@@ -74,11 +74,15 @@ static void startApPortal(void)
     /* a fixed portal address keeps the captive redirect predictable */
     WiFi.softAPConfig(IPAddress(10, 0, 0, 1), IPAddress(10, 0, 0, 1),
                       IPAddress(255, 255, 255, 0));
-    WiFi.softAP(ssid, GW_AP_PASS);
-    sDns.start(53, "*", IPAddress(10, 0, 0, 1));
-    webSetup(true);
+    bool ap = WiFi.softAP(ssid, GW_AP_PASS);
+    DBG("main: softAP %s (heap %u)\n", ap ? "up" : "FAILED",
+        (unsigned)ESP.getFreeHeap());
+    if (ap)
+        sDns.start(53, "*", IPAddress(10, 0, 0, 1));
+    webSetup(true); /* keep http alive even without the AP, for diagnostics */
     mbSetup();
-    DBG("main: ap %s pass %s ip 10.0.0.1\n", ssid, GW_AP_PASS);
+    if (ap)
+        DBG("main: ap %s pass %s ip 10.0.0.1\n", ssid, GW_AP_PASS);
 }
 
 void setup()
@@ -141,9 +145,19 @@ void loop()
     if (gwApMode)
         sDns.processNextRequest();
 
-    webLoop();
-    MDNS.update();
-    mbLoop();
+    /*
+     * While the text listing is being captured, keep the loop free: a
+     * chunked /api/params send can stall long enough for the UART rx
+     * ring to overflow and corrupt listing lines (lost parameter names).
+     * HTTP/TCP clients retry on their own; the window is ~2 seconds.
+     */
+    if (!skeCapturing())
+    {
+        webLoop();
+        MDNS.update();
+        mbLoop();
+    }
+
     skePoll();
 
     if (mbConsumeRestartRequest())

@@ -34,7 +34,7 @@ static String jsonEsc(const char *s)
 /* ------------------------------------------------------------------ */
 /* WiFi setup portal                                                   */
 
-static const char PAGE_WIFI[] = R"HTML(<!doctype html>
+static const char PAGE_WIFI[] PROGMEM = R"HTML(<!doctype html>
 <html lang="ru"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>SKE-02 Gateway - Wi-Fi</title>
@@ -74,7 +74,7 @@ function pick(i){document.getElementById('ssid').value=NETS[i].s}
 load(1);
 </script></body></html>)HTML";
 
-static const char PAGE_CSS[] =
+static const char PAGE_CSS[] PROGMEM =
     "body{font:14px system-ui,sans-serif;background:#14171c;color:#d8dee9;"
     "max-width:520px;margin:24px auto;padding:0 14px}a{color:#7aa2f7}";
 
@@ -198,7 +198,7 @@ static void handleSave(void)
 /* ------------------------------------------------------------------ */
 /* dashboard + JSON API                                                */
 
-static const char PAGE_INDEX[] = R"HTML(<!doctype html>
+static const char PAGE_INDEX[] PROGMEM = R"HTML(<!doctype html>
 <html lang="ru"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>SKE-02 Gateway</title>
@@ -210,9 +210,18 @@ h1{font-size:18px;margin:0 8px 0 0}
 .ok{background:#1d5c2f}.bad{background:#6c2431}
 button{background:#2a5bdb;color:#fff;border:0;border-radius:6px;padding:5px 12px;cursor:pointer;font-size:13px}
 button.warn{background:#a23b2e}
-input{background:#0e1116;color:#d8dee9;border:1px solid #39414f;border-radius:6px;padding:4px 8px;box-sizing:border-box}
-#filter{width:210px}
+input,select{background:#0e1116;color:#d8dee9;border:1px solid #39414f;border-radius:6px;padding:4px 8px;box-sizing:border-box}
+#filter{width:200px}
 #bar{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-bottom:10px}
+#nav{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px}
+#nav button{background:#2a3140;font-size:14px;padding:8px 18px}
+#nav button.act{background:#2a5bdb}
+.tabs{display:flex;flex-wrap:wrap;gap:4px;border-bottom:2px solid #2a3140;margin-bottom:8px}
+.tabs button{background:transparent;color:#8b94a7;border:0;border-bottom:2px solid transparent;border-radius:6px 6px 0 0;padding:7px 14px;cursor:pointer;font-size:14px}
+.tabs button.act{color:#d8dee9;background:#1b202a;border-bottom-color:#2a5bdb}
+.subtabs{display:flex;flex-wrap:wrap;gap:4px;margin:0 0 8px 8px}
+.subtabs button{background:#232a38;color:#8b94a7;border:0;border-radius:10px;padding:3px 12px;cursor:pointer;font-size:12px}
+.subtabs button.act{background:#1d5c2f;color:#d8dee9}
 details{background:#1b202a;border:1px solid #2a3140;border-radius:8px;margin-bottom:8px}
 summary{padding:8px 12px;cursor:pointer;font-weight:600}
 table{width:100%;border-collapse:collapse}
@@ -220,8 +229,15 @@ td,th{padding:5px 10px;border-top:1px solid #2a3140;text-align:left;vertical-ali
 th{color:#8b94a7;font-weight:500;font-size:12px}
 .val{font-family:ui-monospace,Consolas,monospace;white-space:nowrap}
 .stale{color:#8b94a7}
-.id,.ty{color:#8b94a7;font-family:ui-monospace,Consolas,monospace;font-size:12px}
-.set{display:flex;gap:6px}.set input{width:120px}
+.ctl{text-align:right;vertical-align:middle}
+.where{color:#8b94a7;font-size:11px;margin-top:1px}
+input.fnum{width:130px;text-align:right}
+.set{display:flex;gap:6px;align-items:center;flex-wrap:wrap;justify-content:flex-end}
+.set input[type=number],.set input[type=text]{width:110px}
+.set input.fnum{width:130px}
+.set select{max-width:170px}
+.t2{width:56px!important;text-align:center}
+.dv{color:#8b94a7}
 </style></head><body>
 <header>
  <h1>SKE-02 Gateway</h1>
@@ -230,6 +246,9 @@ th{color:#8b94a7;font-weight:500;font-size:12px}
  <button class="warn" onclick="rebootDev()">Перезагрузить прибор</button>
  <a href="/wifi"><button>Wi-Fi</button></a>
 </header>
+<div id="nav"></div>
+<div id="tabs"></div>
+<div id="subtabs"></div>
 <div id="bar">
  <input id="filter" placeholder="фильтр по имени или id" oninput="applyFilter()">
  <span class="tag" id="ip"></span><span class="tag" id="rss"></span>
@@ -239,10 +258,11 @@ th{color:#8b94a7;font-weight:500;font-size:12px}
 </div>
 <div id="sections"><p>Опрос прибора…</p></div>
 <script>
-const TYP=['F','U32','TIME','DATE','U8','I8','H8','U16','H16','I16','B','E','S','S'];
-let P=[],built=-1;
+const COMMON='\x01';              /* pseudo tab for params directly in the section */
+let P=[],SECT=[],built='',cur=0,curT={},curS={};
 const $=i=>document.getElementById(i);
 const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const p2=v=>String(v).padStart(2,'0');
 function hms(t){const s=t%60,m=(t/60|0)%60,h=t/3600|0;return h?h+'ч '+m+'м':m?m+'м '+s+'с':s+'с'}
 async function tick(){
  try{
@@ -250,45 +270,133 @@ async function tick(){
   $('link').textContent=r.link?'UART: связь есть':'UART: нет связи';
   $('link').className='tag '+(r.link?'ok':'bad');
   $('fw').textContent=r.fw+' · параметров: '+r.count;
-  $('ip').textContent=r.ip;$('rss').textContent=r.rssi+' dBm';
+  $('ip').textContent=r.ip;
+  $('rss').textContent=r.ap?r.rssi+' dBm':r.ssid+': '+r.rssi+' dBm';
   $('upt').textContent='uptime '+hms(r.uptime);$('heap').textContent='heap '+(r.heap/1024|0)+' KiB';
-  if(!r.ap)$('rss').textContent=r.ssid+': '+r.rssi+' dBm';
   if(document.activeElement!==$('poll'))$('poll').value=Math.round(r.poll/100);
   const d=await (await fetch('/api/params')).json();
-  if(built!==d.count){P=d.params;build()}
-  else for(const q of d.params){const e=$('v'+q.i);if(e){e.textContent=q.v;e.className='val'+(q.a>90?' stale':'')}}
+  const fp=d.count+'|'+d.params.length+'|'+d.sections.length+'|'+d.rc;
+  if(fp!==built){P=d.params;SECT=d.sections;render(fp);applyFilter()}
+  else for(const q of d.params){updVal(q)}
  }catch(e){}
 }
-function build(){
- if(!P.length){$('sections').innerHTML='<p>Прибор не найден: проверьте подключение UART и питание, затем нажмите «Пересканировать».</p>';built=0;return}
- const map=new Map();
- for(const q of P){const k=q.s||'';if(!map.has(k))map.set(k,[]);map.get(k).push(q)}
- let h='';
- for(const [s,arr] of map){
-  h+='<details open><summary>'+esc(s||'Параметры')+'</summary><table><tr><th>id</th><th>Параметр</th><th>Тип</th><th>Значение</th><th></th></tr>';
-  for(const q of arr){
-   h+='<tr data-n="'+esc((q.n+' '+q.i).toLowerCase())+'"><td class="id">'+q.i+'</td><td>'+esc(q.n||('P'+q.i))+
-      '</td><td class="ty">'+TYP[q.t]+'</td><td class="val" id="v'+q.i+'">'+esc(q.v)+'</td><td>';
-   h+=q.w?'<div class="set"><input id="w'+q.i+'" value="'+esc(q.v)+'"><button onclick="setParam('+q.i+')">✓</button></div>':'';
-   h+='</td></tr>';
-  }
-  h+='</table></details>';
- }
- $('sections').innerHTML=h;built=P.length;applyFilter();
+/* value refresh of the editor (never steals focus) */
+function updVal(q){
+ const e=$('v'+q.i);if(e){e.textContent=q.v;e.className='val'+(q.a>90?' stale':'')}
+ if(!q.w)return; /* read-only: the span above is the whole value */
+ const t=q.t,g=x=>$(x+q.i);
+ if((t===10||t===11)&&g('w')&&g('w')!==document.activeElement)g('w').value=q.r;
+ else if(t!==2&&t!==3&&g('w')&&g('w')!==document.activeElement)g('w').value=q.v;
+ else if(t===2&&g('wh')){const m=q.v.split(':');if(g('wh')!==document.activeElement)g('wh').value=m[0];if(g('wm')!==document.activeElement)g('wm').value=m[1]}
+ else if(t===3&&g('wd')){const m=q.v.split('.');if(g('wd')!==document.activeElement)g('wd').value=m[0];if(g('wm2')!==document.activeElement)g('wm2').value=m[1];if(g('wy')!==document.activeElement)g('wy').value=m[2]}
 }
+/* edit widget html for the parameter type */
+function widget(q){
+ if(!q.w)return '';
+ const i=q.i,ok='<button onclick="setParam('+i+')">✓</button>';
+ if((q.t===10||q.t===11)&&q.o&&q.o.length){
+  let h='<select id="w'+i+'">';
+  q.o.forEach((s,k)=>h+='<option value="'+k+'"'+(String(k)===String(q.r)?' selected':'')+'>'+esc(s)+'</option>');
+  return '<div class="set">'+h+'</select>'+ok+'</div>';
+ }
+ if(q.t===0)return '<div class="set"><input id="w'+i+'" type="text" class="fnum" inputmode="decimal" maxlength="12" title="'+esc((q.lo||'?')+' .. '+(q.hi||'?'))+'" value="'+esc(q.v)+'">'+ok+'</div>';
+ if(q.t===1)return '<div class="set"><input id="w'+i+'" type="text" maxlength="6" inputmode="numeric" title="'+esc((q.lo||'?')+' .. '+(q.hi||'?'))+'" value="'+esc(q.v)+'">'+ok+'</div>';
+ if(q.t===2||q.t===3){
+  const m=q.v.split(/[:.]/);
+  if(q.t===2)return '<div class="set"><input class="t2" id="wh'+i+'" type="number" min="0" max="23" step="1" value="'+esc(m[0])+'"><span class="dv">:</span><input class="t2" id="wm'+i+'" type="number" min="0" max="59" step="1" value="'+esc(m[1])+'">'+ok+'</div>';
+  return '<div class="set"><input class="t2" id="wd'+i+'" type="number" min="1" max="31" step="1" value="'+esc(m[0])+'"><span class="dv">.</span><input class="t2" id="wm2'+i+'" type="number" min="1" max="12" step="1" value="'+esc(m[1])+'"><span class="dv">.</span><input class="t2" id="wy'+i+'" type="number" min="0" max="99" step="1" value="'+esc(m[2])+'">'+ok+'</div>';
+ }
+ const st=' min="'+(q.lo!==''?esc(q.lo):'0')+'" max="'+(q.hi!==''?esc(q.hi):'65535')+'"';
+ return '<div class="set"><input id="w'+i+'" type="number" step="1"'+st+' value="'+esc(q.v)+'">'+ok+'</div>';
+}
+/* one table row: name | editor (read-only values render as plain text) */
+function row(q,where){
+ const ctrl=q.w?widget(q):'<span class="val'+(q.a>90?' stale':'')+'" id="v'+q.i+'">'+esc(q.v)+'</span>';
+ return '<tr data-n="'+esc((q.n+' '+q.i).toLowerCase())+'"><td>'+esc(q.n||('P'+q.i))+
+  (where?'<div class="where">'+esc(where)+'</div>':'')+'</td><td class="ctl">'+ctrl+'</td></tr>';
+}
+const THEAD='<tr><th>Параметр</th><th></th></tr>';
+/*
+ * The server names the owning L2 menu explicitly ("tb"), because the
+ * firmware prints subtrees before the parent's own params and the id
+ * order alone cannot recover the hierarchy. L3 = the nearest submenu
+ * when its level is exactly 3.
+ */
+function decorate(arr){
+ const rows=[];
+ for(const q of arr){
+  rows.push({q,l2:q.tb||COMMON,l3:(q.gl===3&&q.g)?q.g:''});
+ }
+ return rows;
+}
+let curTab=COMMON;                 /* active L2 tab name of the section */
+function render(fp){
+ if(!P.length){$('tabs').innerHTML='';$('subtabs').innerHTML='';$('sections').innerHTML='<p>Прибор не найден: проверьте подключение UART и питание, затем нажмите «Пересканировать».</p>';built=fp;return}
+ let h='';
+ SECT.forEach((s,k)=>h+='<button class="'+(k===cur?'act':'')+'" onclick="go('+k+')">'+esc(s)+'</button>');
+ $('nav').innerHTML=h;
+ if(cur>=SECT.length)cur=0;
+ const rows=decorate(P.filter(q=>q.s===cur||SECT.length<=1));
+ const tabs=[...new Set(rows.map(r=>r.l2))];
+ if(!(cur in curT)||curT[cur]>=tabs.length)curT[cur]=0;
+ const t=tabs[curT[cur]];
+ curTab=t;
+ const tr=rows.filter(r=>r.l2===t);
+ const subs=[...new Set(tr.map(r=>r.l3))];
+ const sk=cur+'|'+t;
+ if(!(sk in curS)||curS[sk]>=subs.length)curS[sk]=0;
+ const s=subs[curS[sk]];
+ h='';
+ tabs.forEach((n,k)=>h+='<button class="'+(n===t?'act':'')+'" onclick="go2('+k+')">'+esc(n===COMMON?'Общие':n)+'</button>');
+ $('tabs').innerHTML='<div class="tabs">'+h+'</div>';
+ h='';
+ if(subs.length>1||subs[0]!=='')
+  subs.forEach((n,k)=>h+='<button class="'+(n===s?'act':'')+'" onclick="go3('+k+')">'+esc(n||'Общие')+'</button>');
+ $('subtabs').innerHTML=h?'<div class="subtabs">'+h+'</div>':'';
+ h='<table>'+THEAD;
+ for(const r of tr.filter(r=>r.l3===s))
+  h+=row(r.q);
+ h+='</table>';
+ $('sections').innerHTML=h;built=fp;
+}
+/* search view: filter matches anywhere, across all sections and tabs */
+function renderSearch(f){
+ let h='<table>'+THEAD;
+ for(const q of P){
+  if(!(q.n+' '+q.i).toLowerCase().includes(f))continue;
+  const sec=q.s>=0&&q.s<SECT.length?SECT[q.s]:'';
+  h+=row(q,sec?(sec+(q.g?' · '+q.g:'')):'');
+ }
+ h+='</table>';
+ $('sections').innerHTML=h||'<p>Ничего не найдено.</p>';
+ $('tabs').innerHTML='';$('subtabs').innerHTML='';
+}
+function go(k){cur=k;applyFilter()}
+function go2(k){curT[cur]=k;applyFilter()}
+function go3(k){curS[cur+'|'+curTab]=k;applyFilter()}
 function applyFilter(){
- const f=$('filter').value.toLowerCase();
- for(const r of document.querySelectorAll('tr[data-n]'))r.style.display=!f||r.dataset.n.includes(f)?'':'none';
+ const f=$('filter').value.trim().toLowerCase();
+ if(!f){render(built);return}
+ renderSearch(f);
+}
+function curVal(q){
+ const i=q.i,g=x=>$(x+i);
+ if(q.t===10||q.t===11)return g('w').value;
+ if(q.t===2)return p2(g('wh').value)+':'+p2(g('wm').value);
+ if(q.t===3)return p2(g('wd').value)+'.'+p2(g('wm2').value)+'.'+p2(g('wy').value);
+ return g('w').value;
 }
 async function setParam(i){
+ const q=P.find(x=>x.i===i);if(!q)return;
  try{
   const r=await (await fetch('/api/set',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},
-   body:'id='+i+'&v='+encodeURIComponent($('w'+i).value)})).json();
-  if(!r.ok)alert('Ошибка: '+r.error);
-  else{const e=$('v'+i);e.textContent=r.value;e.className='val';$('w'+i).value=r.value}
+   body:'id='+i+'&v='+encodeURIComponent(curVal(q))})).json();
+  if(!r.ok){alert('Ошибка: '+r.error);return}
+  updVal(Object.assign({},q,{v:r.value,a:0}));
+  if(q.t===10||q.t===11){const s=$('w'+i);if(s)[...s.options].forEach(o=>{if(o.text===r.value)s.value=o.value})}
  }catch(e){alert('нет ответа от шлюза')}
 }
-async function rescan(){await fetch('/api/rescan',{method:'POST'});built=-1}
+async function rescan(){await fetch('/api/rescan',{method:'POST'});built='';tick()}
 function rebootDev(){if(confirm('Перезагрузить прибор?'))fetch('/api/reboot',{method:'POST'})}
 async function setPoll(){await fetch('/api/setpoll?poll='+$('poll').value,{method:'POST'});tick()}
 setInterval(tick,2000);tick();
@@ -339,14 +447,26 @@ static void handleApiParams(void)
     out.reserve(1600);
     out = F("{\"count\":");
     out += String(skeCount());
-    out += F(",\"params\":[");
+    out += F(",\"sections\":[");
+    for (uint16_t s = 0; s < skeSectionCount(); s++)
+    {
+        if (s)
+            out += ',';
+        out += F("\"");
+        out += jsonEsc(skeSectionName((uint8_t)s));
+        out += F("\"");
+    }
+    out += F("],\"params\":[");
     bool first = true;
+    uint16_t rc = 0;
     for (uint16_t id = 0; id < skeCount(); id++)
     {
         SkeParam *p = skeGet(id);
         if (!p || (!p->present && !p->name[0]))
             continue;
         uint8_t sz = skeTypeSize(p->type);
+        if ((p->minv != 0 || p->maxv != 0) || p->optCnt > 0)
+            rc++;
         uint32_t age = p->updated ? (millis() - p->updated) / 1000UL : 0xFFFF;
         if (age > 0xFFFF)
             age = 0xFFFF;
@@ -357,15 +477,36 @@ static void handleApiParams(void)
         out += String(id);
         out += F(",\"t\":");
         out += String(p->type);
+        out += F(",\"r\":");
+        out += String(p->value); /* raw u32: enum/bool index, spin value */
         out += F(",\"n\":\"");
         out += jsonEsc(p->name);
-        out += F("\",\"s\":\"");
-        out += jsonEsc(skeSectionName(p->section));
+        out += F("\",\"s\":");
+        out += String((int)skeSectionIndexOf(p->section)); /* -1 = none */
+        out += F(",\"g\":\"");
+        out += jsonEsc(skeGroupName(p->group));
+        out += F("\",\"gl\":");
+        out += String(p->groupLvl);
+        out += F(",\"tb\":\"");
+        out += jsonEsc(p->tab2 ? skeGroupName(p->tab2) : "");
         out += F("\",\"v\":\"");
         out += jsonEsc(skeValueText(id).c_str());
         out += F("\",\"w\":");
         out += (p->present && !p->readOnly && sz > 0) ? '1' : '0';
-        out += F(",\"a\":");
+        out += F(",\"lo\":\"");
+        out += jsonEsc(skeBoundText(p, false).c_str());
+        out += F("\",\"hi\":\"");
+        out += jsonEsc(skeBoundText(p, true).c_str());
+        out += F("\",\"o\":[");
+        for (uint8_t k = 0; k < skeOptCount(p); k++)
+        {
+            if (k)
+                out += ',';
+            out += F("\"");
+            out += jsonEsc(skeOptText(p, k) ? skeOptText(p, k) : "");
+            out += F("\"");
+        }
+        out += F("],\"a\":");
         out += String(age);
         out += '}';
         if (out.length() > 1400)
@@ -374,7 +515,9 @@ static void handleApiParams(void)
             out = "";
         }
     }
-    out += F("]}");
+    out += F("],\"rc\":");
+    out += String(rc);
+    out += '}';
     sServer.sendContent(out);
     sServer.sendContent(""); /* end of chunked body */
 }
@@ -442,14 +585,16 @@ void webSetup(bool portalMode)
     sServer.on("/scan", HTTP_GET, handleScan);
     sServer.on("/save", HTTP_POST, handleSave);
 
+    /* the API works in both modes (portal included) for bench testing */
+    sServer.on("/api/info", HTTP_GET, handleApiInfo);
+    sServer.on("/api/params", HTTP_GET, handleApiParams);
+    sServer.on("/api/set", HTTP_POST, handleApiSet);
+    sServer.on("/api/rescan", HTTP_POST, handleApiRescan);
+    sServer.on("/api/reboot", HTTP_POST, handleApiReboot);
+    sServer.on("/api/setpoll", HTTP_POST, handleApiSetPoll);
+
     if (!portalMode)
     {
-        sServer.on("/api/info", HTTP_GET, handleApiInfo);
-        sServer.on("/api/params", HTTP_GET, handleApiParams);
-        sServer.on("/api/set", HTTP_POST, handleApiSet);
-        sServer.on("/api/rescan", HTTP_POST, handleApiRescan);
-        sServer.on("/api/reboot", HTTP_POST, handleApiReboot);
-        sServer.on("/api/setpoll", HTTP_POST, handleApiSetPoll);
         sServer.onNotFound([]() {
             sServer.send(404, "text/plain", F("not found"));
         });
