@@ -248,7 +248,13 @@ static uint16_t process_frame(const uint8_t *in, uint16_t inLen, uint8_t *out)
     len = (in[4] << 8) | in[5];
     if (in[2] || in[3] || len < 2 || (uint16_t)(6 + len) > inLen)
         return 0; /* not modbus tcp */
-    fc = in[6];
+    /*
+     * MBAP layout: tid(0-1) pid(2-3) len(4-5) UNIT(6) FC(7)...
+     * in[6] is the unit id - reading the function code from there put
+     * the unit (usually 1) into the switch and every request fell into
+     * the default branch answering "illegal function".
+     */
+    fc = in[7];
     pdu = in + 7;
 
     switch (fc)
@@ -257,7 +263,9 @@ static uint16_t process_frame(const uint8_t *in, uint16_t inLen, uint8_t *out)
     case 4:
     {
         uint16_t addr, qty, v;
-        if (len != 5)
+        /* len counts the unit id too: unit(1) + fc/addr/qty(5) = 6.
+         * Checking against 5 rejected every well-formed request. */
+        if (len != 6)
         {
             exc = MB_EX_ILLEGAL_VALUE;
             break;
@@ -284,7 +292,7 @@ static uint16_t process_frame(const uint8_t *in, uint16_t inLen, uint8_t *out)
     case 6:
     {
         uint16_t addr, val;
-        if (len != 5)
+        if (len != 6) /* unit(1) + fc/addr/val(5) */
         {
             exc = MB_EX_ILLEGAL_VALUE;
             break;
@@ -325,7 +333,7 @@ static uint16_t process_frame(const uint8_t *in, uint16_t inLen, uint8_t *out)
             o[0] = fc;
             memcpy(o + 1, pdu + 1, 4);
             out[4] = 0;
-            out[5] = 5;
+            out[5] = 6; /* unit + fc + addr + qty */
         }
         break;
     }
@@ -339,13 +347,19 @@ static uint16_t process_frame(const uint8_t *in, uint16_t inLen, uint8_t *out)
         o[0] = fc | 0x80;
         o[1] = exc;
         out[4] = 0;
-        out[5] = 2;
+        out[5] = 3; /* unit + fc|0x80 + exception code */
     }
     out[0] = tid >> 8;
     out[1] = tid & 0xFF;
     out[2] = out[3] = 0;
     out[6] = in[6];
-    return 7 + out[5];
+    /*
+     * Total frame = MBAP header (6 bytes) + the length field, which
+     * itself already counts the unit id. Returning 7 + len sent one
+     * extra trailing byte with EVERY response and desynced masters on
+     * their next transaction.
+     */
+    return 6 + out[5];
 }
 
 static void modbus_client_task(void *arg)
@@ -355,6 +369,10 @@ static void modbus_client_task(void *arg)
     uint8_t out[MB_RXBUF];
     uint16_t pos = 0;
     TickType_t lastAct = xTaskGetTickCount();
+
+    /* close dead clients instead of parking recv() forever */
+    struct timeval tv = { .tv_sec = MB_IDLE_MS / 1000, .tv_usec = 0 };
+    setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
 
     for (;;)
     {

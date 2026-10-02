@@ -14,7 +14,7 @@ NVS вместо EEPROM-сектора. Протокольная логика п
 | `src/ske02.c` | задача **meter**: uart-драйвер, стейт-машина WAKE→LIST→IDLE, очередь команд (SET/RUN/UNLOCK/REFRESH/RESCAN/REBOOT) с мьютексом и слотом, 1 Гц мониторинг 'm' |
 | `src/wifi.c` | задача **wifi**: STA-подключение по кредам, фолбэк в AP-портал (10.0.0.1), события esp_event |
 | `src/web.c` | **esp_http_server**: портал, мониторинговое окно, настройки, JSON API; страницы в `src/pages.h` |
-| `src/pages.h` | HTML, сгенерированный из Arduino-версии (`tools/extract_pages.py`) |
+| `src/pages.h` | HTML-страницы (рукоподдерживаемый источник, правится напрямую) |
 | `src/modbus_tcp.c` | Modbus TCP slave (502) на BSD-сокетах, та же карта регистров |
 | `src/dns.c` | captive-DNS (udp/53) для портала |
 | `src/storage.c` | NVS: SSID/пароль WiFi |
@@ -25,7 +25,6 @@ NVS вместо EEPROM-сектора. Протокольная логика п
 pio run -e esp8266_modern_rtos            # сборка
 pio run -e esp8266_modern_rtos -t upload  # прошивка
 python tools/gen_sdkconfig.py             # перегенерация sdkconfig при смене опций
-python tools/extract_pages.py             # перегенерация pages.h из legacy_arduino/web.cpp
 cmd /c tools\run_parser_test.bat          # хост-тест протокольного ядра
 ```
 

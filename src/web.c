@@ -23,7 +23,6 @@
 #include "wifi.h"
 
 static httpd_handle_t sServer;
-static bool sPortal;
 
 /* ------------------------------------------------------------------ */
 /* helpers                                                             */
@@ -221,12 +220,19 @@ static esp_err_t h_api_info(httpd_req_t *req)
     char esc[40];
     tcpip_adapter_ip_info_t ip;
     const gw_settings_t *st = storage_get();
+    bool portal = wifi_ap_ssid() != NULL;
     bool sta = wifi_sta_connected();
+    int rssi = 0;
 
-    if (sPortal)
+    if (portal)
         tcpip_adapter_get_ip_info(TCPIP_ADAPTER_IF_AP, &ip);
     else
+    {
+        wifi_ap_record_t ap;
         tcpip_adapter_get_ip_info(TCPIP_ADAPTER_IF_STA, &ip);
+        if (esp_wifi_sta_get_ap_info(&ap) == ESP_OK)
+            rssi = ap.rssi;
+    }
 
     {
         xSemaphoreTake(ske02_lock(), portMAX_DELAY);
@@ -237,8 +243,8 @@ static esp_err_t h_api_info(httpd_req_t *req)
                  "\"uptime\":%lu,\"heap\":%lu}",
                  esc, (unsigned)ske02_ctx()->count,
                  ske02_link_up() ? 1 : 0, ske02_ready() ? 1 : 0,
-                 sPortal ? 1 : 0, sta ? st->ssid : "",
-                 ip4addr_ntoa(&ip.ip), (int)(sPortal ? 0 : 0),
+                 portal ? 1 : 0, sta ? st->ssid : "",
+                 ip4addr_ntoa(&ip.ip), rssi,
                  (unsigned long)(xTaskGetTickCount() * portTICK_PERIOD_MS / 1000),
                  (unsigned long)esp_get_free_heap_size());
         xSemaphoreGive(ske02_lock());
@@ -253,18 +259,27 @@ static esp_err_t h_api_values(httpd_req_t *req)
     char out[640];
     size_t off = 0;
     const SkeValues *v;
+    int link, ready;
 
+    /*
+     * link/ready ride this 1 Hz endpoint so the UI badge refreshes with
+     * the monitoring poll - no separate /api/info traffic.
+     */
     xSemaphoreTake(ske02_lock(), portMAX_DELAY);
+    link = ske02_link_up() ? 1 : 0;
+    ready = ske02_ready() ? 1 : 0;
     v = ske02_values();
     if (!v)
     {
         xSemaphoreGive(ske02_lock());
+        snprintf(out, sizeof(out), "{\"ok\":0,\"link\":%d,\"ready\":%d}",
+                 link, ready);
         httpd_resp_set_type(req, "application/json");
-        httpd_resp_send(req, "{\"ok\":0}", 7);
+        httpd_resp_send(req, out, strlen(out));
         return ESP_OK;
     }
     off += snprintf(out + off, sizeof(out) - off,
-                    "{\"ok\":1,\"age\":%lu,"
+                    "{\"ok\":1,\"age\":%lu,\"link\":%d,\"ready\":%d,"
                     "\"frequency\":%.3f,\"rate_raw\":%.3f,\"rate_fast\":%.3f,"
                     "\"rateMLPM\":%.3f,\"rate\":%.3f,"
                     "\"total_plus\":%.3f,\"total_minus\":%.3f,"
@@ -276,6 +291,7 @@ static esp_err_t h_api_values(httpd_req_t *req)
                     "\"status\":%u,\"setpoint\":%u,\"isr\":%u}",
                     (unsigned long)((xTaskGetTickCount() * portTICK_PERIOD_MS -
                                      v->updated) / 1000),
+                    link, ready,
                     (double)v->frequency, (double)v->rate_raw,
                     (double)v->rate_fast, (double)v->rateMLPM,
                     (double)v->rate, (double)v->total_plus,

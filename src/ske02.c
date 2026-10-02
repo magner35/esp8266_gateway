@@ -28,8 +28,8 @@
 #define SKE_UART_RX_BUF   1024
 #define SKE_CMD_TIMEOUT   pdMS_TO_TICKS(1200)
 #define SKE_LIST_TIMEOUT  pdMS_TO_TICKS(15000)
-#define SKE_WAKE_PERIOD   pdMS_TO_TICKS(1000)
-#define SKE_VALUES_PERIOD pdMS_TO_TICKS(1000)
+#define SKE_WAKE_PERIOD   pdMS_TO_TICKS(200)
+#define SKE_VALUES_PERIOD pdMS_TO_TICKS(200)
 #define SKE_WAKE_MISS     3
 
 enum
@@ -121,19 +121,33 @@ static void line_to_parser(char *line)
 
 typedef void (*line_cb)(char *line, void *user);
 
+/* first line of the last transaction - wake diagnostics */
+static char sFirstLine[40];
+static bool sFirstLineValid;
+
 static bool txt_command(const char *cmd, line_cb cb, void *user,
                         TickType_t timeout)
 {
     char line[512];
     uart_flush_rx();
     uart_send_line(cmd);
+    sFirstLineValid = false;
     for (;;)
     {
         int rc = read_line_until_prompt(line, sizeof(line), timeout);
         if (rc == 0)
             return false;
-        if (rc == 2 && cb)
-            cb(line, user);
+        if (rc == 2)
+        {
+            if (!sFirstLineValid)
+            {
+                strncpy(sFirstLine, line, sizeof(sFirstLine) - 1);
+                sFirstLine[sizeof(sFirstLine) - 1] = 0;
+                sFirstLineValid = true;
+            }
+            if (cb)
+                cb(line, user);
+        }
         if (rc == 1)
             return true;
     }
@@ -152,6 +166,18 @@ static void echo_cb(char *line, void *user)
     }
 }
 
+static void ske02_uart_setup(void);
+
+static void uart_reinit(void)
+{
+    /* full driver restart: recovers from a wedged ring/FIFO state that
+     * plain flushes cannot clear (e.g. a broken listing) */
+    uart_driver_delete(SKE_UART_NUM);
+    vTaskDelay(pdMS_TO_TICKS(50));
+    ske02_uart_setup();
+    DBG("ske02: uart driver reinstalled\n");
+}
+
 static bool ske_echo_off(void)
 {
     char last[32];
@@ -165,6 +191,8 @@ static bool ske_echo_off(void)
         if (txt_command("e", echo_cb, last, SKE_CMD_TIMEOUT) &&
             !strncmp(last, "echo off", 8))
             return true;
+        DBG("ske02: wake reply: '%s'\n",
+            sFirstLineValid ? sFirstLine : "<none>");
     }
     return false;
 }
@@ -257,6 +285,8 @@ static bool capture_listing(TickType_t timeout)
     xSemaphoreTake(sLock, portMAX_DELAY);
     sCtx.inListing = false;
     xSemaphoreGive(sLock);
+    if (ok)
+        sLastOk = xTaskGetTickCount();
     return ok;
 }
 
@@ -280,6 +310,8 @@ static bool ske_query_values(void)
     xSemaphoreTake(sLock, portMAX_DELAY);
     ok = proto_values_ready(&sCtx);
     xSemaphoreGive(sLock);
+    if (ok)
+        sLastOk = xTaskGetTickCount();
     return ok;
 }
 
@@ -467,11 +499,13 @@ static void meter_task(void *arg)
         case ST_WAKE:
             if (xTaskGetTickCount() - sT >= SKE_WAKE_PERIOD)
             {
+                static uint16_t wakeFails;
                 sT = xTaskGetTickCount();
                 /* ~1 Hz while the meter link is down; read on GPIO2 */
                 DBG("ske02: wake: console silent\n");
                 if (ske_echo_off() && ske_info())
                 {
+                    wakeFails = 0;
                     xSemaphoreTake(sLock, portMAX_DELAY);
                     DBG("ske02: %s, %u params\n", sCtx.version,
                         (unsigned)sCtx.count);
@@ -479,6 +513,13 @@ static void meter_task(void *arg)
                     text_start();
                     sState = ST_LIST;
                     sMisses = 0;
+                }
+                else if (++wakeFails >= 30)
+                {
+                    /* 30 s of silence: restart the uart driver - a
+                     * wedged ring/FIFO never clears by flushing alone */
+                    wakeFails = 0;
+                    uart_reinit();
                 }
             }
             else
@@ -537,7 +578,7 @@ static void meter_task(void *arg)
 /* ------------------------------------------------------------------ */
 /* public API                                                          */
 
-void ske02_start(void)
+void ske02_uart_setup(void)
 {
     uart_config_t cfg = {
         .baud_rate = SKE_UART_BAUD,
@@ -549,7 +590,11 @@ void ske02_start(void)
     };
     uart_driver_install(SKE_UART_NUM, SKE_UART_RX_BUF, 0, 0, NULL, 0);
     uart_param_config(SKE_UART_NUM, &cfg);
+}
 
+void ske02_start(void)
+{
+    ske02_uart_setup();
     proto_init(&sCtx);
     sLock = xSemaphoreCreateMutex();
     sReqMutex = xSemaphoreCreateMutex();
