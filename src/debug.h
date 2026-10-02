@@ -1,27 +1,21 @@
 #ifndef GW_DEBUG_H
 #define GW_DEBUG_H
 
-#include <Arduino.h>
-
 /*
- * Console layout flags (orthogonal):
- *  - GW_DEBUG_USB: the debug log goes to UART0 (the USB port of the
- *    devboard) instead of UART1/GPIO2.
- *  - GW_SKE_DISABLE: the meter UART link is disabled.
- * GW_DEBUG_USB alone = diagnostic build: log on USB, meter link active
- * (log bytes mix into the meter line - fine for short boot diagnosis).
+ * Debug log on UART1 (GPIO2, TX only) - UART0 belongs to the meter link,
+ * and the SDK console (printf / esp_log) would inject garbage into it.
+ * dbg_init() also silences esp_log, keeping UART0 clean.
  */
 
-#if defined(GW_DEBUG_USB)
-#define DBG(...) Serial.printf("[gw] " __VA_ARGS__)
+void dbg_init(void);
+
+#ifdef __cplusplus
+#define dbg_va(...) __VA_ARGS__
+void dbg_printf(const char *fmt, ...);
 #else
-#define DBG(...) Serial1.printf("[gw] " __VA_ARGS__)
+void dbg_printf(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
 #endif
 
-#if defined(GW_SKE_DISABLE)
-#define GW_SKE_ENABLED 0
-#else
-#define GW_SKE_ENABLED 1
-#endif
+#define DBG(...) dbg_printf(__VA_ARGS__)
 
 #endif /* GW_DEBUG_H */

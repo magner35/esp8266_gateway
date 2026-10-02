@@ -1,0 +1,8 @@
+# Project Kconfig defaults (applied when sdkconfig.<env> is regenerated).
+# NodeMCU v2/v3: 4 MB flash, DIO mode.
+CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y
+CONFIG_ESPTOOLPY_FLASHMODE_DIO=y
+CONFIG_ESPTOOLPY_FLASHFREQ_40M=y
+
+# %f in snprintf for the values JSON (nano format has no floats)
+# CONFIG_NEWLIB_NANO_FORMAT is not set
