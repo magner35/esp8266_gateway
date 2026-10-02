@@ -125,11 +125,20 @@ def build_api():
             "tb": hdr.get(2, "") if owner >= 2 else "",
             "v": fmt_value(p, p["raw"]),
             "w": 0 if p["ro"] else 1,
+            "cx": 0,
+            "m": 1 if pid == 46 else 0,  # «Пароль» = masked U32
             "lo": fmt_bound(p, 0), "hi": fmt_bound(p, 1),
             "o": p["opts"] or [], "a": 3,
         })
+    # synthetic menu command item (the real firmware lists them as
+    # "<id> CMD <name>"; the captured listing predates that)
+    params.append({
+        "i": db.count, "t": 14, "r": 0, "n": "Сброс объёма (команда)",
+        "s": 1, "g": "Сброс объёма", "gl": 2, "tb": "Сброс объёма",
+        "v": "", "w": 0, "cx": 1, "m": 0, "lo": "", "hi": "", "o": [], "a": 0,
+    })
     return {
-        "count": db.count,
+        "count": db.count + 1,
         "sections": sections,
         "params": params,
         "rc": sum(1 for p in params if p["lo"] or p["o"]),
@@ -164,6 +173,17 @@ class H(BaseHTTPRequestHandler):
         elif self.path == "/api/info":
             INFO["uptime"] += 2
             self._send(200, json.dumps(INFO))
+        elif self.path == "/api/values":
+            self._send(200, json.dumps({
+                "ok": 1, "age": 0,
+                "frequency": 25.4, "rate_raw": 12.51, "rate_fast": 12.49,
+                "rateMLPM": 12500, "rate": 12.5,
+                "total_plus": 123.456, "total_minus": 0.5, "total": 122.956,
+                "total_sum": 123.956, "totalml_plus": 123456.2,
+                "totalml_minus": 500, "gtotal": 9876.5, "gtotalml": 9876543,
+                "kf_value": 1.0, "batch": 10.25,
+                "pulses_packet": 4, "pulses": 123456,
+                "status": 0x45, "setpoint": 0x0A, "isr": 0x81}))
         elif self.path == "/api/params":
             self._send(200, json.dumps(API))
         else:
@@ -173,6 +193,21 @@ class H(BaseHTTPRequestHandler):
         n = int(self.headers.get("Content-Length", 0))
         body = self.rfile.read(n).decode("utf-8")
         q = parse_qs(body or self.path.split("?", 1)[-1])
+        # the mock password: anything else is rejected like the device does
+        pw = q.get("pw", [""])[0]
+        if pw and pw != "1234":
+            self._send(400, json.dumps(
+                {"ok": False, "error": "нет доступа: неверный пароль меню"}))
+            return
+        if self.path.startswith("/api/run"):
+            pid = int(q.get("id", ["-1"])[0])
+            p = next((x for x in API["params"] if x["i"] == pid), None)
+            if p and p.get("cx"):
+                self._send(200, '{"ok":true}')
+            else:
+                self._send(400, json.dumps(
+                    {"ok": False, "error": "нет такой команды"}))
+            return
         if self.path.startswith("/api/set"):
             pid = int(q.get("id", ["-1"])[0])
             p = next((x for x in API["params"] if x["i"] == pid), None)
@@ -190,11 +225,15 @@ class H(BaseHTTPRequestHandler):
                 dbp = DB_BY_ID.get(pid)
                 if dbp:
                     p["v"] = fmt_value(dbp, p["r"])
-                self._send(200, json.dumps({"ok": True, "value": p["v"]}))
+                value = "******" if p.get("m") else p["v"]
+                self._send(200, json.dumps({"ok": True, "value": value}))
             else:
                 self._send(400, json.dumps({"ok": False, "error": "нет такого параметра"}))
         else:
             self._send(200, '{"ok":true}')
+
+    def do_HEAD(self):
+        self._send(200, "{}")
 
 
 if __name__ == "__main__":

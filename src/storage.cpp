@@ -9,7 +9,7 @@
  */
 
 #define SETTINGS_MAGIC  0x534BU /* "SK" */
-#define SETTINGS_POLL_DEFAULT 20U /* 2 s */
+#define SETTINGS_POLL_DEFAULT 1U /* g poll step: 1 x 100 ms per param */
 
 struct Settings
 {

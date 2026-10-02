@@ -14,7 +14,8 @@
 static void yield() {}
 
 enum { SKT_FLOAT = 0, SKT_U32, SKT_TIME, SKT_DATE, SKT_U8, SKT_I8, SKT_H8,
-       SKT_U16, SKT_H16, SKT_I16, SKT_BOOL, SKT_ENUM, SKT_STRING, SKT_STRINGP };
+       SKT_U16, SKT_H16, SKT_I16, SKT_BOOL, SKT_ENUM, SKT_STRING, SKT_STRINGP,
+       SKT_CMD };
 enum { BS_OK = 0, BS_BAD_ID, BS_BAD_TYPE, BS_READONLY };
 #define SKE_MAX_PARAMS 192
 #define SKE_NAME_LEN 44
@@ -31,7 +32,7 @@ struct SkeParam
     uint32_t value, minv, maxv, updated;
     uint16_t optPool;
     uint8_t optCnt, type, section, group, groupLvl, tab2;
-    bool present, readOnly;
+    bool present, readOnly, masked;
 };
 
 static SkeParam sParams[SKE_MAX_PARAMS];
@@ -59,13 +60,14 @@ static uint8_t typeByToken(const char *tok)
     if (!strcmp(tok, "B")) return SKT_BOOL;
     if (!strcmp(tok, "E")) return SKT_ENUM;
     if (!strcmp(tok, "S")) return SKT_STRING;
+    if (!strcmp(tok, "CMD")) return SKT_CMD;
     return 0xFF;
 }
 
 static uint8_t skeTypeSize(uint8_t type)
 {
-    static const uint8_t sz[14] = { 4, 4, 4, 4, 1, 1, 1, 2, 2, 2, 1, 1, 0, 0 };
-    return (type < 14) ? sz[type] : 0;
+    static const uint8_t sz[15] = { 4, 4, 4, 4, 1, 1, 1, 2, 2, 2, 1, 1, 0, 0, 0 };
+    return (type < 15) ? sz[type] : 0;
 }
 
 static void civilFromDays(int32_t days, int16_t *y, uint8_t *m, uint8_t *d)
@@ -163,6 +165,26 @@ static void rusifyText(char *s)
     }
     buf[out] = 0;
     strcpy(s, buf);
+}
+
+static void rawToTextCmd(uint8_t type, uint32_t raw, char *buf, size_t cap)
+{
+    if (type == SKT_TIME)
+    {
+        uint32_t v = raw % 86400UL;
+        snprintf(buf, cap, "%02u%02u", (unsigned)(v / 3600),
+                 (unsigned)(v % 3600 / 60));
+        return;
+    }
+    if (type == SKT_DATE)
+    {
+        int16_t y;
+        uint8_t m, d;
+        civilFromDays(raw / 86400L, &y, &m, &d);
+        snprintf(buf, cap, "%02u%02u%02u", d, m, (unsigned)(y % 100));
+        return;
+    }
+    (void)type; (void)raw; (void)buf; (void)cap;
 }
 
 static const char *skeOptText(const SkeParam *p, uint8_t idx)
@@ -306,6 +328,29 @@ static void parseParamLine(char *s)
     while (*name == ' ')
         name++;
     char *eq = strstr(name, " = ");
+
+    if (type == SKT_CMD && !eq)
+    {
+        char *eol = name + strlen(name);
+        while (eol > name && (eol[-1] == ' ' || eol[-1] == '*'))
+            *--eol = 0;
+        rusifyText(name);
+        SkeParam *p = &sParams[id];
+        if (sInListing)
+        {
+            strncpy(p->name, name, SKE_NAME_LEN - 1);
+            p->name[SKE_NAME_LEN - 1] = 0;
+            p->section = sCurSection;
+            p->groupLvl = owner;
+            p->group = (owner < sizeof(sHdrName)) ? sHdrName[owner] : sCurGroup;
+            p->tab2 = (owner >= 2) ? sHdrName[2] : 0;
+        }
+        p->type = SKT_CMD;
+        p->present = true;
+        p->updated = 1;
+        return;
+    }
+
     if (!eq || type == 0xFF)
         return;
 
@@ -430,7 +475,13 @@ static void parseParamLine(char *s)
     }
 
     p->present = (skeTypeSize(type) > 0);
-    p->value = textToRaw(p, valBuf);
+    if (!strncmp(valBuf, "******", 6))
+        p->masked = true;
+    else
+    {
+        p->masked = false;
+        p->value = textToRaw(p, valBuf);
+    }
     p->updated = 1;
 }
 
@@ -554,6 +605,32 @@ int main(int argc, char **argv)
     CHECK(sParams[43].value == 6, "p43 value=%u", sParams[43].value);
     CHECK(sParams[152].value == 946684800UL, "p152 date=%u", sParams[152].value);
     CHECK(sParams[153].value == 3 * 3600UL, "p153 time=%u", sParams[153].value);
+
+    /* command items and masked passwords (synthetic lines) */
+    {
+        char cmd1[] = "      177 CMD  CÐ±poc oÐ±ÑÑÐ¼a";
+        parseParamLine(cmd1);
+        CHECK(sParams[177].type == SKT_CMD && sParams[177].present,
+              "cmd type=%u present=%d", sParams[177].type, (int)sParams[177].present);
+        char pw1[] = "      046 U32  ÐapoÐ»Ñ = ****** [0..999999]";
+        parseParamLine(pw1);
+        CHECK(sParams[46].masked && sParams[46].value == 0,
+              "masked flag=%d v=%u", (int)sParams[46].masked, sParams[46].value);
+    }
+
+    /* console 's' value packing: TIME = HHMM, DATE = DDMMYY */
+    {
+        char b[16];
+        rawToTextCmd(SKT_TIME, 12UL * 3600 + 34 * 60, b, sizeof(b));
+        CHECK(!strcmp(b, "1234"), "time pack='%s' (want 1234)", b);
+        rawToTextCmd(SKT_TIME, 3UL * 3600, b, sizeof(b));
+        CHECK(!strcmp(b, "0300"), "time pack='%s' (want 0300)", b);
+        rawToTextCmd(SKT_DATE, 946684800UL, b, sizeof(b)); /* 2000-01-01 */
+        CHECK(!strcmp(b, "010100"), "date pack='%s' (want 010100)", b);
+        rawToTextCmd(SKT_DATE, (uint32_t)daysFromCivil(2099, 12, 31) * 86400UL,
+                     b, sizeof(b));
+        CHECK(!strcmp(b, "311299"), "date pack='%s' (want 311299)", b);
+    }
 
     /* read-only marker */
     CHECK(sParams[169].readOnly, "p169 ro"); /* Изм.CRC view */

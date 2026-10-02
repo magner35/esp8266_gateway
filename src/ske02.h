@@ -18,21 +18,19 @@
  *     (its type tokens are ambiguous: H8 prints as "U8", H16 as "U16").
  */
 
-/* property type codes = prop_type_t of the firmware */
+/* property type codes = prop_type_t of the firmware (+CMD for menu
+ * command items, which have no value and are run, not set) */
 enum
 {
     SKT_FLOAT = 0, SKT_U32, SKT_TIME, SKT_DATE, SKT_U8, SKT_I8, SKT_H8,
-    SKT_U16, SKT_H16, SKT_I16, SKT_BOOL, SKT_ENUM, SKT_STRING, SKT_STRINGP
+    SKT_U16, SKT_H16, SKT_I16, SKT_BOOL, SKT_ENUM, SKT_STRING, SKT_STRINGP,
+    SKT_CMD
 };
 
-/* console opcodes and status bytes */
+/* console opcodes and status bytes (internal result codes) */
 enum
 {
-    BC_PING = 1, BC_READ, BC_WRITE, BC_READ_MANY, BC_REBOOT, BC_MENU, BC_RANGE
-};
-enum
-{
-    BS_OK = 0, BS_BAD_ID, BS_BAD_TYPE, BS_READONLY
+    BS_OK = 0, BS_BAD_ID, BS_BAD_TYPE, BS_READONLY, BS_ACCESS, BS_WAIT
 };
 
 /* skeCommitRaw() result when the UART transaction itself failed */
@@ -61,7 +59,7 @@ struct SkeParam
     uint32_t minv;     /* raw numeric range, both 0 when not reported */
     uint32_t maxv;
     uint32_t updated;  /* millis() of the last refresh, 0 = never */
-    uint16_t optPool;  /* offset into the option pool, 0 = none */
+    uint16_t optPool;  /* offset into the option pool + 1, 0 = none */
     uint8_t  optCnt;   /* enum/bool option count */
     uint8_t  type;     /* SKT_*, 0 if unknown */
     uint8_t  section;  /* L1 submenu index (the web UI buttons) */
@@ -70,6 +68,7 @@ struct SkeParam
     uint8_t  tab2;     /* owning L2 submenu (the tab), 0 = section root */
     bool     present;  /* readable through the binary protocol */
     bool     readOnly; /* MITEM_VIEW, marked '*' in the text listing */
+    bool     masked;   /* password U32: shown as ****** by the console */
 };
 
 void        skeBegin(void);
@@ -96,7 +95,27 @@ const char *skeOptText(const SkeParam *p, uint8_t idx); /* NULL when out of rang
 int         skeCommitRaw(uint16_t id, uint32_t raw); /* 0 ok, -1 transport, >0 console status */
 bool        skeSetFromText(uint16_t id, const char *text, String &err);
 
+/* access control: 'p' unlock / 'x' run a menu command item */
+bool        skeUnlock(const char *pass, String &err); /* 'p <pass>' */
+int         skeRunCommand(uint16_t id);               /* 'x <id>' */
+
+/* live measurement values: the console 'm' command dumps MeterData_t
+ * (meter.h of the firmware) as three CSV lines; bitwise members carry
+ * the FSETPOINT_/FSTATUS_/FISR_ flag bits */
+struct SkeValues
+{
+    float frequency, rate_raw, rate_fast, rateMLPM, rate;
+    float total_plus, total_minus, total, total_sum;
+    float totalml_plus, totalml_minus, gtotal, gtotalml;
+    float kf_value, batch;
+    uint32_t pulses_packet, pulses;
+    uint8_t status, setpoint, isr;
+    uint32_t updated; /* millis() of the last good frame, 0 = none */
+};
+
+const SkeValues *skeValues(void);  /* NULL until the first frame */
 void        skeRescan(void);        /* wipe the cache, rediscover the device */
 void        skeRebootDevice(void);  /* BC_REBOOT */
+bool        skeRefresh(void);       /* on-demand full 'l' (the "Обновить" button) */
 
 #endif /* GW_SKE02_H */

@@ -1,6 +1,5 @@
 #include "ske02.h"
 #include "debug.h"
-#include "storage.h"
 
 /*
  * Client of the SKE-02 service console, TEXT protocol only (the binary
@@ -34,16 +33,14 @@
 #define SKE_LIST_QUIET_MS 900
 #define SKE_CMD_TIMEOUT_MS 1200
 #define SKE_WAKE_PERIOD_MS 1000
+#define SKE_VALUES_PERIOD_MS 1000 /* monitoring: one 'm' frame per second */
 #define SKE_WAKE_MISS 3
-#define SKE_POLL_MISS 3
-#define SKE_POLL_MIN_MS 5000UL /* a full listing takes >1 s on the wire;
-                                * keep the serving pauses sparse */
 
 enum
 {
     ST_WAKE,   /* no console yet: echo off + 'i' until it answers */
     ST_LIST,   /* capturing the 'l' listing (first time or a poll) */
-    ST_POLL    /* steady state: periodic re-listing */
+    ST_IDLE    /* ready: no traffic until an explicit refresh */
 };
 
 static SkeParam sParams[SKE_MAX_PARAMS];
@@ -58,6 +55,7 @@ static uint8_t sState;
 static bool sReady;
 static uint32_t sT;            /* timestamp of the last step */
 static uint8_t sMisses;
+static SkeValues sVals;      /* live 'm' frame cache */
 
 /* listing capture (streamed, prompt-terminated) */
 static bool sTxtActive;
@@ -183,13 +181,14 @@ static uint8_t typeByToken(const char *tok)
     if (!strcmp(tok, "B")) return SKT_BOOL;
     if (!strcmp(tok, "E")) return SKT_ENUM;
     if (!strcmp(tok, "S")) return SKT_STRING;
+    if (!strcmp(tok, "CMD")) return SKT_CMD;
     return 0xFF;
 }
 
 uint8_t skeTypeSize(uint8_t type)
 {
-    static const uint8_t sz[14] = { 4, 4, 4, 4, 1, 1, 1, 2, 2, 2, 1, 1, 0, 0 };
-    return (type < 14) ? sz[type] : 0;
+    static const uint8_t sz[15] = { 4, 4, 4, 4, 1, 1, 1, 2, 2, 2, 1, 1, 0, 0, 0 };
+    return (type < 15) ? sz[type] : 0;
 }
 
 /* days <-> civil date (Howard Hinnant's algorithms, TZ-free); the meter
@@ -449,6 +448,30 @@ static void parseParamLine(char *s)
     while (*name == ' ')
         name++;
     char *eq = strstr(name, " = ");
+
+    if (type == SKT_CMD && !eq)
+    {
+        /* "<id> CMD <name>" - a menu command item: no value, run via 'x' */
+        char *eol = name + strlen(name);
+        while (eol > name && (eol[-1] == ' ' || eol[-1] == '*'))
+            *--eol = 0;
+        rusifyText(name);
+        SkeParam *p = &sParams[id];
+        if (sInListing)
+        {
+            strncpy(p->name, name, SKE_NAME_LEN - 1);
+            p->name[SKE_NAME_LEN - 1] = 0;
+            p->section = sCurSection;
+            p->groupLvl = owner;
+            p->group = (owner < sizeof(sHdrName)) ? sHdrName[owner] : sCurGroup;
+            p->tab2 = (owner >= 2) ? sHdrName[2] : 0;
+        }
+        p->type = SKT_CMD;
+        p->present = true;
+        p->updated = millis();
+        return;
+    }
+
     if (!eq || type == 0xFF)
         return;
 
@@ -595,7 +618,13 @@ static void parseParamLine(char *s)
     }
 
     p->present = (skeTypeSize(type) > 0);
-    p->value = textToRaw(p, valBuf);
+    if (!strncmp(valBuf, "******", 6))
+        p->masked = true; /* password U32s are always shown masked */
+    else
+    {
+        p->masked = false;
+        p->value = textToRaw(p, valBuf);
+    }
     p->updated = millis();
 }
 
@@ -718,7 +747,7 @@ static void SKE_UNUSED textFeed(void)
             if (sState == ST_LIST)
             {
                 sReady = true;
-                sState = ST_POLL;
+                sState = ST_IDLE;
                 sT = millis();
                 DBG("ske02: listing done (%u params)\n", (unsigned)sCount);
             }
@@ -756,6 +785,10 @@ static void setValueCb(char *line)
     {
         if (strstr(line, "read only"))
             sSetStatus = BS_READONLY;
+        else if (strstr(line, "access"))
+            sSetStatus = BS_ACCESS;
+        else if (strstr(line, "wait"))
+            sSetStatus = BS_WAIT;
         else if (strstr(line, "id"))
             sSetStatus = BS_BAD_ID;
         else
@@ -800,7 +833,28 @@ static void rawToTextCmd(uint8_t type, uint32_t raw, char *buf, size_t cap)
             strcpy(buf, "0");
         return;
     }
-    ultoa(raw, buf, 10); /* ints and TIME/DATE unix seconds */
+    /*
+     * TIME/DATE take PACKED numbers, not unix seconds (the console's
+     * 9-digit parser would not fit them, see txtFinishValue in the
+     * firmware): TIME = HHMM, DATE = DDMMYY; the device rebuilds the
+     * rest of the timestamp on top of its current value itself.
+     */
+    if (type == SKT_TIME)
+    {
+        uint32_t v = raw % 86400UL;
+        snprintf(buf, cap, "%02u%02u", (unsigned)(v / 3600),
+                 (unsigned)(v % 3600 / 60));
+        return;
+    }
+    if (type == SKT_DATE)
+    {
+        int16_t y;
+        uint8_t m, d;
+        civilFromDays(raw / 86400L, &y, &m, &d);
+        snprintf(buf, cap, "%02u%02u%02u", d, m, (unsigned)(y % 100));
+        return;
+    }
+    ultoa(raw, buf, 10); /* ints */
 }
 
 int skeCommitRaw(uint16_t id, uint32_t raw)
@@ -821,13 +875,87 @@ int skeCommitRaw(uint16_t id, uint32_t raw)
     return sSetStatus;
 }
 
+/* ------------------------------------------------------------------ */
+/* access control ('p'/'x')                                           */
+
+static uint8_t sUnlockState; /* 0 pending, 1 ok, 2 bad, 3 lockout */
+
+static void unlockCb(char *line)
+{
+    if (!strncmp(line, "access:", 7))
+        sUnlockState = 1;
+    else if (!strncmp(line, "ERR", 3))
+        sUnlockState = strstr(line, "wait") ? 3 : 2;
+}
+
+bool skeUnlock(const char *pass, String &err)
+{
+    if (!pass || !*pass)
+    {
+        err = F("пустой пароль");
+        return false;
+    }
+    char cmd[16];
+    snprintf(cmd, sizeof(cmd), "p %s", pass);
+    sUnlockState = 0;
+    if (!txtCommand(cmd, unlockCb, SKE_CMD_TIMEOUT_MS))
+    {
+        err = F("прибор не отвечает");
+        return false;
+    }
+    if (sUnlockState == 1)
+    {
+        sLastOk = millis();
+        return true;
+    }
+    if (sUnlockState == 3)
+        err = F("ввод пароля заблокирован, подождите");
+    else
+        err = F("неверный пароль");
+    return false;
+}
+
+static uint8_t sRunState; /* 0 pending, 1 ok, else BS_* */
+
+static void runCb(char *line)
+{
+    if (!strncmp(line, "ERR", 3))
+    {
+        if (strstr(line, "access"))
+            sRunState = BS_ACCESS;
+        else if (strstr(line, "wait"))
+            sRunState = BS_WAIT;
+        else if (strstr(line, "id"))
+            sRunState = BS_BAD_ID;
+        else
+            sRunState = BS_BAD_TYPE; /* not a command item */
+        return;
+    }
+    if (!strncmp(line, "OK ", 3))
+        sRunState = 1;
+}
+
+int skeRunCommand(uint16_t id)
+{
+    SkeParam *p = skeGet(id);
+    if (!p || p->type != SKT_CMD)
+        return BS_BAD_TYPE;
+    char cmd[16];
+    snprintf(cmd, sizeof(cmd), "x %u", (unsigned)id);
+    sRunState = 0;
+    if (!txtCommand(cmd, runCb, SKE_CMD_TIMEOUT_MS))
+        return SKE_ERR_TRANSPORT;
+    if (sRunState == 1)
+        sLastOk = millis();
+    return (sRunState == 1) ? BS_OK : (int)sRunState;
+}
+
 /*
  * Write from UI text. TIME is "hh:mm" and DATE is "dd.mm.yy": like the
  * device menu, only the edited part of the unix value changes (the date
  * part stays for TIME, the time-of-day stays for DATE); the console 's'
  * command itself takes the raw seconds.
- */
-bool skeSetFromText(uint16_t id, const char *text, String &err)
+ */bool skeSetFromText(uint16_t id, const char *text, String &err)
 {
     SkeParam *p = skeGet(id);
     if (!p)
@@ -926,6 +1054,10 @@ bool skeSetFromText(uint16_t id, const char *text, String &err)
         err = F("неверное значение");
     else if (rc == BS_READONLY)
         err = F("только для чтения");
+    else if (rc == BS_ACCESS)
+        err = F("нет доступа: неверный пароль меню");
+    else if (rc == BS_WAIT)
+        err = F("ввод пароля заблокирован, подождите");
     return rc == BS_OK;
 }
 
@@ -954,9 +1086,97 @@ void skeRescan(void)
     sCount = 0;
     sMisses = 0;
     sTxtActive = false;
+    sVals.updated = 0;
     sState = ST_WAKE;
     sT = 0;
     sReady = false;
+}
+
+/* ------------------------------------------------------------------ */
+/* live values ('m'): MeterData_t as three CSV lines, prompt-framed    */
+
+static uint8_t sValsLine; /* which CSV line is expected next */
+
+/* split one comma-separated field; advances the cursor */
+static bool valsNext(char *&p, char *field, size_t cap)
+{
+    if (!p || !*p)
+        return false;
+    char *c = strchr(p, ',');
+    size_t n = c ? (size_t)(c - p) : strlen(p);
+    if (n >= cap)
+        n = cap - 1;
+    memcpy(field, p, n);
+    field[n] = 0;
+    p = c ? c + 1 : NULL;
+    return true;
+}
+
+static float valsFloat(char *&p, char *field, size_t cap)
+{
+    return valsNext(p, field, cap) ? (float)strtod(field, NULL) : 0.0f;
+}
+
+static uint32_t valsUlong(char *&p, char *field, size_t cap, int base)
+{
+    return valsNext(p, field, cap) ? strtoul(field, NULL, base) : 0;
+}
+
+static void valuesLineCb(char *line)
+{
+    char f[24];
+    char *p;
+    switch (sValsLine)
+    {
+    case 0: /* m,frequency,rate_raw,rate_fast,rateMLPM,rate */
+        if (strncmp(line, "m,", 2))
+            return; /* console chatter */
+        p = line + 2;
+        sVals.frequency = valsFloat(p, f, sizeof(f));
+        sVals.rate_raw = valsFloat(p, f, sizeof(f));
+        sVals.rate_fast = valsFloat(p, f, sizeof(f));
+        sVals.rateMLPM = valsFloat(p, f, sizeof(f));
+        sVals.rate = valsFloat(p, f, sizeof(f));
+        sValsLine = 1;
+        break;
+    case 1: /* totals, 8 fields */
+        p = line;
+        sVals.total_plus = valsFloat(p, f, sizeof(f));
+        sVals.total_minus = valsFloat(p, f, sizeof(f));
+        sVals.total = valsFloat(p, f, sizeof(f));
+        sVals.total_sum = valsFloat(p, f, sizeof(f));
+        sVals.totalml_plus = valsFloat(p, f, sizeof(f));
+        sVals.totalml_minus = valsFloat(p, f, sizeof(f));
+        sVals.gtotal = valsFloat(p, f, sizeof(f));
+        sVals.gtotalml = valsFloat(p, f, sizeof(f));
+        sValsLine = 2;
+        break;
+    case 2: /* kf,pulses_packet,pulses,batch,status,setpoint,isr (%02X) */
+        p = line;
+        sVals.kf_value = valsFloat(p, f, sizeof(f));
+        sVals.pulses_packet = valsUlong(p, f, sizeof(f), 10);
+        sVals.pulses = valsUlong(p, f, sizeof(f), 10);
+        sVals.batch = valsFloat(p, f, sizeof(f));
+        sVals.status = (uint8_t)valsUlong(p, f, sizeof(f), 16);
+        sVals.setpoint = (uint8_t)valsUlong(p, f, sizeof(f), 16);
+        sVals.isr = (uint8_t)valsUlong(p, f, sizeof(f), 16);
+        sValsLine = 3; /* frame complete */
+        break;
+    default:
+        break;
+    }
+}
+
+static bool SKE_UNUSED skeQueryValues(void)
+{
+    sValsLine = 0;
+    if (!txtCommand("m", valuesLineCb, SKE_CMD_TIMEOUT_MS))
+        return false;
+    if (sValsLine != 3)
+        return false; /* torn frame */
+    sVals.updated = millis();
+    sLastOk = millis();
+    return true;
 }
 
 /* ------------------------------------------------------------------ */
@@ -1013,19 +1233,23 @@ void skePoll(void)
         }
         break;
 
-    case ST_POLL:
-    {
-        uint32_t period = (uint32_t)storagePoll100ms() * 100UL;
-        if (period < SKE_POLL_MIN_MS)
-            period = SKE_POLL_MIN_MS;
-        if (millis() - sT >= period)
+    case ST_IDLE:
+        /* monitoring: one small 'm' frame per second (the settings tree
+         * itself stays quiet - it is refreshed only on demand) */
+        if (millis() - sT >= SKE_VALUES_PERIOD_MS)
         {
             sT = millis();
-            textStart(); /* one command refreshes every value */
-            sState = ST_LIST;
+            if (skeQueryValues())
+                sMisses = 0;
+            else if (++sMisses >= SKE_WAKE_MISS)
+            {
+                sMisses = 0;
+                sState = ST_WAKE;
+                sT = 0;
+            }
         }
         break;
-    }
+
     }
 #endif
 }
@@ -1036,7 +1260,32 @@ bool skeLinkUp(void)
 }
 
 bool skeReady(void) { return sReady; }
+const SkeValues *skeValues(void) { return sVals.updated ? &sVals : NULL; }
 bool skeCapturing(void) { return sTxtActive; }
+
+/*
+ * On-demand full refresh for the web "Обновить" button: runs one 'l'
+ * listing synchronously (settings rarely change, there is NO background
+ * polling - the listing stalls the meter console task for ~1.2 s, so
+ * it only ever happens on an explicit user action).
+ */
+bool skeRefresh(void)
+{
+#if GW_SKE_ENABLED
+    if (sTxtActive || sState == ST_WAKE)
+        return sReady;
+    uint32_t before = sLastOk;
+    textStart();
+    while (sTxtActive)
+    {
+        textFeed();
+        delay(1);
+    }
+    return sLastOk != before;
+#else
+    return false;
+#endif
+}
 uint16_t skeCount(void) { return sCount; }
 const char *skeVersion(void) { return sVersion[0] ? sVersion : "-"; }
 uint32_t skeLastOkMs(void) { return sLastOk; }
@@ -1126,8 +1375,12 @@ String skeValueText(uint16_t id)
     SkeParam *p = skeGet(id);
     if (!p)
         return String();
+    if (p->type == SKT_CMD)
+        return String();
     if (!p->present)
         return String('-');
+    if (p->masked)
+        return F("******");
     /* enum/bool values are shown as their option label, like on the LCD */
     if ((p->type == SKT_ENUM || p->type == SKT_BOOL) && p->optCnt)
     {
