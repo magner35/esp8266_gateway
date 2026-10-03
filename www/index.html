@@ -83,7 +83,8 @@
 
     #values {
       display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(168px, 1fr));
+      /* 10 chars of 17px monospace (~102px) + card padding + border */
+      grid-template-columns: repeat(auto-fill, minmax(134px, 1fr));
       gap: 8px;
       margin: 0 0 10px 0
     }
@@ -152,6 +153,67 @@
     body.edit #values {
       user-select: none
     }
+
+    #btnW.act {
+      background: #1d5c2f
+    }
+
+    #wpanel {
+      background: #1b202a;
+      border: 1px solid #2a3140;
+      border-radius: 8px;
+      padding: 10px 12px;
+      margin: 0 0 10px 0;
+      display: flex;
+      flex-direction: column;
+      gap: 6px
+    }
+
+    #wpanel[hidden] {
+      display: none
+    }
+
+    #wpanel .wrow {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      align-items: center;
+      font-size: 13px
+    }
+
+    #wpanel input[type=number] {
+      width: 80px
+    }
+
+    .hbar {
+      background: #0e1116;
+      border: 1px solid #39414f;
+      border-radius: 6px;
+      height: 14px;
+      margin-top: 6px;
+      overflow: hidden
+    }
+
+    /* torn stripe fill: solid dashes with gaps */
+    .hfill {
+      height: 100%;
+      width: 0;
+      transition: width .25s ease-out;
+      background: repeating-linear-gradient(90deg, #7aa2f7 0 10px, transparent 10px 14px)
+    }
+
+    /* bar card without the value text: same height as a value card */
+    .vcard.wbar {
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      min-height: 58px
+    }
+
+    .vcard.wbar .hbar {
+      height: 18px;
+      margin-top: 8px
+    }
   </style>
 </head>
 
@@ -160,10 +222,14 @@
     <h1>SKE-02 Gateway</h1>
     <span id="link" class="tag">…</span><span id="fw" class="tag"></span>
     <button id="btnEdit" onclick="toggleEdit()">&#9998; Раскладка</button>
+    <button id="btnW" onclick="toggleW()">&#9633; Виджеты</button>
     <a href="/settings"><button>&#9881; Настройки</button></a>
     <button class="warn" onclick="rebootDev()">Перезагрузить прибор</button>
     <a href="/wifi"><button>Wi-Fi</button></a>
   </header>
+  <div id="wpanel" hidden>
+    <div id="wlist"></div>
+  </div>
   <div id="values"></div>
   <div id="debug">
     отладочная панель
@@ -219,6 +285,41 @@
       status: 'Состояние (биты)',
       isr: 'Флаги ISR (биты)'
     };
+
+    const r7 = x => Number(x.toPrecision(7));
+
+    /*
+     * ── CUSTOM VALUE WIDGETS ────────────────────────────────────────
+     * A digital-parameter widget computed by a free-form formula:
+     *   calc(d, C) - d = the whole live 'm' values object (fields are
+     *   the names in VFLOATS/VUINTS above), C = the named constants
+     *   from MY_CONST below. Returns a number.
+     * To add your own widget by hand, add ONE line to CUSTOM, e.g.:
+     *     total_x2: { calc: (d, C) => d.total * C.k, label: 'Объём ×k', on: true },
+     * That's all: the widget auto-appears on the main screen and in
+     * the "Виджеты" panel (a saved layout already in localStorage
+     * picks the new entry up on the next page load).
+     * 'on' is the initial state for a FIRST appearance only; later
+     * on/off and drag order are the user's, kept in localStorage.
+     */
+    const MY_CONST = {
+      my_const: 10
+    };
+    const CUSTOM = {
+      fast_plus_total: { calc: d => r7(d.rate_fast + 10) / 10 + d.total, label: 'fast+total', on: true },
+      with_const: { calc: (d, C) => r7((d.rate_fast + 10) / 10 + d.total - C.my_const), label: 'с константой', on: true }
+    };
+    /*
+     * ── FLOW WIDGET ─────────────────────────────────────────────────
+     * Configurable rate widget (like the bar, configured in the panel):
+     * input is rateMLPM (ml/min), the two combos pick the volume unit
+     * and the time unit; the label composes itself ("Расход, л/мин").
+     * The "vol" widget below is the same for gtotal (volume only).
+     */
+    const VOLU = { ml: 1, l: 1000, m3: 1000000 };   /* ml per volume unit */
+    const VOLN = { ml: 'мл', l: 'л', m3: 'м³' };
+    const TIMU = { s: 1 / 60, m: 1, h: 60, d: 1440 }; /* minutes per time unit */
+    const TIMN = { s: 'с', m: 'мин', h: 'ч', d: 'сут' };
     let vBuilt = false;
     /* rate history: ring of the last 600 s (the values poll is 1 Hz) */
     const RATE_N = 600;
@@ -260,31 +361,76 @@
     }
     window.addEventListener('resize', rateDraw);
     /*
-     * Editable layout: cards are defined once, rendered in the saved
-     * order (localStorage "vorder"); drag & drop in the edit mode just
-     * reorders the DOM and stores the new key sequence back.
+     * Widgets: the main screen is a list of widget configs kept in
+     * localStorage ("widgets"): {k: id, t: chart|val|bits|bar, src: data
+     * key, on, min, max}. Base widgets are generated from the MeterData
+     * members; "bar" is the torn-stripe progress bar. Drag & drop in the
+     * edit mode reorders the array.
      */
-    function cardDefs() {
-      const d = [{ k: 'rateChart', h: '<div class="vcard chart" data-k="rateChart"><div class="vname">Расход, последние 10 мин</div><canvas id="rateChart"></canvas></div>' }];
-      for (const n of VFLOATS.concat(VUINTS))
-        d.push({ k: n, h: '<div class="vcard" data-k="' + n + '"><div class="vname">' + (LBL[n] || n) + '</div><div class="vval" id="vf_' + n + '">—</div></div>' });
-      for (const n in FLAGS) {
-        let inner = '';
-        FLAGS[n].forEach((b, k) => inner += '<span class="bit" id="vb_' + n + '_' + k + '" title="' + b + '">' + (FLBL[b] || b) + '</span>');
-        d.push({ k: 'bits_' + n, h: '<div class="vcard wide" data-k="bits_' + n + '"><div class="vname">' + (LBL[n] || n) + '</div><div id="vb_' + n + '">' + inner + '</div></div>' });
+    function baseWidgets() {
+      const w = [{ k: 'rateChart', t: 'chart', src: 'rate', on: true },
+      { k: 'bar_rate_fast', t: 'bar', src: 'rate_fast', on: true, min: 0, max: 100, auto: true }];
+      for (const n of VFLOATS.concat(VUINTS)) w.push({ k: n, t: 'val', src: n, on: true });
+      for (const n in FLAGS) w.push({ k: 'bits_' + n, t: 'bits', src: n, on: true });
+      for (const id in CUSTOM) w.push({ k: id, t: 'cval', on: CUSTOM[id].on !== false });
+      w.push({ k: 'flow_l_m', t: 'flow', vol: 'l', time: 'm', on: true });
+      w.push({ k: 'vol_l', t: 'vol', vol: 'l', on: true });
+      return w;
+    }
+    let widgets = null;
+    function saveWidgets() { localStorage.setItem('widgets', JSON.stringify(widgets)) }
+    function loadWidgets() {
+      try { widgets = JSON.parse(localStorage.getItem('widgets')) } catch (e) { widgets = null }
+      if (!Array.isArray(widgets)) {
+        widgets = baseWidgets();
+        /* one-time migration: keep the old drag order ("vorder") */
+        try {
+          const o = JSON.parse(localStorage.getItem('vorder'));
+          if (Array.isArray(o))
+            widgets.sort((a, b) => (o.indexOf(a.k) + 1 || 1e9) - (o.indexOf(b.k) + 1 || 1e9));
+        } catch (e) { }
+        saveWidgets();
       }
-      return d;
+      /* drop configs whose source disappeared, add new data keys */
+      widgets = widgets.filter(w => w.t === 'bar' || w.t === 'flow' || w.t === 'vol' || (w.t === 'cval' && CUSTOM[w.k]) ||
+        (w.src && (w.src === 'rate' || VFLOATS.includes(w.src) || VUINTS.includes(w.src) || w.src in FLAGS)));
+      for (const w of widgets) if (w.t === 'flow' && (!VOLU[w.vol] || !TIMU[w.time])) w.vol = 'l', w.time = 'm';
+      for (const w of widgets) if (w.t === 'vol' && !VOLU[w.vol]) w.vol = 'l';
+      for (const w of widgets) if (w.t === 'bar' && w.auto === undefined) w.auto = true;
+      for (const b of baseWidgets())
+        if (!widgets.some(w => w.k === b.k)) widgets.push(b);
+    }
+    function widgetName(w) {
+      if (w.t === 'chart') return 'График: Расход, 10 мин';
+      if (w.t === 'bar') return 'Прогрессбар: ' + (LBL[w.src] || w.src);
+      if (w.t === 'cval') return (CUSTOM[w.k] && CUSTOM[w.k].label) || w.k;
+      if (w.t === 'flow') return 'Расход, ' + VOLN[w.vol] + '/' + TIMN[w.time];
+      if (w.t === 'vol') return 'Общий, ' + VOLN[w.vol];
+      return LBL[w.src] || w.src;
+    }
+    function widgetHtml(w) {
+      if (w.t === 'chart')
+        return '<div class="vcard chart" data-k="' + w.k + '"><div class="vname">Расход, последние 10 мин</div><canvas id="rateChart"></canvas></div>';
+      if (w.t === 'val')
+        return '<div class="vcard" data-k="' + w.k + '"><div class="vname">' + (LBL[w.src] || w.src) + '</div><div class="vval" id="vf_' + w.src + '">—</div></div>';
+      if (w.t === 'cval') /* custom: src × factor, label from CUSTOM */
+        return '<div class="vcard" data-k="' + w.k + '"><div class="vname">' + widgetName(w) + '</div><div class="vval" id="vfc_' + w.k + '">—</div></div>';
+      if (w.t === 'flow') /* rateMLPM converted to vol/time units */
+        return '<div class="vcard" data-k="' + w.k + '"><div class="vname">' + widgetName(w) + '</div><div class="vval" id="vfl_' + w.k + '">—</div></div>';
+      if (w.t === 'vol') /* gtotalml converted to the volume unit */
+        return '<div class="vcard" data-k="' + w.k + '"><div class="vname">' + widgetName(w) + '</div><div class="vval" id="vvv_' + w.k + '">—</div></div>';
+      if (w.t === 'bits') {
+        let inner = '';
+        FLAGS[w.src].forEach((b, k) => inner += '<span class="bit" id="vb_' + w.src + '_' + k + '" title="' + b + '">' + (FLBL[b] || b) + '</span>');
+        return '<div class="vcard wide" data-k="' + w.k + '"><div class="vname">' + (LBL[w.src] || w.src) + '</div><div id="vb_' + w.src + '">' + inner + '</div></div>';
+      }
+      /* bar: torn-stripe progress bar clamped to min..max, no value text */
+      return '<div class="vcard wbar" data-k="' + w.k + '"><div class="vname">' + (LBL[w.src] || w.src) + '</div><div class="hbar"><div class="hfill" id="hf_' + w.k + '"></div></div></div>';
     }
     function vBuild() {
-      const defs = cardDefs(), map = {};
-      defs.forEach(d => map[d.k] = d.h);
-      let order = [];
-      try { order = JSON.parse(localStorage.getItem('vorder')) || [] } catch (e) { }
-      const seen = new Set(), html = [];
-      for (const k of order) if (map[k] !== undefined && !seen.has(k)) { html.push(map[k]); seen.add(k) }
-      for (const d of defs) if (!seen.has(d.k)) { html.push(d.h); seen.add(d.k) }
-      $('values').innerHTML = html.join('');
-      vBuilt = true; rateDraw(); setDrag();
+      loadWidgets();
+      $('values').innerHTML = widgets.filter(w => w.on).map(widgetHtml).join('');
+      vBuilt = true; rateDraw(); setDrag(); renderPanel();
     }
     let editing = false;
     function toggleEdit() {
@@ -323,13 +469,130 @@
       const r = c.getBoundingClientRect();
       const after = (e.clientY - r.top) > r.height / 2 || (e.clientX - r.left) > r.width / 2;
       c.parentNode.insertBefore(src, after ? c.nextSibling : c);
-      localStorage.setItem('vorder',
-        JSON.stringify([...$('values').children].map(x => x.dataset.k)));
+      /* the DOM order of the enabled cards IS the widget order */
+      const ord = [...$('values').children].map(x => x.dataset.k);
+      widgets.sort((a, b) =>
+        (ord.indexOf(a.k) + 1 || 1e9) - (ord.indexOf(b.k) + 1 || 1e9));
+      saveWidgets();
     });
+    /* ---------------------------------------------------------------- */
+    /* the "Виджеты" panel: enable/disable, bar min/max, add/remove     */
+    function toggleW() {
+      const p = $('wpanel');
+      p.hidden = !p.hidden;
+      $('btnW').classList.toggle('act', !p.hidden);
+      renderPanel();
+    }
+    function renderPanel() {
+      const p = $('wlist'); if (!p) return;
+      let h = '';
+      widgets.forEach((w, i) => {
+        h += '<div class="wrow"><label><input type="checkbox"' + (w.on ? ' checked' : '') +
+          ' onchange="wToggle(' + i + ',this.checked)"> ' + widgetName(w) + '</label>';
+        if (w.t === 'bar')
+          h += ' min <input type="number" value="' + w.min + '" onchange="wRange(' + i + ',\'min\',this.value)"' +
+            '> max <input type="number" value="' + w.max + '" onchange="wRange(' + i + ',\'max\',this.value)">' +
+            ' <label><input type="checkbox"' + (w.auto ? ' checked' : '') + ' onchange="wAuto(' + i + ',this.checked)"> авто</label>' +
+            ' <button class="warn" onclick="wDel(' + i + ')">удалить</button>';
+        if (w.t === 'flow') {
+          const sel = (which, map, names) => {
+            let s = '<select onchange="wFlow(' + i + ',\'' + which + '\',this.value)">';
+            for (const u in map) s += '<option value="' + u + '"' + (w[which] === u ? ' selected' : '') + '>' + names[u] + '</option>';
+            return s + '</select>';
+          };
+          h += ' объём ' + sel('vol', VOLU, VOLN) + ' время ' + sel('time', TIMU, TIMN) +
+            ' <button class="warn" onclick="wDel(' + i + ')">удалить</button>';
+        }
+        if (w.t === 'vol') {
+          let s = '<select onchange="wFlow(' + i + ',\'vol\',this.value)">';
+          for (const u in VOLU) s += '<option value="' + u + '"' + (w.vol === u ? ' selected' : '') + '>' + VOLN[u] + '</option>';
+          h += ' объём ' + s + '</select>' +
+            ' <button class="warn" onclick="wDel(' + i + ')">удалить</button>';
+        }
+        h += '</div>';
+      });
+      const opts = VFLOATS.map(n => '<option value="' + n + '">' + (LBL[n] || n) + '</option>').join('');
+      h += '<div class="wrow">＋ прогрессбар <select id="nwSrc">' + opts + '</select>' +
+        ' min <input id="nwMin" type="number" value="0">' +
+        ' max <input id="nwMax" type="number" value="100">' +
+        ' <label><input id="nwAuto" type="checkbox" checked> авто</label>' +
+        ' <button onclick="wAdd()">Добавить</button></div>';
+      h += '<div class="wrow">＋ расход <select id="nwVol">' +
+        '<option value="ml">мл</option><option value="l" selected>л</option><option value="m3">м³</option></select>' +
+        ' / <select id="nwTime"><option value="s">с</option><option value="m" selected>мин</option>' +
+        '<option value="h">ч</option><option value="d">сут</option></select>' +
+        ' <button onclick="wAddFlow()">Добавить</button></div>';
+      h += '<div class="wrow">＋ общий объём <select id="nvVol">' +
+        '<option value="ml">мл</option><option value="l" selected>л</option><option value="m3">м³</option></select>' +
+        ' <button onclick="wAddVol()">Добавить</button></div>';
+      p.innerHTML = h;
+    }
+    function wToggle(i, on) { widgets[i].on = on; saveWidgets(); vBuild() }
+    function wRange(i, which, v) { widgets[i][which] = parseFloat(v) || 0; saveWidgets() }
+    function wAuto(i, on) { widgets[i].auto = on; saveWidgets() }
+    function wFlow(i, which, v) { widgets[i][which] = v; saveWidgets(); vBuild() }
+    function wDel(i) { widgets.splice(i, 1); saveWidgets(); vBuild() }
+    function wAdd() {
+      widgets.push({
+        k: 'bar' + Date.now(), t: 'bar', src: $('nwSrc').value, on: true,
+        min: parseFloat($('nwMin').value) || 0, max: parseFloat($('nwMax').value) || 100,
+        auto: $('nwAuto').checked
+      });
+      saveWidgets(); vBuild();
+    }
+    function wAddFlow() {
+      widgets.push({ k: 'flow' + Date.now(), t: 'flow', vol: $('nwVol').value, time: $('nwTime').value, on: true });
+      saveWidgets(); vBuild();
+    }
+    function wAddVol() {
+      widgets.push({ k: 'vol' + Date.now(), t: 'vol', vol: $('nvVol').value, on: true });
+      saveWidgets(); vBuild();
+    }
     function vApply(d) {
+      const barLo = vApply.lo || (vApply.lo = {}), barHi = vApply.hi || (vApply.hi = {});
       for (const n of VFLOATS) { const e = $('vf_' + n); if (e && d[n] !== undefined) e.textContent = d[n] }
       for (const n of VUINTS) { const e = $('vf_' + n); if (e && d[n] !== undefined) e.textContent = d[n] }
       for (const n in FLAGS) { const v = d[n] || 0; FLAGS[n].forEach((b, k) => { const e = $('vb_' + n + '_' + k); if (e) e.className = 'bit' + ((v >> k) & 1 ? ' on' : '') }) }
+      for (const w of widgets || []) {
+        if (w.t !== 'cval' || !w.on) continue;
+        const c = CUSTOM[w.k], e = $('vfc_' + w.k);
+        if (c && e && c.calc) {
+          /* no forced formatting here: the calc's own rounding (e.g.
+           * Number(x.toPrecision(4))) is what the card must show */
+          const v = c.calc(d, MY_CONST);
+          if (isFinite(v)) e.textContent = String(v)
+        }
+      }
+      /* flow widgets: rateMLPM (ml/min) -> chosen volume / time units */
+      for (const w of widgets || []) {
+        if (w.t !== 'flow' || !w.on) continue;
+        const e = $('vfl_' + w.k);
+        if (e && d.rateMLPM !== undefined)
+          e.textContent = Number((d.rateMLPM / VOLU[w.vol] * TIMU[w.time]).toPrecision(4))
+      }
+      /* volume widgets: gtotalml -> chosen volume unit, no time factor */
+      for (const w of widgets || []) {
+        if (w.t !== 'vol' || !w.on) continue;
+        const e = $('vvv_' + w.k);
+        if (e && d.gtotalml !== undefined)
+          e.textContent = Number((d.gtotalml / VOLU[w.vol]).toPrecision(4))
+      }
+      for (const w of widgets || []) {
+        if (w.t !== 'bar' || !w.on) continue;
+        const f = $('hf_' + w.k), v = d[w.src];
+        if (f && v !== undefined) {
+          let lo = w.min, hi = w.max;
+          if (w.auto) {
+            /* running min/max of the value, like the chart scale */
+            if (!(w.k in barLo) || v < barLo[w.k]) barLo[w.k] = v;
+            if (!(w.k in barHi) || v > barHi[w.k]) barHi[w.k] = v;
+            lo = barLo[w.k]; hi = barHi[w.k];
+            if (hi - lo < 1e-9) { lo -= 0.5; hi += 0.5 }
+          }
+          let p = (v - lo) / (hi - lo) * 100;
+          f.style.width = Math.max(0, Math.min(100, p)).toFixed(1) + '%';
+        }
+      }
     }
     async function valuesTick() {
       try {
