@@ -454,9 +454,17 @@ static void exec_request(ske_req_t *req)
         xSemaphoreTake(sLock, portMAX_DELAY);
         proto_reset(&sCtx);
         xSemaphoreGive(sLock);
-        text_start();
-        req->result = capture_listing(SKE_LIST_TIMEOUT) ? BS_OK
-                                                        : SKE_ERR_TRANSPORT;
+        /* the reset wipes count/version too: re-run the full wake
+         * sequence ('e' + 'i'), not just the listing - otherwise
+         * count stays 0 and every param looks gone */
+        if (ske_echo_off() && ske_info())
+        {
+            text_start();
+            req->result = capture_listing(SKE_LIST_TIMEOUT) ? BS_OK
+                                                            : SKE_ERR_TRANSPORT;
+        }
+        else
+            req->result = SKE_ERR_TRANSPORT;
         if (req->result == BS_OK)
             sReady = true;
         break;

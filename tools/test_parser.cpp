@@ -175,6 +175,16 @@ int main(int argc, char **argv)
         proto_parse_line(&ctx, s2); /* refresh with a longer text */
         proto_value_text(&ctx, 176, buf, sizeof(buf));
         CHECK(!strcmp(buf, "99999"), "string refresh='%s'", buf);
+
+        /* submenu-owner names carry the LCD arrow '~' + padding */
+        char t1[] = "      179 U32  Homep~ = 0018 [0..9999]";
+        char t2[] = "    181 CMD  Pocmotp          ~";
+        proto_parse_line(&ctx, t1);
+        CHECK(!strcmp(ctx.params[179].name, "Homep"), "tilde name='%s'",
+              ctx.params[179].name);
+        proto_parse_line(&ctx, t2);
+        CHECK(!strcmp(ctx.params[181].name, "Pocmotp"), "tilde cmd='%s'",
+              ctx.params[181].name);
     }
 
     /* console 's' value packing: TIME = HHMM, DATE = DDMMYY */

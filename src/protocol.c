@@ -704,9 +704,11 @@ void proto_parse_line(ProtoCtx *ctx, char *s)
 
     if (type == SKT_CMD && !eq)
     {
-        /* "<id> CMD <name>" - a menu command item, run via 'x' */
+        /* "<id> CMD <name>" - a menu command item, run via 'x'; the
+         * device pads submenu-owner names with the LCD arrow '~' */
         char *eol = name + strlen(name);
-        while (eol > name && (eol[-1] == ' ' || eol[-1] == '*'))
+        while (eol > name && (eol[-1] == ' ' || eol[-1] == '*' ||
+                              eol[-1] == '~'))
             *--eol = 0;
         proto_rusify(name);
         p = &ctx->params[id];
@@ -755,7 +757,7 @@ void proto_parse_line(ProtoCtx *ctx, char *s)
 
     *eq = 0;
     t = eq;
-    while (t > name && t[-1] == ' ')
+    while (t > name && (t[-1] == ' ' || t[-1] == '~'))
         *--t = 0;
 
     /* the value text is copied out FIRST: rusify expands in place and

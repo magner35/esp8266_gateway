@@ -134,6 +134,24 @@
       background: #1d5c2f;
       color: #d8dee9
     }
+
+    #btnEdit.act {
+      background: #1d5c2f
+    }
+
+    body.edit .vcard {
+      outline: 1px dashed #39414f;
+      cursor: grab
+    }
+
+    body.edit .vcard.dragging {
+      opacity: .35;
+      cursor: grabbing
+    }
+
+    body.edit #values {
+      user-select: none
+    }
   </style>
 </head>
 
@@ -141,6 +159,7 @@
   <header>
     <h1>SKE-02 Gateway</h1>
     <span id="link" class="tag">…</span><span id="fw" class="tag"></span>
+    <button id="btnEdit" onclick="toggleEdit()">&#9998; Раскладка</button>
     <a href="/settings"><button>&#9881; Настройки</button></a>
     <button class="warn" onclick="rebootDev()">Перезагрузить прибор</button>
     <a href="/wifi"><button>Wi-Fi</button></a>
@@ -161,6 +180,18 @@
       setpoint: ['RATEQMAX', 'RATEHIGH', 'RATELOW', 'FLOW', 'TOTAL', 'GTOTAL', 'BATCH', 'PREEMPTION'],
       status: ['ACCESERROR', 'BATCHER_TIMEOUT', 'BATCHER_PAUSE', 'BATCHER_FINISH', 'RTCERROR', 'RAMERROR', 'REVERSE', 'LOGFULL'],
       isr: ['DOUT0', 'DOUT1', 'DOUT2', 'BUZZER', 'HIGHFREQ', 'LOWFREQ', 'DUTY', 'PHASE']
+    };
+    /* display labels for the flag chips (bit order must match FLAGS) */
+    const FLBL = {
+      RATEQMAX: 'Расх>Qмакс', RATEHIGH: 'Расх>макс', RATELOW: 'Расх<мин',
+      FLOW: 'Поток', TOTAL: 'Объём', GTOTAL: 'Общий объём', BATCH: 'Порция',
+      PREEMPTION: 'Прерывание',
+      ACCESERROR: 'Ошибка доступа', BATCHER_TIMEOUT: 'Таймаут порции',
+      BATCHER_PAUSE: 'Порция: пауза', BATCHER_FINISH: 'Порция: конец',
+      RTCERROR: 'Ошибка RTC', RAMERROR: 'Ошибка RAM', REVERSE: 'Реверс',
+      LOGFULL: 'Журнал полон',
+      DOUT0: 'Вых0', DOUT1: 'Вых1', DOUT2: 'Вых2', BUZZER: 'Звук',
+      HIGHFREQ: 'Частота>', LOWFREQ: 'Частота<', DUTY: 'Скважность', PHASE: 'Фаза'
     };
     const VFLOATS = ['frequency', 'rate_raw', 'rate_fast', 'rateMLPM', 'rate', 'total_plus', 'total_minus', 'total', 'total_sum', 'totalml_plus', 'totalml_minus', 'gtotal', 'gtotalml', 'kf_value', 'batch'];
     const VUINTS = ['pulses_packet', 'pulses'];
@@ -228,17 +259,73 @@
       g.fillText('min ' + (rateMin).toFixed(3), w - 86, h - 4);
     }
     window.addEventListener('resize', rateDraw);
-    function vBuild() {
-      let h = '<div class="vcard chart"><div class="vname">Расход, последние 10 мин</div><canvas id="rateChart"></canvas></div>';
-      for (const n of VFLOATS) h += '<div class="vcard"><div class="vname">' + (LBL[n] || n) + '</div><div class="vval" id="vf_' + n + '">—</div></div>';
-      for (const n of VUINTS) h += '<div class="vcard"><div class="vname">' + (LBL[n] || n) + '</div><div class="vval" id="vf_' + n + '">—</div></div>';
+    /*
+     * Editable layout: cards are defined once, rendered in the saved
+     * order (localStorage "vorder"); drag & drop in the edit mode just
+     * reorders the DOM and stores the new key sequence back.
+     */
+    function cardDefs() {
+      const d = [{ k: 'rateChart', h: '<div class="vcard chart" data-k="rateChart"><div class="vname">Расход, последние 10 мин</div><canvas id="rateChart"></canvas></div>' }];
+      for (const n of VFLOATS.concat(VUINTS))
+        d.push({ k: n, h: '<div class="vcard" data-k="' + n + '"><div class="vname">' + (LBL[n] || n) + '</div><div class="vval" id="vf_' + n + '">—</div></div>' });
       for (const n in FLAGS) {
-        h += '<div class="vcard wide"><div class="vname">' + (LBL[n] || n) + '</div><div id="vb_' + n + '">';
-        FLAGS[n].forEach((b, k) => h += '<span class="bit" id="vb_' + n + '_' + k + '">' + b + '</span>');
-        h += '</div></div>';
+        let inner = '';
+        FLAGS[n].forEach((b, k) => inner += '<span class="bit" id="vb_' + n + '_' + k + '" title="' + b + '">' + (FLBL[b] || b) + '</span>');
+        d.push({ k: 'bits_' + n, h: '<div class="vcard wide" data-k="bits_' + n + '"><div class="vname">' + (LBL[n] || n) + '</div><div id="vb_' + n + '">' + inner + '</div></div>' });
       }
-      $('values').innerHTML = h; vBuilt = true; rateDraw();
+      return d;
     }
+    function vBuild() {
+      const defs = cardDefs(), map = {};
+      defs.forEach(d => map[d.k] = d.h);
+      let order = [];
+      try { order = JSON.parse(localStorage.getItem('vorder')) || [] } catch (e) { }
+      const seen = new Set(), html = [];
+      for (const k of order) if (map[k] !== undefined && !seen.has(k)) { html.push(map[k]); seen.add(k) }
+      for (const d of defs) if (!seen.has(d.k)) { html.push(d.h); seen.add(d.k) }
+      $('values').innerHTML = html.join('');
+      vBuilt = true; rateDraw(); setDrag();
+    }
+    let editing = false;
+    function toggleEdit() {
+      editing = !editing;
+      document.body.className = editing ? 'edit' : '';
+      $('btnEdit').classList.toggle('act', editing);
+      setDrag();
+    }
+    function setDrag() {
+      const el = $('values'); if (!el) return;
+      [...el.children].forEach(c => c.draggable = editing);
+    }
+    let dragK = null;
+    document.addEventListener('dragstart', e => {
+      const c = e.target.closest && e.target.closest('.vcard');
+      if (!editing || !c) return;
+      dragK = c.dataset.k; c.classList.add('dragging');
+      e.dataTransfer.effectAllowed = 'move';
+    });
+    document.addEventListener('dragend', e => {
+      const c = e.target.closest && e.target.closest('.vcard');
+      if (c) c.classList.remove('dragging');
+      dragK = null;
+    });
+    document.addEventListener('dragover', e => {
+      if (!editing || !dragK) return;
+      if (e.target.closest && e.target.closest('.vcard')) e.preventDefault();
+    });
+    document.addEventListener('drop', e => {
+      const c = e.target.closest && e.target.closest('.vcard');
+      if (!editing || !dragK || !c || c.dataset.k === dragK) return;
+      e.preventDefault();
+      const src = document.querySelector('.vcard[data-k="' + dragK + '"]');
+      if (!src) return;
+      /* insert before/after by the pointer half of the target card */
+      const r = c.getBoundingClientRect();
+      const after = (e.clientY - r.top) > r.height / 2 || (e.clientX - r.left) > r.width / 2;
+      c.parentNode.insertBefore(src, after ? c.nextSibling : c);
+      localStorage.setItem('vorder',
+        JSON.stringify([...$('values').children].map(x => x.dataset.k)));
+    });
     function vApply(d) {
       for (const n of VFLOATS) { const e = $('vf_' + n); if (e && d[n] !== undefined) e.textContent = d[n] }
       for (const n of VUINTS) { const e = $('vf_' + n); if (e && d[n] !== undefined) e.textContent = d[n] }

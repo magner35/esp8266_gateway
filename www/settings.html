@@ -281,6 +281,7 @@
     const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
     const p2 = v => String(v).padStart(2, '0');
     /* manual refresh only: values never change under the user's fingers */
+    let retryT = 0;
     async function tick() {
       try {
         const r = await (await fetch('/api/info')).json();
@@ -291,6 +292,10 @@
         P = d.params; SECT = d.sections; dirty = new Set();
         render(d.count + '|' + d.params.length + '|' + d.sections.length + '|' + d.rc);
         applyFilter();
+        /* the tree is empty while a rescan/listing is in flight on the
+         * gateway - poll instead of demanding a wiring check */
+        if (!P.length && !retryT)
+          retryT = setTimeout(() => { retryT = 0; tick() }, 3000);
       } catch (e) { }
     }
     /* the per-section password field follows the active section */
@@ -354,7 +359,7 @@
     }
     let curTab = COMMON;                 /* active L2 tab name of the section */
     function render(fp) {
-      if (!P.length) { $('tabs').innerHTML = ''; $('subtabs').innerHTML = ''; $('sections').innerHTML = '<p>Прибор не найден: проверьте подключение UART и питание, затем перезапросите («Обновить»).</p>'; built = fp; return }
+      if (!P.length) { $('tabs').innerHTML = ''; $('subtabs').innerHTML = ''; $('sections').innerHTML = '<p>Опрос прибора… если через минуту пусто — проверьте подключение UART и питание, затем нажмите «Обновить».</p>'; built = fp; return }
       let h = '';
       SECT.forEach((s, k) => h += '<button class="' + (k === cur ? 'act' : '') + '" onclick="go(' + k + ')">' + esc(s) + '</button>');
       $('nav').innerHTML = h;
