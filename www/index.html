@@ -1,0 +1,252 @@
+<!doctype html>
+<html lang="ru">
+
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>SKE-02 Gateway</title>
+  <style>
+    body {
+      font: 14px/1.45 system-ui, sans-serif;
+      background: #14171c;
+      color: #d8dee9;
+      margin: 0;
+      padding: 12px
+    }
+
+    header {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: center;
+      margin-bottom: 10px
+    }
+
+    h1 {
+      font-size: 18px;
+      margin: 0 8px 0 0
+    }
+
+    .tag {
+      background: #2a3140;
+      border-radius: 6px;
+      padding: 2px 8px;
+      font-size: 12px;
+      white-space: nowrap
+    }
+
+    .ok {
+      background: #1d5c2f
+    }
+
+    .bad {
+      background: #6c2431
+    }
+
+    button {
+      background: #2a5bdb;
+      color: #fff;
+      border: 0;
+      border-radius: 6px;
+      padding: 5px 12px;
+      cursor: pointer;
+      font-size: 13px
+    }
+
+    button.warn {
+      background: #a23b2e
+    }
+
+    #debug {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      align-items: center;
+      margin: 0 0 8px 0;
+      padding: 4px 8px;
+      border: 1px dashed #39414f;
+      border-radius: 8px;
+      color: #8b94a7;
+      font-size: 12px
+    }
+
+    #debug .tag {
+      background: transparent;
+      border: 1px solid #2a3140;
+      padding: 1px 6px
+    }
+
+    #debug button {
+      font-size: 12px;
+      padding: 4px 10px
+    }
+
+    #values {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(168px, 1fr));
+      gap: 8px;
+      margin: 0 0 10px 0
+    }
+
+    .vcard {
+      background: #1b202a;
+      border: 1px solid #2a3140;
+      border-radius: 8px;
+      padding: 8px 12px
+    }
+
+    .vname {
+      color: #8b94a7;
+      font-size: 11px
+    }
+
+    .vval {
+      font-family: ui-monospace, Consolas, monospace;
+      font-size: 17px;
+      white-space: nowrap
+    }
+
+    .vcard.wide {
+      grid-column: span 2
+    }
+
+    .vcard.chart {
+      grid-column: 1/-1
+    }
+
+    .vcard.chart canvas {
+      width: 100%;
+      height: 120px;
+      display: block
+    }
+
+    .bit {
+      display: inline-block;
+      font-size: 10px;
+      padding: 1px 7px;
+      border-radius: 9px;
+      margin: 1px;
+      background: #232a38;
+      color: #565f6e
+    }
+
+    .bit.on {
+      background: #1d5c2f;
+      color: #d8dee9
+    }
+  </style>
+</head>
+
+<body>
+  <header>
+    <h1>SKE-02 Gateway</h1>
+    <span id="link" class="tag">…</span><span id="fw" class="tag"></span>
+    <a href="/settings"><button>&#9881; Настройки</button></a>
+    <button class="warn" onclick="rebootDev()">Перезагрузить прибор</button>
+    <a href="/wifi"><button>Wi-Fi</button></a>
+  </header>
+  <div id="values"></div>
+  <div id="debug">
+    отладочная панель
+    <button onclick="rescan()">Пересканировать</button>
+    <span class="tag" id="ip"></span><span class="tag" id="rss"></span>
+    <span class="tag" id="upt"></span><span class="tag" id="heap"></span>
+  </div>
+  <script>
+    const $ = i => document.getElementById(i);
+    function hms(t) { const s = t % 60, m = (t / 60 | 0) % 60, h = t / 3600 | 0; return h ? h + 'ч ' + m + 'м' : m ? m + 'м ' + s + 'с' : s + 'с' }
+    /* live values window: MeterData_t fields, names as the struct members;
+     * bitwise members render as FSETPOINT_/FSTATUS_/FISR_ flag chips */
+    const FLAGS = {
+      setpoint: ['RATEQMAX', 'RATEHIGH', 'RATELOW', 'FLOW', 'TOTAL', 'GTOTAL', 'BATCH', 'PREEMPTION'],
+      status: ['ACCESERROR', 'BATCHER_TIMEOUT', 'BATCHER_PAUSE', 'BATCHER_FINISH', 'RTCERROR', 'RAMERROR', 'REVERSE', 'LOGFULL'],
+      isr: ['DOUT0', 'DOUT1', 'DOUT2', 'BUZZER', 'HIGHFREQ', 'LOWFREQ', 'DUTY', 'PHASE']
+    };
+    const VFLOATS = ['frequency', 'rate_raw', 'rate_fast', 'rateMLPM', 'rate', 'total_plus', 'total_minus', 'total', 'total_sum', 'totalml_plus', 'totalml_minus', 'gtotal', 'gtotalml', 'kf_value', 'batch'];
+    const VUINTS = ['pulses_packet', 'pulses'];
+    let vBuilt = false;
+    /* rate history: ring of the last 600 s (the values poll is 1 Hz) */
+    const RATE_N = 600;
+    let rateHist = [], rateMin = 0, rateMax = 1;
+    function ratePush(v) {
+      rateHist.push(v);
+      if (rateHist.length > RATE_N) rateHist.shift();
+    }
+    function rateDraw() {
+      const cv = $('rateChart'); if (!cv) return;
+      const dpr = window.devicePixelRatio || 1;
+      const w = cv.offsetWidth, h = 120;
+      if (cv.width !== w * dpr || cv.height !== h * dpr) { cv.width = w * dpr; cv.height = h * dpr }
+      const g = cv.getContext('2d');
+      g.setTransform(dpr, 0, 0, dpr, 0, 0);
+      g.clearRect(0, 0, w, h);
+      const n = rateHist.length;
+      g.strokeStyle = '#2a3140'; g.lineWidth = 1;
+      for (let k = 1; k < 4; k++) { const y = h * k / 4; g.beginPath(); g.moveTo(0, y); g.lineTo(w, y); g.stroke() }
+      if (n < 2) { g.fillStyle = '#8b94a7'; g.font = '12px system-ui'; g.fillText('накопление данных…', 8, h / 2); return }
+      let lo = Infinity, hi = -Infinity;
+      for (const v of rateHist) { if (v < lo) lo = v; if (v > hi) hi = v }
+      rateMin = lo; rateMax = hi;
+      if (hi - lo < 1e-9) { lo -= 0.5; hi += 0.5 }
+      const pad = (hi - lo) * 0.08; lo -= pad; hi += pad;
+      const X = i => w * i / (RATE_N - 1), Y = v => h - 2 - (v - lo) / (hi - lo) * (h - 4);
+      g.beginPath();
+      const off = RATE_N - n; /* anchor right so the chart scrolls */
+      for (let i = 0; i < n; i++) { const x = X(off + i), y = Y(rateHist[i]); i ? g.lineTo(x, y) : g.moveTo(x, y) }
+      g.strokeStyle = '#7aa2f7'; g.lineWidth = 1.5; g.stroke();
+      g.lineTo(X(RATE_N - 1), h); g.lineTo(X(off), h); g.closePath();
+      g.fillStyle = 'rgba(122,162,247,0.15)'; g.fill();
+      const last = rateHist[n - 1];
+      g.fillStyle = '#d8dee9'; g.font = '12px ui-monospace,Consolas,monospace';
+      g.fillText(last.toFixed(3), 8, 12);
+      g.fillStyle = '#8b94a7';
+      g.fillText('max ' + (rateMax).toFixed(3), w - 86, 12);
+      g.fillText('min ' + (rateMin).toFixed(3), w - 86, h - 4);
+    }
+    window.addEventListener('resize', rateDraw);
+    function vBuild() {
+      let h = '<div class="vcard chart"><div class="vname">rate, последние 10 мин</div><canvas id="rateChart"></canvas></div>';
+      for (const n of VFLOATS) h += '<div class="vcard"><div class="vname">' + n + '</div><div class="vval" id="vf_' + n + '">—</div></div>';
+      for (const n of VUINTS) h += '<div class="vcard"><div class="vname">' + n + '</div><div class="vval" id="vf_' + n + '">—</div></div>';
+      for (const n in FLAGS) {
+        h += '<div class="vcard wide"><div class="vname">' + n + '</div><div id="vb_' + n + '">';
+        FLAGS[n].forEach((b, k) => h += '<span class="bit" id="vb_' + n + '_' + k + '">' + b + '</span>');
+        h += '</div></div>';
+      }
+      $('values').innerHTML = h; vBuilt = true; rateDraw();
+    }
+    function vApply(d) {
+      for (const n of VFLOATS) { const e = $('vf_' + n); if (e && d[n] !== undefined) e.textContent = d[n] }
+      for (const n of VUINTS) { const e = $('vf_' + n); if (e && d[n] !== undefined) e.textContent = d[n] }
+      for (const n in FLAGS) { const v = d[n] || 0; FLAGS[n].forEach((b, k) => { const e = $('vb_' + n + '_' + k); if (e) e.className = 'bit' + ((v >> k) & 1 ? ' on' : '') }) }
+    }
+    async function valuesTick() {
+      try {
+        const d = await (await fetch('/api/values')).json();
+        if (d.link !== undefined) {
+          $('link').textContent = d.link ? 'UART: связь есть' : 'UART: нет связи';
+          $('link').className = 'tag ' + (d.link ? 'ok' : 'bad');
+        }
+        if (!d.ok) { return }
+        if (!vBuilt) vBuild();
+        vApply(d);
+        if (d.rate !== undefined) { ratePush(d.rate); rateDraw() }
+      } catch (e) { }
+    }
+    setInterval(valuesTick, 200); valuesTick();
+    async function infoTick() {
+      try {
+        const r = await (await fetch('/api/info')).json();
+        $('fw').textContent = r.fw + ' · параметров: ' + r.count;
+        $('ip').textContent = r.ip;
+        $('rss').textContent = r.ap ? r.rssi + ' dBm' : r.ssid + ': ' + r.rssi + ' dBm';
+        $('upt').textContent = 'uptime ' + hms(r.uptime); $('heap').textContent = 'heap ' + (r.heap / 1024 | 0) + ' KiB';
+      } catch (e) { }
+    }
+    async function rescan() { await fetch('/api/rescan', { method: 'POST' }); infoTick() }
+    function rebootDev() { if (confirm('Перезагрузить прибор?')) fetch('/api/reboot', { method: 'POST' }) }
+    infoTick(); setInterval(infoTick, 5000);
+  </script>
+</body>
+
+</html>

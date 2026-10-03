@@ -125,6 +125,12 @@ static esp_err_t h_wifi(httpd_req_t *req)
     return ESP_OK;
 }
 
+static esp_err_t h_settings(httpd_req_t *req)
+{
+    send_page(req, PAGE_SETTINGS);
+    return ESP_OK;
+}
+
 static esp_err_t h_scan(httpd_req_t *req)
 {
     static TickType_t scanStart; /* when the current scan was kicked off */
@@ -629,6 +635,8 @@ void web_start(void)
     u = (httpd_uri_t){.uri = "/", .method = HTTP_GET, .handler = h_root};
     httpd_register_uri_handler(sServer, &u);
     u = (httpd_uri_t){.uri = "/wifi", .method = HTTP_GET, .handler = h_wifi};
+    httpd_register_uri_handler(sServer, &u);
+    u = (httpd_uri_t){.uri = "/settings", .method = HTTP_GET, .handler = h_settings};
     httpd_register_uri_handler(sServer, &u);
     u = (httpd_uri_t){.uri = "/scan", .method = HTTP_GET, .handler = h_scan};
     httpd_register_uri_handler(sServer, &u);
