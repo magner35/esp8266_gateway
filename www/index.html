@@ -164,6 +164,30 @@
     };
     const VFLOATS = ['frequency', 'rate_raw', 'rate_fast', 'rateMLPM', 'rate', 'total_plus', 'total_minus', 'total', 'total_sum', 'totalml_plus', 'totalml_minus', 'gtotal', 'gtotalml', 'kf_value', 'batch'];
     const VUINTS = ['pulses_packet', 'pulses'];
+    /* display labels only: the JSON keys stay the MeterData_t member
+     * names, so the 'm' data itself is untouched */
+    const LBL = {
+      frequency: 'Частота, Гц',
+      rate_raw: 'Расход (raw)',
+      rate_fast: 'Расход (fast)',
+      rateMLPM: 'Расход, мл/мин',
+      rate: 'Расход',
+      total_plus: 'Объём +',
+      total_minus: 'Объём −',
+      total: 'Объём',
+      total_sum: 'Объём (сумма)',
+      totalml_plus: 'Объём +, мл',
+      totalml_minus: 'Объём −, мл',
+      gtotal: 'Общий объём',
+      gtotalml: 'Общий объём, мл',
+      kf_value: 'K-фактор',
+      batch: 'Порция',
+      pulses_packet: 'Импульсы (пакет)',
+      pulses: 'Импульсы',
+      setpoint: 'Уставки (биты)',
+      status: 'Состояние (биты)',
+      isr: 'Флаги ISR (биты)'
+    };
     let vBuilt = false;
     /* rate history: ring of the last 600 s (the values poll is 1 Hz) */
     const RATE_N = 600;
@@ -205,11 +229,11 @@
     }
     window.addEventListener('resize', rateDraw);
     function vBuild() {
-      let h = '<div class="vcard chart"><div class="vname">rate, последние 10 мин</div><canvas id="rateChart"></canvas></div>';
-      for (const n of VFLOATS) h += '<div class="vcard"><div class="vname">' + n + '</div><div class="vval" id="vf_' + n + '">—</div></div>';
-      for (const n of VUINTS) h += '<div class="vcard"><div class="vname">' + n + '</div><div class="vval" id="vf_' + n + '">—</div></div>';
+      let h = '<div class="vcard chart"><div class="vname">Расход, последние 10 мин</div><canvas id="rateChart"></canvas></div>';
+      for (const n of VFLOATS) h += '<div class="vcard"><div class="vname">' + (LBL[n] || n) + '</div><div class="vval" id="vf_' + n + '">—</div></div>';
+      for (const n of VUINTS) h += '<div class="vcard"><div class="vname">' + (LBL[n] || n) + '</div><div class="vval" id="vf_' + n + '">—</div></div>';
       for (const n in FLAGS) {
-        h += '<div class="vcard wide"><div class="vname">' + n + '</div><div id="vb_' + n + '">';
+        h += '<div class="vcard wide"><div class="vname">' + (LBL[n] || n) + '</div><div id="vb_' + n + '">';
         FLAGS[n].forEach((b, k) => h += '<span class="bit" id="vb_' + n + '_' + k + '">' + b + '</span>');
         h += '</div></div>';
       }

@@ -321,6 +321,12 @@ void proto_value_text(const ProtoCtx *ctx, uint16_t id, char *buf, size_t cap)
         snprintf(buf, cap, "******");
         return;
     }
+    /* string values are kept as text in the option pool */
+    if (p->type == SKT_STRING && p->optPool)
+    {
+        snprintf(buf, cap, "%s", ctx->optPool + p->optPool - 1);
+        return;
+    }
     /* enum/bool values are shown as their option label, like on the LCD */
     if ((p->type == SKT_ENUM || p->type == SKT_BOOL) && p->optCnt)
     {
@@ -513,6 +519,35 @@ bool proto_input_to_raw(ProtoCtx *ctx, uint16_t id, const char *text,
  *         009 U8  View = 5 *           read only views end with " *"
  *         010 CMD  Run something       command item, no value
  */
+
+static void store_options(ProtoCtx *ctx, SkeParam *p, char *range);
+
+/*
+ * String params ("S": LCD-charset texts like the serial number) have no
+ * numeric payload - their value text lives in the option pool instead.
+ * Strings are always read only, short and few; a refresh rewrites the
+ * copy in place when it fits, otherwise appends a fresh one.
+ */
+static void store_string(ProtoCtx *ctx, SkeParam *p, const char *text)
+{
+    size_t len = strlen(text) + 1;
+    if (p->optPool)
+    {
+        char *old = ctx->optPool + p->optPool - 1;
+        size_t oldLen = strlen(old) + 1;
+        if (len <= oldLen)
+        {
+            memset(old, 0, oldLen);
+            memcpy(old, text, len - 1);
+            return;
+        }
+    }
+    if ((size_t)ctx->optPoolUsed + len > SKE_OPT_POOL)
+        return;
+    memcpy(ctx->optPool + ctx->optPoolUsed, text, len);
+    p->optPool = ctx->optPoolUsed + 1;
+    ctx->optPoolUsed = (uint16_t)(ctx->optPoolUsed + len);
+}
 
 static void store_options(ProtoCtx *ctx, SkeParam *p, char *range)
 {
@@ -785,13 +820,17 @@ void proto_parse_line(ProtoCtx *ctx, char *s)
     else
         p->readOnly = ro;
 
-    p->present = (proto_type_size(type) > 0);
+    p->present = (proto_type_size(type) > 0 || type == SKT_STRING);
+    if (type == SKT_STRING)
+        p->readOnly = true; /* LCD strings are never settable */
     if (!strncmp(valBuf, "******", 6))
         p->masked = true; /* password U32s are always shown masked */
     else
     {
         p->masked = false;
-        if (type == SKT_BOOL || type == SKT_ENUM)
+        if (type == SKT_STRING)
+            store_string(ctx, p, valBuf);
+        else if (type == SKT_BOOL || type == SKT_ENUM)
         {
             /* the display value is the option label: match it back to
              * the index through the (rusified) pool */

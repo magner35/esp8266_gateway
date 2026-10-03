@@ -161,6 +161,22 @@ int main(int argc, char **argv)
               ctx.params[46].value);
     }
 
+    /* "S" params: LCD-charset strings, always read only */
+    {
+        char s1[] = "      176 S  Seriiny \xe2\x84\x96 = 3425";
+        char s2[] = "      176 S  Seriiny \xe2\x84\x96 = 99999";
+        proto_parse_line(&ctx, s1);
+        CHECK(ctx.params[176].type == SKT_STRING && ctx.params[176].present,
+              "string type=%u present=%d", ctx.params[176].type,
+              (int)ctx.params[176].present);
+        CHECK(ctx.params[176].readOnly, "string not ro");
+        proto_value_text(&ctx, 176, buf, sizeof(buf));
+        CHECK(!strcmp(buf, "3425"), "string display='%s'", buf);
+        proto_parse_line(&ctx, s2); /* refresh with a longer text */
+        proto_value_text(&ctx, 176, buf, sizeof(buf));
+        CHECK(!strcmp(buf, "99999"), "string refresh='%s'", buf);
+    }
+
     /* console 's' value packing: TIME = HHMM, DATE = DDMMYY */
     proto_raw_to_cmd(SKT_TIME, 12UL * 3600 + 34 * 60, buf, sizeof(buf));
     CHECK(!strcmp(buf, "1234"), "time pack='%s'", buf);
