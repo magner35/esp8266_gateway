@@ -5,6 +5,7 @@
 
 #include <stdint.h>
 #include <stdbool.h>
+#include <stddef.h>
 
 typedef struct
 {
@@ -20,5 +21,9 @@ bool storage_save(const gw_settings_t *s);
 bool storage_load(gw_settings_t *s); /* false = blank/invalid, defaults */
 const gw_settings_t *storage_get(void);
 void storage_set_wifi(const char *ssid, const char *pass);
+
+/* widget layout blob: opaque JSON owned by the page, served verbatim */
+bool widgets_load(char *buf, size_t cap); /* false = not stored yet */
+bool widgets_store(const char *json, size_t len);
 
 #endif /* GW_STORAGE_H */

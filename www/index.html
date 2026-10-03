@@ -6,14 +6,30 @@
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>SKE-02 Gateway</title>
   <style>
+    /* ==================================================================
+     * STYLE MAP (index.html - главная страница мониторинга)
+     *   1. общие: body, header, h1, .tag/.ok/.bad, button, #debug
+     *   2. сетка виджетов: #values, .vcard (+ .wbar/.wbit/.chart/.wide),
+     *      .vname (подпись), .vval (число)
+     *   3. режим правки раскладки: body.edit*, #btnEdit.act
+     *   4. панель "Виджеты": #wpanel*, #btnW.act, .flash
+     *   5. виджет БАРГРАФ (.vcard.wbar): .hbar (дорожка), .hfill
+     *      (рваная заливка), .bpct (проценты)
+     *   6. виджет БИТ (.vcard.wbit): .bitlamp (лампа)
+     * ================================================================== */
+
+    /* --- 1. общие ---------------------------------------------------- */
+
     body {
       font: 13px/1.45 system-ui, sans-serif;
-      background: #14171c;
-      color: #d8dee9;
+      /* background: #14171c; */
+      background: #000000;       /* цвет фона всей страницы */
+      color: #d8dee9;             /* основной цвет текста */
       margin: 0;
-      padding: 12px
+      padding: 12px               /* внешний отступ страницы */
     }
 
+    /* шапка: заголовок, метки связи, кнопки (Раскладка/Виджеты/...) */
     header {
       display: flex;
       flex-wrap: wrap;
@@ -23,40 +39,36 @@
     }
 
     h1 {
-      font-size: 18px;
+      font-size: 18px;            /* размер заголовка "SKE-02 Gateway" */
       margin: 0 8px 0 0
     }
 
+    /* маленькая метка-пилюля в шапке (UART: связь, fw, ip...) */
     .tag {
-      background: #2a3140;
+      background: #2a3140;        /* фон метки */
       border-radius: 4px;
       padding: 2px 8px;
       font-size: 12px;
       white-space: nowrap
     }
 
-    .ok {
-      background: #1d5c2f
-    }
+    .ok { background: #1d5c2f }   /* метка связи: зелёный (связь есть) */
+    .bad { background: #6c2431 }  /* метка связи: красный (нет связи) */
 
-    .bad {
-      background: #6c2431
-    }
-
+    /* все обычные кнопки */
     button {
-      background: #2a5bdb;
+      background: #2a5bdb;        /* синий фон кнопки */
       color: #fff;
       border: 0;
       border-radius: 4px;
-      padding: 5px 5px;
+      padding: 5px 5px;           /* паддинг кнопки (верт гориз) */
       cursor: pointer;
       font-size: 12px
     }
 
-    button.warn {
-      background: #a23b2e
-    }
+    button.warn { background: #a23b2e } /* красная кнопка (Перезагрузить, удалить) */
 
+    /* отладочная панель внизу (ip/rssi/uptime/heap) */
     #debug {
       display: flex;
       flex-wrap: wrap;
@@ -81,98 +93,95 @@
       padding: 4px 4px
     }
 
+    /* --- 2. сетка виджетов ------------------------------------------- */
+
+    /* контейнер всех карточек-виджетов (#values в body) */
     #values {
       display: grid;
-      /* 10 chars of 15px monospace (~90px) + card padding + border */
-      grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
-      gap: 6px;
+      /* half-width tracks: a normal card spans 2 tracks (a full cell,
+       * 10 chars of 15px monospace), a bit card spans 1 -> two bits
+       * pack into one value-card slot */
+      grid-template-columns: repeat(auto-fill, minmax(60px, 1fr));
+      gap: 6px;                   /* расстояние между карточками */
       margin: 0 0 10px 0
     }
 
+    /* обычная карточка и карточка барграфа занимают полный слот */
+    .vcard,
+    .vcard.wbar {
+      grid-column: span 2
+    }
+
+    /* карточка виджета общего вида (значение, расход, объём...) */
     .vcard {
-      background: #1b202a;
-      border: 2px solid #2a3140;
+      background: #1b202a;        /* фон карточки */
+      border: 2px solid #2a3140;  /* рамка карточки */
       border-radius: 4px;
       padding: 2px 4px   /* vertical horizontal */
     }
 
+    /* подпись (имя параметра) внутри карточки */
     .vname {
-      color: #8b94a7;
-      font-size: 11px
+      color: #8b94a7;             /* серый цвет подписи */
+      font-size: 11px             /* размер шрифта подписи */
     }
 
+    /* числовое значение внутри карточки */
     .vval {
       font-family: ui-monospace, Consolas, monospace;
-      font-size: 16px;
+      font-size: 16px;            /* размер цифр значения */
       white-space: nowrap
     }
 
-    .vcard.wide {
-      grid-column: span 2
-    }
+    .vcard.wide { grid-column: span 4 }   /* широкая карточка (2 слота) */
 
+    /* карточка графика расхода - на всю ширину строки */
     .vcard.chart {
       grid-column: 1/-1
     }
 
+    /* canvas самого графика внутри карточки */
     .vcard.chart canvas {
       width: 100%;
-      height: 120px;
+      height: 120px;              /* высота графика */
       display: block
     }
 
-    .bit {
-      display: inline-block;
-      font-size: 10px;
-      padding: 1px 7px;
-      border-radius: 9px;
-      margin: 1px;
-      background: #232a38;
-      color: #565f6e
-    }
+    /* --- 3. режим правки раскладки ("✎ Раскладка" включает body.edit) - */
 
-    .bit.on {
-      background: #1d5c2f;
-      color: #d8dee9
-    }
-
-    #btnEdit.act {
-      background: #1d5c2f
-    }
+    #btnEdit.act { background: #1d5c2f }  /* кнопка Раскладка в активном режиме */
 
     body.edit .vcard {
-      outline: 1px dashed #39414f;
+      outline: 1px dashed #39414f; /* перетаскиваемая карточка: пунктир */
       cursor: grab
     }
 
-    body.edit .vcard.dragging {
+    body.edit .vcard.dragging {   /* карточка в момент перетаскивания */
       opacity: .35;
       cursor: grabbing
     }
 
-    body.edit #values {
-      user-select: none
-    }
+    body.edit #values { user-select: none }  /* не выделять текст при драге */
 
-    #btnW.act {
-      background: #1d5c2f
-    }
+    /* --- 4. панель "Виджеты" ----------------------------------------- */
 
+    #btnW.act { background: #1d5c2f }  /* кнопка Виджеты в активном режиме */
+
+    /* панель конфигурации виджетов (список + кнопка Сохранить) */
     #wpanel {
-      background: #1b202a;
+      background: #1b202a;        /* фон панели */
       border: 1px solid #2a3140;
       border-radius: 4px;
       padding: 10px 12px;
       margin: 0 0 10px 0;
       display: flex;
       flex-direction: column;
-      gap: 6px
+      gap: 6px                    /* расстояние между строками панели */
     }
 
-    #wpanel[hidden] {
-      display: none
-    }
+    #wpanel[hidden] { display: none }  /* выключенный атрибут hidden сильнее display:flex */
 
+    /* строка панели: чекбокс+имя виджета, комбобоксы, кнопки */
     #wpanel .wrow {
       display: flex;
       flex-wrap: wrap;
@@ -181,15 +190,25 @@
       font-size: 13px
     }
 
+    /* поля min/max в строке виджета */
     #wpanel input[type=number] {
       width: 80px
     }
 
+    /* служебные сообщения панели ("не сохранено") */
+    .flash {
+      color: #7aa2f7;
+      font-size: 12px
+    }
+
+    /* --- 5. виджет БАРГРАФ (t:'bar', .vcard.wbar) --------------------- */
+
+    /* дорожка барграфа: тёмный фон, заливка едет внутри */
     .hbar {
-      background: #0e1116;
+      background: #0e1116;        /* цвет пустой дорожки */
       border: 1px solid #39414f;
       border-radius: 2px;
-      height: 14px;
+      height: 14px;               /* высота дорожки (в карточке ниже - 16) */
       margin-top: 6px;
       overflow: hidden
     }
@@ -198,9 +217,9 @@
     .hfill {
       height: 100%;
       width: 0;
-      transition: width .25s ease-out;
+      transition: width .25s ease-out;   /* плавность движения заливки */
       /* green torn stripe: wide dashes, hairline gaps */
-      background: repeating-linear-gradient(90deg, #3fbf5f 0 10px, transparent 10px 11px)
+      background: repeating-linear-gradient(90deg, #3fbf5f 0 10px, transparent 10px 11px) /* цвет штриха */
     }
 
     /* bar card: label + the stripe, 3px horizontal padding */
@@ -211,6 +230,7 @@
       padding: 3px
     }
 
+    /* дорожка внутри карточки барграфа - чуть выше */
     .vcard.wbar .hbar {
       height: 16px;
       margin-top: 0
@@ -224,26 +244,40 @@
       font-family: ui-monospace, Consolas, monospace
     }
 
-    /* bit-state card: label wraps on spaces, lamp = the active color */
+    /* --- 6. виджет БИТ (t:'bit', .vcard.wbit) ------------------------- */
+
+    /* bit-state card: HALF a value-cell wide (span 1 of the 2-track
+     * cell) and compact, so two of them pack into one slot; the label
+     * wraps on spaces, the lamp takes the chosen active color */
     .vcard.wbit {
+      grid-column: span 1;
       display: flex;
       flex-direction: column;
+      justify-content: space-between;
       gap: 2px;
-      padding: 3px 5px
+      padding: 3px 4px;
+      min-height: 28px            /* минимальная высота карточки бита */
     }
 
+    /* подпись карточки бита: мелкая, переносится по пробелам */
     .vcard.wbit .vname {
-      white-space: normal
+      white-space: normal;
+      font-size: 10px;
+      line-height: 1.15;
+      color: #8b94a7;
+      overflow: hidden
     }
 
+    /* лампа состояния бита (цвет активного уровня задаёт виджет) */
     .bitlamp {
-      height: 16px;
+      height: 16px;               /* высота лампы */
       border: 1px solid #39414f;
       border-radius: 6px;
-      background: #0e1116;
-      transition: background .15s
+      background: #0e1116;   /* inactive level - keep in sync with BITOFF */
+      transition: background .15s  /* плавность включения */
     }
 
+    /* включённая лампа слегка светится (цвет = w.col виджета) */
     .bitlamp.on {
       box-shadow: 0 0 6px 0 currentColor
     }
@@ -382,6 +416,7 @@
      * name and wraps on spaces (narrow cards).
      */
     const BITCOL = ['#1d5c2f', '#a23b2e', '#2a5bdb', '#e3b341'];
+    const BITOFF = '#14171c';  /* lamp color of the INACTIVE level */
     let vBuilt = false;
     /* rate history: ring of the last 600 s (the values poll is 1 Hz) */
     const RATE_N = 600;
@@ -433,7 +468,7 @@
       const w = [{ k: 'rateChart', t: 'chart', src: 'rate', on: true },
       { k: 'bar_qmax', t: 'bar', mode: 'qmax', on: true }];
       for (const n of VFLOATS.concat(VUINTS)) w.push({ k: n, t: 'val', src: n, on: true });
-      for (const n in FLAGS) w.push({ k: 'bits_' + n, t: 'bits', src: n, on: true });
+      /* old group bit widgets ("bits_*") are gone: single-bit lamps only */
       for (const id in CUSTOM) w.push({ k: id, t: 'cval', on: CUSTOM[id].on !== false });
       w.push({ k: 'flow_l_m', t: 'flow', vol: 'l', time: 'm', on: true });
       w.push({ k: 'vol_l', t: 'vol', vol: 'l', on: true });
@@ -442,7 +477,43 @@
       return w;
     }
     let widgets = null;
-    function saveWidgets() { localStorage.setItem('widgets', JSON.stringify(widgets)) }
+    /*
+     * Persistence: localStorage is the instant cache, the gateway NVS
+     * (via /api/widgets) is the source of truth. rev bumps on every
+     * "Сохранить"; a newer server rev wins on the next page load.
+     */
+    let wRev = parseInt(localStorage.getItem('wrev')) || 0;
+    let wDirty = false;
+    function saveWidgets() {
+      localStorage.setItem('widgets', JSON.stringify(widgets));
+      wDirty = true;
+      const m = $('wmsg'); if (m) m.textContent = 'не сохранено';
+    }
+    async function wSave() {
+      try {
+        const body = JSON.stringify({ rev: wRev + 1, cfg: widgets });
+        const r = await (await fetch('/api/widgets', { method: 'POST', body })).json();
+        if (!r.ok) { alert('шлюз не смог записать конфиг'); return }
+        wRev++; localStorage.setItem('wrev', wRev); wDirty = false;
+        const m = $('wmsg'); if (m) m.textContent = 'сохранено (rev ' + wRev + ')';
+      } catch (e) { alert('нет ответа от шлюза') }
+    }
+    async function wSync() {
+      try {
+        const d = await (await fetch('/api/widgets')).json();
+        if (d.cfg && Array.isArray(d.cfg) && d.rev > wRev) {
+          widgets = d.cfg; wRev = d.rev;
+          localStorage.setItem('widgets', JSON.stringify(widgets));
+          localStorage.setItem('wrev', wRev);
+          vBuild();
+        } else if (d.rev === 0 && widgets.length && !wDirty) {
+          /* first meet with a blank gateway: migrate the local config */
+          const body = JSON.stringify({ rev: 1, cfg: widgets });
+          const r = await (await fetch('/api/widgets', { method: 'POST', body })).json();
+          if (r.ok) { wRev = 1; localStorage.setItem('wrev', 1) }
+        }
+      } catch (e) { }
+    }
     function loadWidgets() {
       try { widgets = JSON.parse(localStorage.getItem('widgets')) } catch (e) { widgets = null }
       if (!Array.isArray(widgets)) {
@@ -457,7 +528,7 @@
       }
       /* drop configs whose source disappeared, add new data keys */
       widgets = widgets.filter(w => w.t === 'bar' || w.t === 'flow' || w.t === 'vol' || w.t === 'tot' || w.t === 'bit' || (w.t === 'cval' && CUSTOM[w.k]) ||
-        (w.src && (w.src === 'rate' || VFLOATS.includes(w.src) || VUINTS.includes(w.src) || w.src in FLAGS)));
+        (w.src && (w.src === 'rate' || VFLOATS.includes(w.src) || VUINTS.includes(w.src))));
       for (const w of widgets) if (w.t === 'bar' && !BARM[w.mode]) w.mode = 'qmax';
       for (const w of widgets) if ((w.t === 'vol' || w.t === 'tot') && !VOLU[w.vol]) w.vol = 'l';
       for (const w of widgets) if (w.t === 'tot' && !TOTM[w.m]) w.m = 'plus';
@@ -498,11 +569,6 @@
         return '<div class="vcard" data-k="' + w.k + '"><div class="vname">' + widgetName(w) + '</div><div class="vval" id="vtv_' + w.k + '">—</div></div>';
       if (w.t === 'bit') /* single flag bit as a lamp, label wraps */
         return '<div class="vcard wbit" data-k="' + w.k + '"><div class="vname">' + widgetName(w) + '</div><div class="bitlamp" id="bl_' + w.k + '"></div></div>';
-      if (w.t === 'bits') {
-        let inner = '';
-        FLAGS[w.src].forEach((b, k) => inner += '<span class="bit" id="vb_' + w.src + '_' + k + '" title="' + b + '">' + (FLBL[b] || b) + '</span>');
-        return '<div class="vcard wide" data-k="' + w.k + '"><div class="vname">' + (LBL[w.src] || w.src) + '</div><div id="vb_' + w.src + '">' + inner + '</div></div>';
-      }
       /* bar: torn-stripe progress bar clamped to min..max, no value text */
       return '<div class="vcard wbar" data-k="' + w.k + '"><div class="vname">' + widgetName(w).replace('Бар: ', '') + '<span class="bpct" id="bp_' + w.k + '"></span></div><div class="hbar"><div class="hfill" id="hf_' + w.k + '"></div></div></div>';
     }
@@ -564,15 +630,18 @@
     }
     function renderPanel() {
       const p = $('wlist'); if (!p) return;
-      let h = '';
+      let h = '<div class="wrow"><button id="btnWsave" onclick="wSave()">Сохранить в шлюз</button>' +
+        '<span id="wmsg" class="flash">' + (wDirty ? 'не сохранено' : 'сохранено (rev ' + wRev + ')') + '</span></div>';
       widgets.forEach((w, i) => {
         h += '<div class="wrow"><label><input type="checkbox"' + (w.on ? ' checked' : '') +
           ' onchange="wToggle(' + i + ',this.checked)"> ' + widgetName(w) + '</label>';
+        /* ── БАРГРАФ ('bar'): источник-режим; 100% = уставка режима ── */
         if (w.t === 'bar') {
           let sb = '<select onchange="wFlow(' + i + ',\'mode\',this.value)">';
           for (const m in BARM) sb += '<option value="' + m + '"' + (w.mode === m ? ' selected' : '') + '>' + BARM[m].n + '</option>';
           h += ' ' + sb + '</select> <button class="warn" onclick="wDel(' + i + ')">удалить</button>';
         }
+        /* ── РАСХОД ('flow'): единицы объёма + времени, вход rateMLPM ── */
         if (w.t === 'flow') {
           const sel = (which, map, names) => {
             let s = '<select onchange="wFlow(' + i + ',\'' + which + '\',this.value)">';
@@ -582,12 +651,14 @@
           h += ' объём ' + sel('vol', VOLU, VOLN) + ' время ' + sel('time', TIMU, TIMN) +
             ' <button class="warn" onclick="wDel(' + i + ')">удалить</button>';
         }
+        /* ── ОБЩИЙ ('vol'): единица объёма, вход gtotalml ── */
         if (w.t === 'vol') {
           let s = '<select onchange="wFlow(' + i + ',\'vol\',this.value)">';
           for (const u in VOLU) s += '<option value="' + u + '"' + (w.vol === u ? ' selected' : '') + '>' + VOLN[u] + '</option>';
           h += ' объём ' + s + '</select>' +
             ' <button class="warn" onclick="wDel(' + i + ')">удалить</button>';
         }
+        /* ── ОБЪЁМ ('tot'): комбинация totalml_plus/minus + единица ── */
         if (w.t === 'tot') {
           let sm = '<select onchange="wFlow(' + i + ',\'m\',this.value)">';
           for (const u in TOTM) sm += '<option value="' + u + '"' + (w.m === u ? ' selected' : '') + '>' + TOTM[u].n + '</option>';
@@ -596,6 +667,7 @@
           h += ' ' + sm + '</select> ' + sv + '</select>' +
             ' <button class="warn" onclick="wDel(' + i + ')">удалить</button>';
         }
+        /* ── БИТ ('bit'): группа флагов + номер бита + цвет активного уровня ── */
         if (w.t === 'bit') {
           let sg = '<select onchange="wBit(' + i + ',\'src\',this.value)">';
           for (const g in FLAGS) sg += '<option value="' + g + '"' + (w.src === g ? ' selected' : '') + '>' + (LBL[g] || g) + '</option>';
@@ -608,23 +680,24 @@
         h += '</div>';
       });
       const opts = VFLOATS.map(n => '<option value="' + n + '">' + (LBL[n] || n) + '</option>').join('');
-      h += '<div class="wrow">＋ барграф <select id="nbMode">';
+      /* строки создания новых виджетов: ＋ <тип> */
+      h += '<div class="wrow">＋ барграф <select id="nbMode">';   /* 'bar' */
       for (const m in BARM) h += '<option value="' + m + '"' + (m === 'qmax' ? ' selected' : '') + '>' + BARM[m].n + '</option>';
       h += '</select> <button onclick="wAddBar()">Добавить</button></div>';
-      h += '<div class="wrow">＋ расход <select id="nwVol">' +
+      h += '<div class="wrow">＋ расход <select id="nwVol">' +      /* 'flow' */
         '<option value="ml">мл</option><option value="l" selected>л</option><option value="m3">м³</option></select>' +
         ' / <select id="nwTime"><option value="s">с</option><option value="m" selected>мин</option>' +
         '<option value="h">ч</option><option value="d">сут</option></select>' +
         ' <button onclick="wAddFlow()">Добавить</button></div>';
-      h += '<div class="wrow">＋ общий объём <select id="nvVol">' +
+      h += '<div class="wrow">＋ общий объём <select id="nvVol">' + /* 'vol' */
         '<option value="ml">мл</option><option value="l" selected>л</option><option value="m3">м³</option></select>' +
         ' <button onclick="wAddVol()">Добавить</button></div>';
-      h += '<div class="wrow">＋ объём <select id="ntMode">' +
+      h += '<div class="wrow">＋ объём <select id="ntMode">' +      /* 'tot' */
         '<option value="plus" selected>Объём +</option><option value="minus">Объём −</option>' +
         '<option value="diff">Объём (+−)</option><option value="sum">Объём (сумма)</option></select>' +
         ' <select id="ntVol"><option value="ml">мл</option><option value="l" selected>л</option><option value="m3">м³</option></select>' +
         ' <button onclick="wAddTot()">Добавить</button></div>';
-      h += '<div class="wrow">＋ бит <select id="nbiSrc">';
+      h += '<div class="wrow">＋ бит <select id="nbiSrc">';         /* 'bit' */
       for (const g in FLAGS) h += '<option value="' + g + '"' + (g === 'setpoint' ? ' selected' : '') + '>' + (LBL[g] || g) + '</option>';
       h += '</select> <select id="nbiBit"></select>' +
         ' цвет <input id="nbiCol" type="color" value="' + BITCOL[0] + '">' +
@@ -635,26 +708,28 @@
         sel.innerHTML = FLAGS[g].map((f, bi) => '<option value="' + bi + '">' + (FLBL[f] || f) + '</option>').join('');
       }
     }
+    /* общие операции панели: показ, правка поля, удаление */
     function wToggle(i, on) { widgets[i].on = on; saveWidgets(); vBuild() }
     function wFlow(i, which, v) { widgets[i][which] = v; saveWidgets(); vBuild() }
     function wDel(i) { widgets.splice(i, 1); saveWidgets(); vBuild() }
-    function wAddBar() {
+    /* создатели новых виджетов, по одному на тип */
+    function wAddBar() {           /* 'bar'  — барграф */
       widgets.push({ k: 'bar' + Date.now(), t: 'bar', mode: $('nbMode').value, on: true });
       saveWidgets(); vBuild();
     }
-    function wAddFlow() {
+    function wAddFlow() {          /* 'flow' — расход */
       widgets.push({ k: 'flow' + Date.now(), t: 'flow', vol: $('nwVol').value, time: $('nwTime').value, on: true });
       saveWidgets(); vBuild();
     }
-    function wAddVol() {
+    function wAddVol() {           /* 'vol'  — общий объём */
       widgets.push({ k: 'vol' + Date.now(), t: 'vol', vol: $('nvVol').value, on: true });
       saveWidgets(); vBuild();
     }
-    function wAddTot() {
+    function wAddTot() {           /* 'tot'  — объём (+/−/разность/сумма) */
       widgets.push({ k: 'tot' + Date.now(), t: 'tot', m: $('ntMode').value, vol: $('ntVol').value, on: true });
       saveWidgets(); vBuild();
     }
-    function wAddBit() {
+    function wAddBit() {           /* 'bit'  — лампа бита */
       widgets.push({ k: 'bit' + Date.now(), t: 'bit', src: $('nbiSrc').value,
                      b: parseInt($('nbiBit').value) || 0, col: $('nbiCol').value, on: true });
       saveWidgets(); vBuild();
@@ -670,11 +745,12 @@
       sel.innerHTML = FLAGS[e.target.value]
         .map((f, bi) => '<option value="' + bi + '">' + (FLBL[f] || f) + '</option>').join('');
     });
+    /* vApply: раз в кадр 'm' обновляет карточки всех типов виджетов */
     function vApply(d) {
       const barLo = vApply.lo || (vApply.lo = {}), barHi = vApply.hi || (vApply.hi = {});
       for (const n of VFLOATS) { const e = $('vf_' + n); if (e && d[n] !== undefined) e.textContent = d[n] }
       for (const n of VUINTS) { const e = $('vf_' + n); if (e && d[n] !== undefined) e.textContent = d[n] }
-      for (const n in FLAGS) { const v = d[n] || 0; FLAGS[n].forEach((b, k) => { const e = $('vb_' + n + '_' + k); if (e) e.className = 'bit' + ((v >> k) & 1 ? ' on' : '') }) }
+      /* 'cval' КАСТОМНЫЕ: формула calc(d, MY_CONST) из блока CUSTOM */
       for (const w of widgets || []) {
         if (w.t !== 'cval' || !w.on) continue;
         const c = CUSTOM[w.k], e = $('vfc_' + w.k);
@@ -685,32 +761,32 @@
           if (isFinite(v)) e.textContent = String(v)
         }
       }
-      /* flow widgets: rateMLPM (ml/min) -> chosen volume / time units */
+      /* 'flow' РАСХОД: rateMLPM (мл/мин) -> выбранные единицы объёма/времени */
       for (const w of widgets || []) {
         if (w.t !== 'flow' || !w.on) continue;
         const e = $('vfl_' + w.k);
         if (e && d.rateMLPM !== undefined)
           e.textContent = Number((d.rateMLPM / VOLU[w.vol] * TIMU[w.time]).toPrecision(4))
       }
-      /* volume widgets: gtotalml -> chosen volume unit, no time factor */
+      /* 'vol' ОБЩИЙ: gtotalml -> единица объёма, без времени */
       for (const w of widgets || []) {
         if (w.t !== 'vol' || !w.on) continue;
         const e = $('vvv_' + w.k);
         if (e && d.gtotalml !== undefined)
           e.textContent = Number((d.gtotalml / VOLU[w.vol]).toPrecision(4))
       }
-      /* bit widgets: the lamp lights with the chosen color when the bit is 1 */
+      /* 'bit' БИТ: лампа зажигается выбранным цветом при бите = 1 */
       for (const w of widgets || []) {
         if (w.t !== 'bit' || !w.on) continue;
         const e = $('bl_' + w.k);
         if (e && d[w.src] !== undefined) {
           const on = (d[w.src] >> w.b) & 1;
-          e.style.background = on ? w.col : '#0e1116';
+          e.style.background = on ? w.col : BITOFF;
           e.style.color = w.col;               /* currentColor glow */
           e.classList.toggle('on', !!on);
         }
       }
-      /* tot widgets: totalml_plus/minus combination -> volume unit */
+      /* 'tot' ОБЪЁМ: комбинация totalml_plus/minus -> единица объёма */
       for (const w of widgets || []) {
         if (w.t !== 'tot' || !w.on) continue;
         const e = $('vtv_' + w.k), m = TOTM[w.m];
@@ -719,6 +795,7 @@
           if (isFinite(v)) e.textContent = Number(v.toPrecision(4))
         }
       }
+      /* 'bar' БАРГРАФ: заполнение = значение / уставка режима (100%) */
       for (const w of widgets || []) {
         if (w.t !== 'bar' || !w.on) continue;
         const m = BARM[w.mode], f = $('hf_' + w.k);
@@ -779,6 +856,7 @@
       } catch (e) { }
     }
     paramsTick(); setInterval(paramsTick, 30000);
+    wSync();
     async function rescan() { await fetch('/api/rescan', { method: 'POST' }); infoTick(); paramsTick() }
     function rebootDev() { if (confirm('Перезагрузить прибор?')) fetch('/api/reboot', { method: 'POST' }) }
     infoTick(); setInterval(infoTick, 5000);

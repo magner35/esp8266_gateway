@@ -589,6 +589,59 @@ static esp_err_t h_api_reboot(httpd_req_t *req)
     return ESP_OK;
 }
 
+/* the widget layout: {"rev":N,"cfg":[...]} stored in NVS verbatim.
+ * The 4 KB buffers are heap-only: keeping them static would eat 8 KB
+ * of the ESP8266 DRAM for two rarely used endpoints. */
+static esp_err_t h_api_widgets_get(httpd_req_t *req)
+{
+    char *buf = malloc(4200);
+    httpd_resp_set_type(req, "application/json");
+    if (!buf)
+    {
+        httpd_resp_set_status(req, "500 Internal Server Error");
+        httpd_resp_send(req, "{\"ok\":false}", 12);
+        return ESP_FAIL;
+    }
+    if (widgets_load(buf, 4200))
+        httpd_resp_send(req, buf, strlen(buf));
+    else
+        httpd_resp_send(req, "{\"rev\":0,\"cfg\":null}", 20);
+    free(buf);
+    return ESP_OK;
+}
+
+static esp_err_t h_api_widgets_set(httpd_req_t *req)
+{
+    char *buf = malloc(4200);
+    int len;
+    httpd_resp_set_type(req, "application/json");
+    if (!buf)
+    {
+        httpd_resp_set_status(req, "500 Internal Server Error");
+        httpd_resp_send(req, "{\"ok\":false}", 12);
+        return ESP_FAIL;
+    }
+    len = httpd_req_recv(req, buf, 4199);
+    if (len <= 2 || buf[0] != '{')
+    {
+        free(buf);
+        httpd_resp_set_status(req, "400 Bad Request");
+        httpd_resp_send(req, "{\"ok\":false}", 12);
+        return ESP_FAIL;
+    }
+    buf[len] = 0;
+    if (!widgets_store(buf, (size_t)len))
+    {
+        free(buf);
+        httpd_resp_set_status(req, "500 Internal Server Error");
+        httpd_resp_send(req, "{\"ok\":false}", 12);
+        return ESP_FAIL;
+    }
+    free(buf);
+    httpd_resp_send(req, "{\"ok\":true}", 11);
+    return ESP_OK;
+}
+
 /*
  * This SDK's esp_http_server matches URIs by exact strcmp (no wildcard
  * support), so instead of a catch-all the real OS probe URLs are
@@ -665,6 +718,12 @@ void web_start(void)
     httpd_register_uri_handler(sServer, &u);
     u = (httpd_uri_t){.uri = "/api/reboot", .method = HTTP_POST,
                       .handler = h_api_reboot};
+    httpd_register_uri_handler(sServer, &u);
+    u = (httpd_uri_t){.uri = "/api/widgets", .method = HTTP_GET,
+                      .handler = h_api_widgets_get};
+    httpd_register_uri_handler(sServer, &u);
+    u = (httpd_uri_t){.uri = "/api/widgets", .method = HTTP_POST,
+                      .handler = h_api_widgets_set};
     httpd_register_uri_handler(sServer, &u);
     {
         int i;

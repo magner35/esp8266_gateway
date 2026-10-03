@@ -71,3 +71,36 @@ void storage_set_wifi(const char *ssid, const char *pass)
     strncpy(sSettings.pass, pass, sizeof(sSettings.pass) - 1);
     sSettings.pass[sizeof(sSettings.pass) - 1] = 0;
 }
+
+/* ------------------------------------------------------------------ */
+/* widget layout: one JSON blob {"rev":N,"cfg":[...]} in its own key.
+ * The content is opaque to the firmware - the page owns the format,
+ * the gateway only stores and serves it verbatim.                   */
+
+#define WKEY "widgets"
+
+bool widgets_load(char *buf, size_t cap)
+{
+    nvs_handle_t h;
+    size_t len = cap - 1;
+    bool ok;
+    if (nvs_open(NVS_NAMESPACE, NVS_READONLY, &h) != ESP_OK)
+        return false;
+    ok = (nvs_get_blob(h, WKEY, buf, &len) == ESP_OK && len < cap);
+    nvs_close(h);
+    if (ok)
+        buf[len] = 0;
+    return ok;
+}
+
+bool widgets_store(const char *json, size_t len)
+{
+    nvs_handle_t h;
+    bool ok;
+    if (nvs_open(NVS_NAMESPACE, NVS_READWRITE, &h) != ESP_OK)
+        return false;
+    ok = (nvs_set_blob(h, WKEY, json, len) == ESP_OK &&
+          nvs_commit(h) == ESP_OK);
+    nvs_close(h);
+    return ok;
+}

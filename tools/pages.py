@@ -37,6 +37,36 @@ HEADER = """/*
 _BK = "\x00"
 
 
+def minify(html: str) -> str:
+    """Drop comments and blank lines from <style>/<script> bodies before
+    packing into pages.h - the www/ sources keep their comments, the
+    flash image does not need them.
+
+    Conservative on purpose: block comments /* .. */ (none of the pages
+    has these sequences inside string literals) and whole-line //
+    comments only; inline // is left alone so '//host' in strings stays.
+    """
+    def strip(body: str, css: bool) -> str:
+        body = re.sub(r"/\*.*?\*/", "", body, flags=re.S)
+        if not css:
+            body = "\n".join(
+                l for l in body.split("\n")
+                if l.strip() and not l.lstrip().startswith("//"))
+        else:
+            body = "\n".join(l for l in body.split("\n") if l.strip())
+        return body
+
+    out, pos = [], 0
+    for m in re.finditer(r"<(style|script)>(.*?)</\1>", html, re.S):
+        out.append(html[pos:m.start()])
+        tag = m.group(1)
+        out.append(f"<{tag}>" + strip(m.group(2), tag == "style") +
+                   f"</{tag}>")
+        pos = m.end()
+    out.append(html[pos:])
+    return "".join(out)
+
+
 def c_literal(html: str) -> str:
     """HTML source -> C concatenated string literal.
 
@@ -57,7 +87,7 @@ def c_literal(html: str) -> str:
 def build() -> None:
     parts = [HEADER]
     for fname, lit in PAGES.items():
-        html = (WWW / fname).read_text(encoding="utf-8")
+        html = minify((WWW / fname).read_text(encoding="utf-8"))
         parts.append(f"static const char {lit}[] =\n{c_literal(html)};\n\n")
     parts.append("#endif /* GW_PAGES_H */\n")
     HDR.write_text("".join(parts), encoding="utf-8", newline="\n")

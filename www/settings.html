@@ -6,6 +6,20 @@
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>SKE-02 Настройки</title>
   <style>
+    /* ==================================================================
+     * STYLE MAP (settings.html - страница настроек параметров прибора)
+     *   1. общие: body, header, .tag/.ok/.bad, button, input/select
+     *   2. навигация меню: #nav (разделы L1), .tabs (табы L2),
+     *      .subtabs (подтабы L3)
+     *   3. таблица параметров: table/td/th, .val, .ctl, .where
+     *   4. редакторы значений: .set (обёртка поля), .t2 (TIME/DATE),
+     *      .dv (разделитель : . .)
+     *   5. панель действий: #actions (пароль/Применить/Обновить),
+     *      #filter (фильтр поиска), #secPw, tr.dirty, button.run
+     *   6. F|V-грид линеаризации: .lingrid
+     * ================================================================== */
+
+    /* --- 1. общие ---------------------------------------------------- */
     body {
       font: 13px/1.45 system-ui, sans-serif;
       background: #14171c;
@@ -14,6 +28,7 @@
       padding: 12px
     }
 
+    /* шапка: заголовок, метки связи, кнопки навигации */
     header {
       display: flex;
       flex-wrap: wrap;
@@ -22,11 +37,13 @@
       margin-bottom: 10px
     }
 
+    /* заголовок "SKE-02 Настройки" */
     h1 {
       font-size: 18px;
       margin: 0 8px 0 0
     }
 
+    /* метка-пилюля в шапке (UART: связь, fw) */
     .tag {
       background: #2a3140;
       border-radius: 4px;
@@ -35,14 +52,17 @@
       white-space: nowrap
     }
 
+    /* метка связи: зелёный (связь есть) */
     .ok {
       background: #1d5c2f
     }
 
+    /* метка связи: красный (нет связи) */
     .bad {
       background: #6c2431
     }
 
+    /* все обычные кнопки */
     button {
       background: #2a5bdb;
       color: #fff;
@@ -53,6 +73,7 @@
       font-size: 12px
     }
 
+    /* поля ввода и комбобоксы (редакторы параметров) */
     input,
     select {
       background: #0e1116;
@@ -63,10 +84,14 @@
       box-sizing: border-box
     }
 
+    /* поле фильтра по имени/id в панели действий */
     #filter {
       width: 200px
     }
 
+    /* --- 2. навигация меню ----------------------------------------- */
+
+    /* ряд кнопок разделов первого уровня (Измеритель/Основные/...) */
     #nav {
       display: flex;
       flex-wrap: wrap;
@@ -84,6 +109,7 @@
       background: #2a5bdb
     }
 
+    /* ряд табов второго уровня внутри раздела */
     .tabs {
       display: flex;
       flex-wrap: wrap;
@@ -109,6 +135,7 @@
       border-bottom-color: #2a5bdb
     }
 
+    /* ряд подтабов третьего уровня */
     .subtabs {
       display: flex;
       flex-wrap: wrap;
@@ -131,6 +158,9 @@
       color: #d8dee9
     }
 
+    /* --- 3. таблица параметров -------------------------------------- */
+
+    /* таблица "Параметр | редактор" текущего таба */
     table {
       width: 100%;
       border-collapse: collapse
@@ -150,26 +180,33 @@
       font-size: 12px
     }
 
+    /*отображение значение параметра (моноширинный текст) */
     .val {
       font-family: ui-monospace, Consolas, monospace;
       white-space: nowrap
     }
 
+    /* давнее значение (обновлялось давно) - тусклее */
     .stale {
       color: #8b94a7
     }
 
+    /* колонка редактора - прижата вправо */
     .ctl {
       text-align: right;
       vertical-align: middle
     }
 
+    /* подпись-путь меню под именем параметра (в поиске) */
     .where {
       color: #8b94a7;
       font-size: 12px;
       margin-top: 1px
     }
 
+    /* --- 4. редакторы значений -------------------------------------- */
+
+    /* обёртка поля редактора (комбобокс/число/пароль) в ячейке */
     .set {
       display: flex;
       gap: 6px;
@@ -180,26 +217,31 @@
 
     .set input[type=number],
     .set input[type=text] {
-      width: 110px
+      width: 80px
     }
 
     .set input.fnum {
-      width: 130px
+      width: 80px
     }
 
     .set select {
-      max-width: 170px
+      max-width: 100px
     }
 
+    /* половинки TIME (чч:мм) и DATE (дд.мм.гг) */
     .t2 {
       width: 56px !important;
       text-align: center
     }
 
+    /* разделители : и . в TIME/DATE */
     .dv {
       color: #8b94a7
     }
 
+    /* --- 5. панель действий ----------------------------------------- */
+
+    /* строка: пароль меню, Применить, Обновить, сообщение */
     #actions {
       display: flex;
       flex-wrap: wrap;
@@ -208,22 +250,29 @@
       margin: 0 0 8px 0
     }
 
+    /* поле пароля текущего раздела */
     #secPw {
       width: 140px
     }
 
+    /* зелёная кнопка "Выполнить" у пунктов CMD */
     button.run {
       background: #1d5c2f
     }
 
+    /* фон строки с несохранённой правкой */
     tr.dirty td {
       background: #2a2517
     }
 
+    /* служебное сообщение панели ("применено: N") */
     .flash {
       color: #7aa2f7
     }
 
+    /* --- 6. F|V-грид линеаризации ----------------------------------- */
+
+    /* сетка пар калибровки F01|V01, F02|V02, ... */
     .lingrid {
       display: grid;
       grid-template-columns: auto auto auto auto;
@@ -236,16 +285,19 @@
       margin-bottom: 8px
     }
 
+    /* подписи F01/V01 в сетке линеаризации */
     .lingrid label {
       color: #8b94a7;
       font-size: 12px;
       white-space: nowrap
     }
 
+    /* поля грида - влево, а не вправо */
     .lingrid .set {
       justify-content: flex-start
     }
 
+    /* изменённое поле линеаризации - жёлтая рамка */
     .lingrid input.dirty {
       border-color: #e3b341
     }

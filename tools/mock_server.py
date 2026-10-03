@@ -166,6 +166,8 @@ def values():
 # ------------------------------------------------------------------------
 
 class H(http.server.SimpleHTTPRequestHandler):
+    WCFG = {"rev": 0, "cfg": None}   # NVS stand-in, survives page reloads
+
     def __init__(self, *a, **kw):
         super().__init__(*a, directory=str(WWW), **kw)
 
@@ -190,6 +192,8 @@ class H(http.server.SimpleHTTPRequestHandler):
                         "heap": 20000, "ap": False})
         elif self.path == "/api/params":
             self._json(params_json())
+        elif self.path == "/api/widgets":
+            self._json(self.WCFG)
         elif self.path in self.PAGES:
             self.path = "/" + self.PAGES[self.path]
             super().do_GET()
@@ -211,6 +215,15 @@ class H(http.server.SimpleHTTPRequestHandler):
                 p['r'] = p['o'].index(v)
             self._json({"ok": True, "value": v})
         elif self.path == "/api/run":
+            self._json({"ok": True})
+        elif self.path == "/api/widgets":
+            try:
+                d = json.loads(body)
+                assert isinstance(d.get('cfg'), list) and 'rev' in d
+            except Exception:
+                self._json({"ok": False}, 400)
+                return
+            type(self).WCFG = d
             self._json({"ok": True})
         elif self.path in ("/api/refresh", "/api/rescan", "/api/reboot"):
             self._json({"ok": 1, "ready": 1})
