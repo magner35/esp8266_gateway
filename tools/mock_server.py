@@ -91,6 +91,22 @@ def parse_dump():
 
 SECTIONS, PARAMS = parse_dump()
 COUNT = max(PARAMS) + 1
+_DUMP_MTIME = DUMP.stat().st_mtime
+
+def dump_maybe_reload():
+    """hot-reload tools/ske_l.txt: reparse when its mtime changes.
+    Runtime /api/set edits to values are reset by a reload - the dump
+    is the source of truth while iterating on the parser/UI."""
+    global SECTIONS, PARAMS, COUNT, _DUMP_MTIME
+    try:
+        m = DUMP.stat().st_mtime
+    except OSError:
+        return
+    if m != _DUMP_MTIME:
+        _DUMP_MTIME = m
+        SECTIONS, PARAMS = parse_dump()
+        COUNT = max(PARAMS) + 1
+        print(f"dump reloaded: {COUNT} params, {len(SECTIONS)} sections", flush=True)
 
 def params_json():
     lst = []
@@ -130,12 +146,26 @@ def flag_byte(t, group):
             v |= 1 << b
     return v
 
+def _enum_val(pid, default):
+    p = PARAMS.get(pid)
+    return p['v'] if p else default
+
+def unit_ml(pid):
+    """ml per the chosen volume unit (params 54/55/56)"""
+    return {'Миллилитр': 1.0, 'Литр': 1000.0, 'Метр куб.': 1e6}.get(
+        _enum_val(pid, 'Литр'), 1000.0)
+
+def per_sec():
+    """seconds of the chosen rate period (param 53)"""
+    return {'Секунда': 1.0, 'Минута': 60.0, 'Час': 3600.0}.get(
+        _enum_val(53, 'Минута'), 60.0)
+
 def values():
     now = time.time()
     t = now - STATE["t0"]
     dt = max(0.0, now - STATE["last"])
     STATE["last"] = now
-    rate = rate_now(t)
+    rate = rate_now(t)                 # L/min, the physical model
     freq = rate * KF / 60.0
     STATE["t_plus"] += rate * dt / 60.0
     STATE["t_minus"] += 0.002 * dt
@@ -146,19 +176,25 @@ def values():
     ph = (t % 6000.0) / 3000.0
     mlpm = 1000.0 + (100000.0 - 1000.0) * (ph if ph <= 1 else 2 - ph)
     tp, tm = STATE["t_plus"], STATE["t_minus"]
+    # emit in the DEVICE units (like the real meter does): volumes in
+    # the unit picked by params 55/56, rate in unit/period (54 + 53)
+    ur = 1000.0 / unit_ml(54)          # L -> rate volume unit
+    uo = 1000.0 / unit_ml(55)          # L -> Объём unit
+    ug = 1000.0 / unit_ml(56)          # L -> Общий unit
+    ps = per_sec()
     return {
         "ok": True, "link": True,
         "frequency": freq,
         "rate_raw": rate / KF,
-        "rate_fast": rate + 0.2 * math.sin(t * 3.1),
-        "rateMLPM": mlpm, "rate": rate,
-        "total_plus": tp, "total_minus": tm,
-        "total": tp - tm, "total_sum": tp + tm,
+        "rate_fast": (rate + 0.2 * math.sin(t * 3.1)) * ur * ps / 60.0,
+        "rateMLPM": mlpm, "rate": rate * ur * ps / 60.0,
+        "total_plus": tp * uo, "total_minus": tm * uo,
+        "total": (tp - tm) * uo, "total_sum": (tp + tm) * uo,
         "totalml_plus": tp * 1000.0, "totalml_minus": tm * 1000.0,
-        "gtotal": STATE["gtotal"], "gtotalml": STATE["gtotal"] * 1000.0,
+        "gtotal": STATE["gtotal"] * ug, "gtotalml": STATE["gtotal"] * 1000.0,
         "kf_value": KF,
         "pulses_packet": int(freq) & 0xFFFF, "pulses": int(STATE["pulses"]),
-        "batch": STATE["batch"],
+        "batch": STATE["batch"] * uo,
         "status": flag_byte(t, "status"),
         "setpoint": flag_byte(t, "setpoint"),
         "isr": flag_byte(t, "isr"),
@@ -179,8 +215,8 @@ class H(http.server.SimpleHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-    PAGES = {"/": "index.html", "/settings": "settings.html",
-             "/wifi": "wifi.html"}
+    PAGES = {"/": "index.html", "/index.html": "index.html",
+             "/settings": "settings.html", "/wifi": "wifi.html"}
 
     def do_GET(self):
         if self.path == "/api/values":
@@ -191,12 +227,24 @@ class H(http.server.SimpleHTTPRequestHandler):
                         "uptime": int(time.time() - STATE["t0"]),
                         "heap": 20000, "ap": False})
         elif self.path == "/api/params":
+            dump_maybe_reload()
             self._json(params_json())
         elif self.path == "/api/widgets":
             self._json(self.WCFG)
+        elif self.path == "/stamp":
+            self._json({"t": www_stamp()})
         elif self.path in self.PAGES:
-            self.path = "/" + self.PAGES[self.path]
-            super().do_GET()
+            # serve the page with an auto-reload probe injected (mock only,
+            # never in pages.h): saving any www/*.html reloads the browser
+            html = (WWW / self.PAGES[self.path]).read_text(encoding='utf-8')
+            html = html.replace('</body>', RELOAD_JS + '</body>')
+            body = html.encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
         else:
             super().do_GET()
 
@@ -234,5 +282,15 @@ class H(http.server.SimpleHTTPRequestHandler):
     def log_message(self, *a):
         pass
 
-print(f"mock: {COUNT} params, {len(SECTIONS)} sections, on :8099")
+
+def www_stamp():
+    """newest mtime across the www/ html files - the reload marker"""
+    return max((p.stat().st_mtime for p in WWW.glob('*.html')), default=0.0)
+
+
+RELOAD_JS = ("<script>setInterval(async()=>{try{const r=await"
+             "(await fetch('/stamp')).json();if(window.__st&&r.t!==window.__st)"
+             "location.reload();window.__st=r.t}catch(e){}},1000)</script>")
+
+print(f"mock: {COUNT} params, {len(SECTIONS)} sections, on :8099", flush=True)
 http.server.ThreadingHTTPServer(("127.0.0.1", 8099), H).serve_forever()
