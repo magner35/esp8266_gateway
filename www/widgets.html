@@ -155,7 +155,7 @@
 
 <body>
   <header>
-    <h1>Виджеты</h1>
+    <h1>SKE-02 Виджеты</h1>
     <a class="back" href="/panel"><button>&#8592; Назад</button></a>
   </header>
   <!-- меню виджетов: та же логика, что была панелью на главной;
@@ -164,13 +164,7 @@
     <div id="wlist"></div>
   </div>
   <script src="/shared.js"></script>
-  <script>
-    /* на этой странице нет главного экрана: перерисовывается только меню */
-    loadWidgets();
-    renderPanel();
-    wSync();
-    paramsTick(); setInterval(paramsTick, 30000);
-  </script>
+  <script src="/widgets.js"></script>
 </body>
 
 </html>

@@ -23,7 +23,24 @@ HDR = ROOT / "src" / "pages.h"
 PAGES = {"wifi.html": "PAGE_WIFI", "index.html": "PAGE_INDEX",
          "settings.html": "PAGE_SETTINGS", "panel.html": "PAGE_PANEL",
          "widgets.html": "PAGE_WIDGETS"}
-JS = {"shared.js": "PAGE_SHARED"}  # embedded as application/javascript
+
+
+def js_literal(fname: str) -> str:
+    """foo-bar.js -> PAGE_FOO_BAR_JS"""
+    stem = re.sub(r"[^0-9a-zA-Z]+", "_", fname.rsplit(".", 1)[0]).upper()
+    return f"PAGE_{stem}_JS"
+
+
+def discover_js() -> dict:
+    """auto-discover <script src="/xxx.js"> tags across the pages: every
+    referenced file is embedded and served as application/javascript -
+    adding a new js file needs no generator change, only a web.c route"""
+    found = {}
+    for fname in PAGES:
+        for m in re.finditer(r'<script src="/([\w.\-]+\.js)"></script>',
+                             (WWW / fname).read_text(encoding="utf-8")):
+            found.setdefault(m.group(1), js_literal(m.group(1)))
+    return found
 
 HEADER = """/*
  * Web pages - AUTO-GENERATED from the plain HTML files in the www dir.
@@ -91,7 +108,7 @@ def build() -> None:
     for fname, lit in PAGES.items():
         html = minify((WWW / fname).read_text(encoding="utf-8"))
         parts.append(f"static const char {lit}[] =\n{c_literal(html)};\n\n")
-    for fname, lit in JS.items():
+    for fname, lit in discover_js().items():
         js = (WWW / fname).read_text(encoding="utf-8")
         js = re.sub(r"/[*].*?[*]/", "", js, flags=re.S)
         js = "\n".join(l for l in js.split("\n")
@@ -99,7 +116,7 @@ def build() -> None:
         parts.append(f"static const char {lit}[] =\n{c_literal(js)};\n\n")
     parts.append("#endif /* GW_PAGES_H */\n")
     HDR.write_text("".join(parts), encoding="utf-8", newline="\n")
-    print(f"{HDR} written from: {', '.join(PAGES)} + {', '.join(JS)}")
+    print(f"{HDR} written from: {', '.join(PAGES)} + js: {', '.join(discover_js())}")
 
 
 def extract() -> None:

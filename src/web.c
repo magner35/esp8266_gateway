@@ -143,12 +143,37 @@ static esp_err_t h_widgets(httpd_req_t *req)
     return ESP_OK;
 }
 
-/* shared widget model, included by index.html and widgets.html */
-static esp_err_t h_shared_js(httpd_req_t *req)
+/*
+ * Page scripts, embedded by tools/pages.py (it auto-discovers every
+ * <script src="/xxx.js"> in the www pages): one table + one handler.
+ * Adding a js file = one table row, nothing else.
+ */
+static const struct
 {
-    httpd_resp_set_type(req, "application/javascript");
-    httpd_resp_send(req, PAGE_SHARED, strlen(PAGE_SHARED));
-    return ESP_OK;
+    const char *path;
+    const char *body;
+} sJsFiles[] = {
+    {"/shared.js", PAGE_SHARED_JS},
+    {"/index.js", PAGE_INDEX_JS},
+    {"/panel.js", PAGE_PANEL_JS},
+    {"/settings.js", PAGE_SETTINGS_JS},
+    {"/wifi.js", PAGE_WIFI_JS},
+    {"/widgets.js", PAGE_WIDGETS_JS},
+};
+
+static esp_err_t h_js(httpd_req_t *req)
+{
+    int i;
+    for (i = 0; i < sizeof(sJsFiles) / sizeof(sJsFiles[0]); i++)
+        if (!strcmp(req->uri, sJsFiles[i].path))
+        {
+            httpd_resp_set_type(req, "application/javascript");
+            httpd_resp_send(req, sJsFiles[i].body, strlen(sJsFiles[i].body));
+            return ESP_OK;
+        }
+    httpd_resp_set_status(req, "404 Not Found");
+    httpd_resp_send(req, NULL, 0);
+    return ESP_FAIL;
 }
 
 static esp_err_t h_scan(httpd_req_t *req)
@@ -715,8 +740,15 @@ void web_start(void)
     httpd_register_uri_handler(sServer, &u);
     u = (httpd_uri_t){.uri = "/widgets", .method = HTTP_GET, .handler = h_widgets};
     httpd_register_uri_handler(sServer, &u);
-    u = (httpd_uri_t){.uri = "/shared.js", .method = HTTP_GET, .handler = h_shared_js};
-    httpd_register_uri_handler(sServer, &u);
+    {
+        int i;
+        for (i = 0; i < sizeof(sJsFiles) / sizeof(sJsFiles[0]); i++)
+        {
+            u = (httpd_uri_t){.uri = sJsFiles[i].path, .method = HTTP_GET,
+                              .handler = h_js};
+            httpd_register_uri_handler(sServer, &u);
+        }
+    }
     u = (httpd_uri_t){.uri = "/scan", .method = HTTP_GET, .handler = h_scan};
     httpd_register_uri_handler(sServer, &u);
     u = (httpd_uri_t){.uri = "/save", .method = HTTP_POST, .handler = h_save};

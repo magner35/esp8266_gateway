@@ -546,7 +546,7 @@
       const p = $('wlist'); if (!p) return;
       if (wView === 'add') { renderAddView(p); return }
       /* ── экран 1: список виджетов ── */
-      let h = '<div class="wrow"><div class="r1"><button id="btnWsave" onclick="wSave()">Сохранить в шлюз</button>' +
+      let h = '<div class="wrow"><div class="r1"><button id="btnWsave" onclick="wSave()">Сохранить</button>' +
         '<span id="wmsg" class="flash">' + (wDirty ? 'не сохранено' : 'сохранено (rev ' + wRev + ')') + '</span></div></div>';
       h += '<div class="wrow"><div class="r1"><span>Добавить виджеты</span>' +
         '<button onclick="wView=\'add\';renderPanel()">＋</button></div></div>';
