@@ -1,0 +1,262 @@
+<!doctype html>
+<html lang="ru">
+
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>SKE-02 Панель</title>
+  <style>
+    /* ==================================================================
+     * STYLE MAP (panel.html - панель управления главным экраном)
+     *   1. общие: body, header, .tag
+     *   2. кнопки-плитки навигации: .tiles, .tile
+     *   3. профили виджетов: #profiles, .prow
+     *   4. отладочная панель: #debug (переехала с главного экрана)
+     * ================================================================== */
+
+    /* --- 1. общие ---------------------------------------------------- */
+    body {
+      font: 14px/1.45 system-ui, sans-serif;
+      background: #000000;       /* цвет фона страницы (как на главной) */
+      color: #d8dee9;
+      margin: 0;
+      padding: 12px
+    }
+
+    header {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: center;
+      margin-bottom: 10px
+    }
+
+    h1 {
+      font-size: 18px;
+      margin: 0 8px 0 0
+    }
+
+    button {
+      background: #2a5bdb;       /* синяя кнопка */
+      color: #fff;
+      border: 0;
+      border-radius: 4px;
+      padding: 5px 5px;
+      cursor: pointer;
+      font-size: 12px
+    }
+
+    button.warn { background: #a23b2e }  /* красная (удалить, перезагрузить) */
+    button.ok { background: #1d5c2f }    /* зелёная (применить) */
+
+    input {
+      background: #0e1116;       /* тёмное поле ввода */
+      color: #d8dee9;
+      border: 1px solid #39414f;
+      border-radius: 4px;
+      padding: 4px 8px;
+      box-sizing: border-box
+    }
+
+    :root { color-scheme: dark }         /* тёмные чекбоксы/списки */
+
+    /* метка-пилюля (состояние сохранения профиля) */
+    .tag {
+      background: #2a3140;
+      border-radius: 4px;
+      padding: 2px 8px;
+      font-size: 12px;
+      white-space: nowrap
+    }
+
+    h2 {
+      font-size: 13px;
+      color: #8b94a7;
+      text-transform: uppercase;
+      letter-spacing: .08em;
+      margin: 16px 0 6px
+    }
+
+    /* --- 2. кнопки-плитки навигации ---------------------------------- */
+    .tiles {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+      gap: 8px
+    }
+
+    .tile {
+      background: #1b202a;       /* фон плитки */
+      border: 1px solid #2a3140;
+      border-radius: 4px;
+      padding: 14px 10px;
+      text-align: center;
+      cursor: pointer;
+      color: #d8dee9;
+      text-decoration: none;
+      font-size: 14px
+    }
+
+    .tile:hover { background: #232a38 }
+
+    .tile .ic { font-size: 20px; display: block; margin-bottom: 4px }
+
+    /* --- 3. профили виджетов ----------------------------------------- */
+    .prow {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      align-items: center;
+      background: #1b202a;
+      border: 1px solid #232a38;
+      border-radius: 4px;
+      padding: 4px 8px;
+      margin-bottom: 6px;
+      font-size: 13px
+    }
+
+    .prow .pname { flex: 1 }     /* имя профиля растягивается */
+
+    #newName { width: 160px }
+
+    /* --- 4. отладочная панель ---------------------------------------- */
+    #debug {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      align-items: center;
+      margin: 0 0 8px 0;
+      padding: 4px 8px;
+      border: 1px dashed #39414f;
+      border-radius: 4px;
+      color: #8b94a7;
+      font-size: 12px
+    }
+
+    #debug .tag {
+      background: transparent;
+      border: 1px solid #2a3140;
+      padding: 1px 6px
+    }
+  </style>
+</head>
+
+<body>
+  <header>
+    <h1>SKE-02 Панель</h1>
+    <a href="/" style="margin-left:auto"><button>&#8592; Назад</button></a>
+    <!-- <a href="/panel" style="margin-left:auto"><button>&#8592; Назад</button></a> -->
+
+  </header>
+
+  <!-- 2. плитки навигации: ранее жили в шапке главного экрана -->
+  <div class="tiles">
+    <a class="tile" href="/?edit=1"><span class="ic">&#9998;</span>Раскладка</a>
+    <a class="tile" href="/widgets"><span class="ic">&#9633;</span>Виджеты</a>
+    <a class="tile" href="/settings"><span class="ic">&#9881;</span>Прибор</a>
+    <a class="tile" href="/wifi"><span class="ic">&#128246;</span>Wi-Fi</a>
+    <a class="tile" href="#" onclick="rebootDev();return false"><span class="ic">&#8635;</span>Перезагрузить</a>
+  </div>
+
+  <!-- 3. профили наборов и расположения виджетов -->
+  <h2>Профили виджетов</h2>
+  <div id="profiles"></div>
+  <div class="prow">
+    <input id="newName" placeholder="имя профиля" onkeydown="if(event.key==='Enter')this.blur()">
+    <button onclick="profCreate()">Сохранить текущий набор</button>
+  </div>
+
+  <!-- 4. отладочная панель (переехала с главного экрана) -->
+  <h2>Отладочная панель</h2>
+  <div id="debug">
+    <button onclick="rescan()">Пересканировать</button>
+    <span id="fw" class="tag"></span>
+    <span class="tag" id="ip"></span><span class="tag" id="rss"></span>
+    <span class="tag" id="upt"></span><span class="tag" id="heap"></span>
+  </div>
+
+  <script>
+    const $ = i => document.getElementById(i);
+    function hms(t) { const s = t % 60, m = (t / 60 | 0) % 60, h = t / 3600 | 0; return h ? h + 'ч ' + m + 'м' : m ? m + 'м ' + s + 'с' : s + 'с' }
+
+    /*
+     * Конфиг виджетов лежит в шлюзе (/api/widgets) блобом v2:
+     *   {rev, cur: [...widgets], profiles: {имя: [...]}}.
+     * Эта страница управляет профилями; cur применяется одним кликом.
+     */
+    let blob = { rev: 0, cur: null, profiles: {} };
+
+    async function load() {
+      try {
+        const d = await (await fetch('/api/widgets')).json();
+        blob = { rev: d.rev || 0, cur: d.cur || d.cfg || null, profiles: d.profiles || {} };
+      } catch (e) { }
+      render();
+    }
+
+    function render() {
+      let h = '';
+      const names = Object.keys(blob.profiles);
+      if (!names.length) h = '<div class="prow"><span class="pname" style="color:#8b94a7">профилей нет</span></div>';
+      for (const n of names) {
+        h += '<div class="prow"><span class="pname">' + esc(n) +
+          ' <span style="color:#8b94a7">(' + blob.profiles[n].length + ' видж.)</span></span>' +
+          '<button class="ok" onclick="profApply(\'' + esc(n) + '\')">Применить</button>' +
+          '<button class="warn" onclick="profDel(\'' + esc(n) + '\')">Удалить</button></div>';
+      }
+      $('profiles').innerHTML = h;
+    }
+
+    function esc(s) { return String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])) }
+
+    async function post() {
+      const r = await (await fetch('/api/widgets', { method: 'POST', body: JSON.stringify(blob) })).json();
+      if (!r.ok) alert('шлюз не смог записать конфиг');
+      return r.ok;
+    }
+
+    /* создать профиль из ТЕКУЩЕГО набора на главном экране */
+    async function profCreate() {
+      const n = $('newName').value.trim();
+      if (!n) { alert('введите имя профиля'); return }
+      if (blob.profiles[n] && !confirm('Профиль «' + n + '» уже есть. Перезаписать?')) return;
+      if (!Array.isArray(blob.cur)) { alert('текущий набор ещё не сохранён в шлюз'); return }
+      blob.profiles[n] = blob.cur;
+      blob.rev++;
+      if (await post()) { $('newName').value = ''; render() }
+    }
+
+    /* применить профиль: он становится текущим набором (rev++), главная
+     * страница подтянет его при следующей загрузке/сохранении */
+    async function profApply(n) {
+      if (!confirm('Применить профиль «' + n + '»? Текущий набор будет заменён.')) return;
+      blob.cur = blob.profiles[n];
+      blob.rev++;
+      if (await post()) render();
+    }
+
+    async function profDel(n) {
+      if (!confirm('Удалить профиль «' + n + '»?')) return;
+      delete blob.profiles[n];
+      blob.rev++;
+      if (await post()) render();
+    }
+
+    /* отладочная панель */
+    async function infoTick() {
+      try {
+        const r = await (await fetch('/api/info')).json();
+        $('fw').textContent = r.fw + ' · параметров: ' + r.count;
+        $('ip').textContent = r.ip;
+        $('rss').textContent = r.ap ? r.rssi + ' dBm' : r.ssid + ': ' + r.rssi + ' dBm';
+        $('upt').textContent = 'uptime ' + hms(r.uptime);
+        $('heap').textContent = 'heap ' + (r.heap / 1024 | 0) + ' KiB';
+      } catch (e) { }
+    }
+    async function rescan() { await fetch('/api/rescan', { method: 'POST' }); infoTick() }
+    function rebootDev() { if (confirm('Перезагрузить прибор?')) fetch('/api/reboot', { method: 'POST' }) }
+    infoTick(); setInterval(infoTick, 5000);
+    load();
+  </script>
+</body>
+
+</html>

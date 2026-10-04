@@ -1,0 +1,176 @@
+<!doctype html>
+<html lang="ru">
+
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>SKE-02 Виджеты</title>
+  <style>
+    /* ==================================================================
+     * STYLE MAP (widgets.html - меню виджетов отдельной страницей;
+     * главный экран с виджетами здесь НЕ показывается)
+     *   1. общие: body, header (+ «Назад» вверху справа)
+     *   2. строки меню (как панель «Виджеты» на главной): .wrow/.r1/.r2
+     * ================================================================== */
+
+    /* --- 1. общие ---------------------------------------------------- */
+    body {
+      font: 13px/1.45 system-ui, sans-serif;
+      background: #000000;       /* фон страницы (как на главной) */
+      color: #d8dee9;
+      margin: 0;
+      padding: 12px
+    }
+
+    header {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: center;
+      margin-bottom: 10px
+    }
+
+    h1 {
+      font-size: 18px;
+      margin: 0 8px 0 0
+    }
+
+    /* кнопка «← Назад» прижата вправо */
+    header .back {
+      margin-left: auto
+    }
+
+    button {
+      background: #2a5bdb;
+      color: #fff;
+      border: 0;
+      border-radius: 4px;
+      padding: 5px 5px;
+      cursor: pointer;
+      font-size: 12px
+    }
+
+    button.warn { background: #a23b2e }
+
+    :root { color-scheme: dark }         /* тёмные нативные контролы */
+
+    .flash {
+      color: #7aa2f7;
+      font-size: 12px
+    }
+
+    /* --- 2. строки меню (двухстрочные, в рамках) --------------------- */
+    #wpanel {
+      display: flex;
+      flex-direction: column;
+      gap: 6px
+    }
+
+    .wrow {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      background: #141821;
+      border: 1px solid #232a38;
+      border-radius: 4px;
+      padding: 4px 8px;
+      font-size: 13px
+    }
+
+    .r1, .r2 {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      align-items: center
+    }
+
+    .r1 span {
+      flex: 1              /* имя растягивается, кнопка вправо */
+    }
+
+    /* квадратные кнопки "＋" и "✕" (символ в квадрате 26×26) */
+    button.sq {
+      width: 26px;
+      height: 26px;
+      padding: 0;
+      flex: 0 0 auto;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center
+    }
+
+    /* чекбокс "авто" на первой строке: не растягивается */
+    .r1 .autolbl {
+      flex: 0 0 auto;
+      white-space: nowrap
+    }
+
+    /* заголовок секции списка */
+    .wsec {
+      color: #8b94a7;
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: .08em;
+      margin-top: 6px
+    }
+
+    select,
+    input[type=number] {
+      background: #0e1116;
+      color: #d8dee9;
+      border: 1px solid #39414f;
+      border-radius: 4px;
+      padding: 2px 4px;
+      font-size: 13px
+    }
+
+    select:disabled {
+      color: #565f6e;
+      background: #141821
+    }
+
+    /* АВТОУЖИМАНИЕ: каждый комбобокс/поле сжимается и обрезается
+     * многоточием, чтобы строка контролов (r2) гарантированно
+     * влезала в одну строку - итог: виджет = максимум 2 строки */
+    .r2 select,
+    .r2 input {
+      min-width: 0;
+      max-width: 26vw;            /* доля экрана на один комбобокс */
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      flex: 0 1 auto              /* сжимаются, но не растягивают ряд */
+    }
+
+    .r2 {
+      flex-wrap: nowrap           /* запрет переноса: только ужаться */
+    }
+
+    .r2 label {
+      white-space: nowrap;
+      flex: 0 0 auto
+    }
+  </style>
+</head>
+
+<body>
+  <header>
+    <h1>Виджеты</h1>
+    <a class="back" href="/panel"><button>&#8592; Назад</button></a>
+  </header>
+  <!-- меню виджетов: та же логика, что была панелью на главной;
+       вся модель живёт в shared.js и синхронизируется через NVS шлюза -->
+  <div id="wpanel">
+    <div id="wlist"></div>
+  </div>
+  <script src="/shared.js"></script>
+  <script>
+    /* на этой странице нет главного экрана: перерисовывается только меню */
+    loadWidgets();
+    renderPanel();
+    wSync();
+    paramsTick(); setInterval(paramsTick, 30000);
+  </script>
+</body>
+
+</html>

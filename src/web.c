@@ -131,6 +131,26 @@ static esp_err_t h_settings(httpd_req_t *req)
     return ESP_OK;
 }
 
+static esp_err_t h_panel(httpd_req_t *req)
+{
+    send_page(req, PAGE_PANEL);
+    return ESP_OK;
+}
+
+static esp_err_t h_widgets(httpd_req_t *req)
+{
+    send_page(req, PAGE_WIDGETS);
+    return ESP_OK;
+}
+
+/* shared widget model, included by index.html and widgets.html */
+static esp_err_t h_shared_js(httpd_req_t *req)
+{
+    httpd_resp_set_type(req, "application/javascript");
+    httpd_resp_send(req, PAGE_SHARED, strlen(PAGE_SHARED));
+    return ESP_OK;
+}
+
 static esp_err_t h_scan(httpd_req_t *req)
 {
     static TickType_t scanStart; /* when the current scan was kicked off */
@@ -690,6 +710,12 @@ void web_start(void)
     u = (httpd_uri_t){.uri = "/wifi", .method = HTTP_GET, .handler = h_wifi};
     httpd_register_uri_handler(sServer, &u);
     u = (httpd_uri_t){.uri = "/settings", .method = HTTP_GET, .handler = h_settings};
+    httpd_register_uri_handler(sServer, &u);
+    u = (httpd_uri_t){.uri = "/panel", .method = HTTP_GET, .handler = h_panel};
+    httpd_register_uri_handler(sServer, &u);
+    u = (httpd_uri_t){.uri = "/widgets", .method = HTTP_GET, .handler = h_widgets};
+    httpd_register_uri_handler(sServer, &u);
+    u = (httpd_uri_t){.uri = "/shared.js", .method = HTTP_GET, .handler = h_shared_js};
     httpd_register_uri_handler(sServer, &u);
     u = (httpd_uri_t){.uri = "/scan", .method = HTTP_GET, .handler = h_scan};
     httpd_register_uri_handler(sServer, &u);

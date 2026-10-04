@@ -21,7 +21,9 @@ WWW = ROOT / "www"
 HDR = ROOT / "src" / "pages.h"
 
 PAGES = {"wifi.html": "PAGE_WIFI", "index.html": "PAGE_INDEX",
-         "settings.html": "PAGE_SETTINGS"}
+         "settings.html": "PAGE_SETTINGS", "panel.html": "PAGE_PANEL",
+         "widgets.html": "PAGE_WIDGETS"}
+JS = {"shared.js": "PAGE_SHARED"}  # embedded as application/javascript
 
 HEADER = """/*
  * Web pages - AUTO-GENERATED from the plain HTML files in the www dir.
@@ -89,9 +91,15 @@ def build() -> None:
     for fname, lit in PAGES.items():
         html = minify((WWW / fname).read_text(encoding="utf-8"))
         parts.append(f"static const char {lit}[] =\n{c_literal(html)};\n\n")
+    for fname, lit in JS.items():
+        js = (WWW / fname).read_text(encoding="utf-8")
+        js = re.sub(r"/[*].*?[*]/", "", js, flags=re.S)
+        js = "\n".join(l for l in js.split("\n")
+                       if l.strip() and not l.lstrip().startswith("//"))
+        parts.append(f"static const char {lit}[] =\n{c_literal(js)};\n\n")
     parts.append("#endif /* GW_PAGES_H */\n")
     HDR.write_text("".join(parts), encoding="utf-8", newline="\n")
-    print(f"{HDR} written from: {', '.join(PAGES)}")
+    print(f"{HDR} written from: {', '.join(PAGES)} + {', '.join(JS)}")
 
 
 def extract() -> None:

@@ -4,7 +4,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>SKE-02 Настройки</title>
+  <title>СКЭ-02 Настройки</title>
   <style>
     /* ==================================================================
      * STYLE MAP (settings.html - страница настроек параметров прибора)
@@ -306,11 +306,9 @@
 
 <body>
   <header>
-    <h1>SKE-02 Настройки</h1>
-    <span id="link" class="tag">…</span>
-    <span id="fw" class="tag"></span>
-    <a href="/"><button>&#8592; Мониторинг</button></a>
-    <a href="/wifi"><button>Wi-Fi</button></a>
+    <h1>SKE-02 Прибор</h1>
+    <!-- меток UART/fw и кнопки Wi-Fi здесь больше нет: всё это на /panel -->
+    <a href="/panel" style="margin-left:auto"><button>&#8592; Назад</button></a>
   </header>
   <div id="nav"></div>
   <div id="tabs"></div>
@@ -337,10 +335,6 @@
     let retryT = 0;
     async function tick() {
       try {
-        const r = await (await fetch('/api/info')).json();
-        $('link').textContent = r.link ? 'UART: связь есть' : 'UART: нет связи';
-        $('link').className = 'tag ' + (r.link ? 'ok' : 'bad');
-        $('fw').textContent = r.fw + ' · параметров: ' + r.count;
         const d = await (await fetch('/api/params')).json();
         P = d.params; SECT = d.sections; dirty = new Set();
         render(d.count + '|' + d.params.length + '|' + d.sections.length + '|' + d.rc);

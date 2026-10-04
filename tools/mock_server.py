@@ -216,7 +216,8 @@ class H(http.server.SimpleHTTPRequestHandler):
         self.wfile.write(body)
 
     PAGES = {"/": "index.html", "/index.html": "index.html",
-             "/settings": "settings.html", "/wifi": "wifi.html"}
+             "/settings": "settings.html", "/wifi": "wifi.html",
+             "/panel": "panel.html", "/widgets": "widgets.html"}
 
     def do_GET(self):
         if self.path == "/api/values":
@@ -267,7 +268,7 @@ class H(http.server.SimpleHTTPRequestHandler):
         elif self.path == "/api/widgets":
             try:
                 d = json.loads(body)
-                assert isinstance(d.get('cfg'), list) and 'rev' in d
+                assert 'rev' in d and isinstance(d.get('cur') or d.get('cfg'), list)
             except Exception:
                 self._json({"ok": False}, 400)
                 return
