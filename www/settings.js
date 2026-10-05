@@ -35,7 +35,8 @@
      * edits accumulate and are sent by the section-wide "Применить") */
     function widget(q) {
       if (!q.w) return '';
-      const i = q.i, m = ' oninput="mark(' + i + ')" onchange="mark(' + i + ')"';
+      const q1 = String.fromCharCode(39);   /* ' для inline-атрибутов */
+      const i = q.i, m = ' oninput="mark(' + i + ')" onchange="mark(' + i + ')" onfocus="this.select()" onkeydown="if(event.key===' + q1 + 'Enter' + q1 + ')this.blur()"';
       if ((q.t === 10 || q.t === 11) && q.o && q.o.length) {
         let h = '<select id="w' + i + '"' + m + '>';
         q.o.forEach((s, k) => h += '<option value="' + k + '"' + (String(k) === String(q.r) ? ' selected' : '') + '>' + esc(s) + '</option>');
@@ -46,11 +47,11 @@
       if (q.t === 1) return '<div class="set"><input id="w' + i + '" type="text" maxlength="6" inputmode="numeric" title="' + esc((q.lo || '?') + ' .. ' + (q.hi || '?')) + '" value="' + esc(q.v) + '"' + m + '></div>';
       if (q.t === 2 || q.t === 3) {
         const m2 = q.v.split(/[:.]/);
-        if (q.t === 2) return '<div class="set"><input class="t2" id="wh' + i + '" type="number" min="0" max="23" step="1" value="' + esc(m2[0]) + '"' + m + '><span class="dv">:</span><input class="t2" id="wm' + i + '" type="number" min="0" max="59" step="1" value="' + esc(m2[1]) + '"' + m + '></div>';
-        return '<div class="set"><input class="t2" id="wd' + i + '" type="number" min="1" max="31" step="1" value="' + esc(m2[0]) + '"' + m + '><span class="dv">.</span><input class="t2" id="wm2' + i + '" type="number" min="1" max="12" step="1" value="' + esc(m2[1]) + '"' + m + '><span class="dv">.</span><input class="t2" id="wy' + i + '" type="number" min="0" max="99" step="1" value="' + esc(m2[2]) + '"' + m + '></div>';
+        if (q.t === 2) return '<div class="set"><input class="t2" id="wh' + i + '" type="text" inputmode="numeric" min="0" max="23" step="1" value="' + esc(m2[0]) + '"' + m + '><span class="dv">:</span><input class="t2" id="wm' + i + '" type="text" inputmode="numeric" min="0" max="59" step="1" value="' + esc(m2[1]) + '"' + m + '></div>';
+        return '<div class="set"><input class="t2" id="wd' + i + '" type="text" inputmode="numeric" min="1" max="31" step="1" value="' + esc(m2[0]) + '"' + m + '><span class="dv">.</span><input class="t2" id="wm2' + i + '" type="text" inputmode="numeric" min="1" max="12" step="1" value="' + esc(m2[1]) + '"' + m + '><span class="dv">.</span><input class="t2" id="wy' + i + '" type="text" inputmode="numeric" min="0" max="99" step="1" value="' + esc(m2[2]) + '"' + m + '></div>';
       }
       const st = ' min="' + (q.lo !== '' ? esc(q.lo) : '0') + '" max="' + (q.hi !== '' ? esc(q.hi) : '65535') + '"';
-      return '<div class="set"><input id="w' + i + '" type="number" step="1"' + st + ' value="' + esc(q.v) + '"' + m + '></div>';
+      return '<div class="set"><input id="w' + i + '" type="text" inputmode="numeric" step="1"' + st + ' value="' + esc(q.v) + '"' + m + '></div>';
     }
     /* one table row: name | editor (RO values as text, CMD items as a button) */
     function row(q, where) {
@@ -165,7 +166,7 @@
         const body = 'id=' + i + '&v=' + encodeURIComponent(curVal(q)) + '&pw=' + encodeURIComponent(pwMap[q.s] || '');
         try {
           const r = await (await fetch('/api/set', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body })).json();
-          if (!r.ok) { alert('«' + (q.n || ('P' + i)) + '»: ' + r.error); break }
+          if (!r.ok) { alert('«' + (q.n || ('P' + i)) + '»: ' + r.error + (r.wait ? ' (ждать ~' + r.wait + ' с)' : '')); break }
           dirty.delete(i); done++;
           unmark(i);
           /* keep the local cache in sync with the device read-back, so a
@@ -191,7 +192,7 @@
           method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
           body: 'id=' + i + '&pw=' + encodeURIComponent(pwMap[q.s] || '')
         })).json();
-        if (!r.ok) alert('«' + (q.n || ('P' + i)) + '»: ' + r.error);
+        if (!r.ok) alert('«' + (q.n || ('P' + i)) + '»: ' + r.error + (r.wait ? ' (ждать ~' + r.wait + ' с)' : ''));
         else flash('команда выполнена');
       } catch (e) { alert('нет ответа от шлюза') }
     }

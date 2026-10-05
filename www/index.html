@@ -35,9 +35,9 @@
     header {
       display: flex;
       flex-wrap: wrap;
-      gap: 8px;
+      gap: 4px;
       align-items: center;
-      margin-bottom: 10px
+      margin-bottom: 5px
     }
 
     /* шестерёнка без надписи, прижата вправо; открывает /panel */
@@ -47,7 +47,7 @@
       line-height: 1;
       color: #d8dee9;
       text-decoration: none;
-      padding: 2px 6px;
+      padding: 2px 3px;
       border-radius: 4px
     }
 
@@ -55,18 +55,16 @@
       background: #2a3140
     }
 
-    /* в режиме правки шестерёнка = зелёная кнопка "Закрепить" */
+    /* режим закрепления: зелёный якорь */
     .gear.ok {
-      background: #1d5c2f;
-      color: #fff;
-      font-size: 13px;
-      padding: 4px 10px
+      color: #d8dee9;
+      font-size: 18px
     }
 
     h1 {
       font-size: 18px;
       /* размер заголовка "SKE-02 Gateway" */
-      margin: 0 8px 0 0
+      margin: 0 4px 0 0
     }
 
     /* маленькая метка-пилюля в шапке (UART: связь, fw, ip...) */
@@ -74,7 +72,7 @@
       background: #2a3140;
       /* фон метки */
       border-radius: 4px;
-      padding: 2px 8px;
+      padding: 2px 4px;
       font-size: 12px;
       white-space: nowrap
     }
@@ -92,12 +90,12 @@
 
     /* все обычные кнопки */
     button {
-      background: #1e3264;
+      background: #19284d;
       /* синий фон кнопки */
       color: #fff;
       border: 0;
       border-radius: 4px;
-      padding: 5px 5px;
+      padding: 4px 4px;
       /* паддинг кнопки (верт гориз) */
       cursor: pointer;
       font-size: 12px
@@ -115,8 +113,8 @@
       flex-wrap: wrap;
       gap: 6px;
       align-items: center;
-      margin: 0 0 8px 0;
-      padding: 4px 8px;
+      margin: 0 0 4px 0;
+      padding: 4px 4px;
       border: 1px dashed #39414f;
       border-radius: 4px;
       color: #8b94a7;
@@ -126,7 +124,7 @@
     #debug .tag {
       background: transparent;
       border: 1px solid #2a3140;
-      padding: 1px 6px
+      padding: 1px 3px
     }
 
     #debug button {
@@ -162,7 +160,8 @@
      *   параметр и ввод  - 1/2 экрана
      *   кнопка и индикатор - 1/4 экрана
      */
-    @media (max-width: 640px), (pointer: coarse) and (hover: none) {
+    @media (max-width: 640px),
+    (pointer: coarse) and (hover: none) {
       #values {
         grid-template-columns: repeat(4, minmax(0, 1fr))
       }
@@ -208,23 +207,24 @@
       border-radius: 4px;
       padding: 2px 4px;
       /* vertical horizontal */
-      min-height: 36px
-        /* единая высота ВСЕХ карточек (параметр - эталон); график выше
-         * за счёт своего содержимого */
+      height: 50px;
+      box-sizing: border-box;
+      overflow: hidden
+        /* единая высота ВСЕХ карточек, кроме графика */
     }
 
     /* подпись (имя параметра) внутри карточки */
     .vname {
       color: #ffffff;
       /* серый цвет подписи */
-      font-size: 11px
+      font-size: 12px
         /* размер шрифта подписи */
     }
 
     /* числовое значение внутри карточки */
     .vval {
       font-family: ui-monospace, Consolas, monospace;
-      font-size: 16px;
+      font-size: 20px;
       /* размер цифр значения */
       white-space: nowrap
     }
@@ -241,10 +241,17 @@
     }
 
     /* canvas самого графика внутри карточки */
+    /* график: высота от canvas (3x барграф), НЕ фиксированные 44px */
+    .vcard.chart {
+      height: auto;
+      overflow: visible;
+      grid-column: 1/-1
+    }
+
     .vcard.chart canvas {
       width: 100%;
-      height: 120px;
-      /* высота графика */
+      height: 114px;
+      /* карточка графика = 3 высоты карточки барграфа (46*3=138) */
       display: block
     }
 
@@ -257,7 +264,7 @@
     /* кнопка Раскладка в активном режиме */
 
     body.edit .vcard {
-      outline: 1px dashed #39414f;
+      outline: 2px dashed #6a5a1f;
       /* перетаскиваемая карточка: пунктир */
       cursor: grab;
       /* мобильный вариант: без этого жест уходит в нативный скролл */
@@ -281,12 +288,13 @@
 
     /* дорожка барграфа: тёмный фон, заливка едет внутри */
     .hbar {
-      position: relative;         /* контейнер для процента (.bpct) */
+      position: relative;
+      /* контейнер для процента (.bpct) */
       background: #0e1116;
       /* цвет пустой дорожки */
       border: 1px solid #39414f;
       border-radius: 2px;
-      height: 14px;
+      height: 20px;
       /* высота дорожки (в карточке ниже - 16) */
       margin-top: 6px;
       overflow: hidden
@@ -296,10 +304,11 @@
     .hfill {
       height: 100%;
       width: 0;
-      transition: width .25s ease-out;
+      transition: width .20s ease-out;
       /* плавность движения заливки */
       /* green torn stripe: wide dashes, hairline gaps */
-      background: repeating-linear-gradient(90deg, #3f5dbf 0 8px, transparent 8px 10px) /* штрих 8px, зазор 2px */
+      background: repeating-linear-gradient(90deg, #3f5dbf 0 10px, transparent 10px 12px)
+        /* штрих 8px, зазор 2px */
         /* цвет штриха */
     }
 
@@ -313,7 +322,7 @@
 
     /* дорожка внутри карточки барграфа - чуть выше */
     .vcard.wbar .hbar {
-      height: 16px;
+      height: 20px;
       margin-top: 0
     }
 
@@ -325,10 +334,11 @@
       top: 50%;
       transform: translate(-50%, -50%);
       color: #fff;
-      font-size: 11px;
+      font-size: 15px;
       line-height: 1;
       font-family: ui-monospace, Consolas, monospace;
-      text-shadow: 0 0 3px #000, 0 0 3px #000   /* читаемость поверх штрихов */
+      text-shadow: 0 0 3px #000, 0 0 3px #000
+        /* читаемость поверх штрихов */
     }
 
     /* строка значения виджета "Параметр": число + единицы прижаты вправо */
@@ -340,7 +350,8 @@
     }
 
     .vunit {
-      color: #8b94a7;             /* единицы мельче и тусклее числа */
+      color: #8b94a7;
+      /* единицы мельче и тусклее числа */
       font-size: 11px;
       white-space: nowrap
     }
@@ -380,7 +391,7 @@
     /* подпись карточки бита: мелкая, переносится по пробелам */
     .vcard.wbit .vname {
       white-space: normal;
-      font-size: 10px;
+      font-size: 12px;
       line-height: 1.15;
       color: #ffffff;
       overflow: hidden
@@ -388,7 +399,7 @@
 
     /* лампа состояния бита (цвет активного уровня задаёт виджет) */
     .bitlamp {
-      height: 16px;
+      height: 20px;
       /* высота лампы */
       border: 1px solid #39414f;
       border-radius: 6px;
@@ -414,14 +425,15 @@
       justify-content: center;
       gap: 2px;
       padding: 3px 4px;
-      /* высота наследует общий min-height карточек (как у параметра) */
+      height: 50px;
+      box-sizing: border-box;
       align-items: center;
       text-align: center;
       cursor: pointer;
       user-select: none;
       font-weight: 650;
-      font-size: 16px;
-      color: #fff
+      font-size: 18px;
+      color: #BBB;
     }
 
     .vcard.wbtn:active {
@@ -436,7 +448,10 @@
       display: flex;
       flex-direction: column;
       gap: 2px;
-      padding: 3px
+      padding: 3px;
+      box-sizing: border-box;
+      height: 50px;
+      justify-content: space-between
     }
 
     .vcard.winp input {
@@ -444,10 +459,11 @@
       color: #d8dee9;
       border: 1px solid #39414f;
       border-radius: 4px;
-      padding: 4px 6px;
-      font: 14px ui-monospace, Consolas, monospace;
+      padding: 4px 3px;
+      font: 17px ui-monospace, Consolas, monospace;
       text-align: right;
-      width: 100%;              /* поле на всю ширину карточки */
+      width: 100%;
+      /* поле на всю ширину карточки */
       box-sizing: border-box
     }
   </style>
@@ -459,7 +475,7 @@
     <span id="link" class="tag">…</span>
     <!-- шестерёнка справа вверху: страница панели (раскладка/виджеты/
          Wi-Fi/перезагрузка/прибор/профили); отладочная панель теперь там -->
-    <a href="#" class="gear" id="gear" onclick="gearClick();return false">&#9881;</a>
+    <a href="#" class="gear" id="gear" onclick="gearClick();return false" title="Панель">&#9881;</a>
   </header>
   <div id="values"></div>
   <!-- панели редактирования всё ещё живут здесь (режим правки и

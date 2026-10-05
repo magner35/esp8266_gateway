@@ -126,31 +126,25 @@ static esp_err_t h_app(httpd_req_t *req)
 
 static esp_err_t h_scan(httpd_req_t *req)
 {
-    static TickType_t scanStart; /* when the current scan was kicked off */
     char out[2048];
     size_t off = 0;
     wifi_ap_record_t aps[16];
     uint16_t n = 16;
     int i;
 
-    if (strchr(req->uri, '?'))
-    { /* ?restart=1 - drop the previous results, rescan */
-        wifi_scan_async();
-        scanStart = xTaskGetTickCount();
-        httpd_resp_set_type(req, "application/json");
-        httpd_resp_send(req, "{\"running\":true}", 16);
-        return ESP_OK;
-    }
-    /* a full channel sweep takes ~2 s: report "running" while it is in
-     * flight, the portal page polls us every 1.5 s */
-    if (xTaskGetTickCount() - scanStart < pdMS_TO_TICKS(2500))
+    /*
+     * Blocking scan (~2 s full channel sweep): the old async scheme with
+     * hand-rolled 2.5 s timers lost results and never worked in STA
+     * mode. Blocking here ties one httpd worker, acceptable for a
+     * manual rescan.
+     */
     {
-        httpd_resp_set_type(req, "application/json");
-        httpd_resp_send(req, "{\"running\":true}", 16);
-        return ESP_OK;
+        wifi_scan_config_t cfg = {0};
+        if (esp_wifi_scan_start(&cfg, true) != ESP_OK)
+            n = 0;
+        else if (esp_wifi_scan_get_ap_records(&n, aps) != ESP_OK)
+            n = 0;
     }
-    if (esp_wifi_scan_get_ap_records(&n, aps) != ESP_OK)
-        n = 0;
     off += snprintf(out + off, sizeof(out) - off, "{\"nets\":[");
     for (i = 0; i < n && off < sizeof(out) - 128; i++)
     {
@@ -447,7 +441,11 @@ static esp_err_t reply_ok_err(httpd_req_t *req, const ske_req_t *r,
         return ESP_OK;
     }
     json_escape(r->err[0] ? r->err : "error", esc, sizeof(esc));
-    snprintf(out, sizeof(out), "{\"ok\":false,\"error\":\"%s\"}", esc);
+    if (r->wait_s)
+        snprintf(out, sizeof(out), "{\"ok\":false,\"error\":\"%s\",\"wait\":%u}",
+                 esc, (unsigned)r->wait_s);
+    else
+        snprintf(out, sizeof(out), "{\"ok\":false,\"error\":\"%s\"}", esc);
     httpd_resp_set_status(req, "400 Bad Request");
     httpd_resp_send(req, out, strlen(out));
     return ESP_OK;

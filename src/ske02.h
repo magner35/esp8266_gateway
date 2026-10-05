@@ -30,6 +30,7 @@ typedef struct
     char text[40];   /* value text / password */
     int result;      /* BS_* / SKE_ERR_TRANSPORT */
     char err[64];    /* human message, empty on success */
+    uint16_t wait_s; /* lockout remainder, s (BS_WAIT) */
     SemaphoreHandle_t done; /* posted when result is ready */
 } ske_req_t;
 

@@ -64,7 +64,7 @@
 
     /* все обычные кнопки */
     button {
-      background: #2a5bdb;
+      background: #21366c;
       color: #fff;
       border: 0;
       border-radius: 4px;
@@ -106,16 +106,16 @@
     }
 
     #nav button.act {
-      background: #2a5bdb
+      background: #21366c;
     }
 
     /* ряд табов второго уровня внутри раздела */
     .tabs {
       display: flex;
       flex-wrap: wrap;
-      gap: 4px;
+      gap: 2px;                    /* минимальный зазор между табами */
       border-bottom: 2px solid #2a3140;
-      margin-bottom: 8px
+      margin-bottom: 3px
     }
 
     .tabs button {
@@ -124,7 +124,7 @@
       border: 0;
       border-bottom: 2px solid transparent;
       border-radius: 6px 6px 0 0;
-      padding: 7px 14px;
+      padding: 2px 6px;             /* минимум внутри таба */
       cursor: pointer;
       font-size: 12px
     }
@@ -139,16 +139,16 @@
     .subtabs {
       display: flex;
       flex-wrap: wrap;
-      gap: 4px;
-      margin: 0 0 8px 8px
+      gap: 2px;
+      margin: 0 0 4px 4px
     }
 
     .subtabs button {
       background: #232a38;
       color: #8b94a7;
       border: 0;
-      border-radius: 10px;
-      padding: 3px 5px;
+      border-radius: 8px;
+      padding: 2px 4px;
       cursor: pointer;
       font-size: 12px
     }
@@ -168,7 +168,7 @@
 
     td,
     th {
-      padding: 5px 5px;
+      padding: 2px 4px;             /* компактнее внутри таба */
       border-top: 1px solid #2a3140;
       text-align: left;
       vertical-align: middle
@@ -211,13 +211,14 @@
       display: flex;
       gap: 6px;
       align-items: center;
-      flex-wrap: wrap;
+      flex-wrap: nowrap;          /* блок без переносов */
       justify-content: flex-end
     }
 
     .set input[type=number],
     .set input[type=text] {
-      width: 80px
+      width: 80px;
+      padding: 2px 4px
     }
 
     .set input.fnum {

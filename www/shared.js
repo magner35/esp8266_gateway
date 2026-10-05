@@ -251,7 +251,7 @@ const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;'
           headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body
         })).json();
         if (r.ok) { INP[w.src].v = parseFloat(r.value); paramsTick() }
-        else alert((INPS[w.src].n) + ': ' + r.error);
+        else alert((INPS[w.src].n) + ': ' + r.error + (r.wait ? ' (ждать ~' + r.wait + ' с)' : ''));
       } catch (e2) { alert('нет ответа от шлюза') }
     }
     /*
@@ -322,7 +322,7 @@ const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;'
       const per = CHPER[w.per] ? w.per : 600;
       const col = chartCol(w);
       const dpr = window.devicePixelRatio || 1;
-      const cw = cv.offsetWidth, ch = 120;
+      const cw = cv.offsetWidth, ch = 114;   /* карточка = 3x барграф (46px) */
       if (cv.width !== cw * dpr || cv.height !== ch * dpr) { cv.width = cw * dpr; cv.height = ch * dpr }
       const g = cv.getContext('2d');
       g.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -648,16 +648,19 @@ const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;'
       h += '<div class="wrow"><div class="r1"><span>＋ Индикатор</span><button class="sq" onclick="wAddBit()">&#43;</button></div>' +
         '<div class="r2"><select id="nbiBit">' + bitOptions('setpoint:0') + '</select>' +
         ' <input id="nbiCol" type="color" value="' + BITCOL[0] + '"></div></div>';
-      /* кнопки: по строке на вид, без комбобоксов; подсказка действия */
+      /* кнопки и уставки - одноразовые: уже добавленные
+         ИСЧЕЗАЮТ из набора добавления */
       for (const m in BTN)
-        h += '<div class="wrow" title="' + BTN[m].h + '"><div class="r1"><span style="color:' + BTN[m].col + '">＋ Кнопка ' + BTN[m].n +
-          '</span><button class="sq" onclick="wAddBtn(\'' + m + '\')">&#43;</button></div>' +
-          '<div class="r2"><span class="flash">' + BTN[m].h + '</span></div></div>';
+        if (!widgets.some(w => w.t === 'btn' && w.mode === m))
+          h += '<div class="wrow" title="' + BTN[m].h + '"><div class="r1"><span style="color:' + BTN[m].col + '">＋ Кнопка ' + BTN[m].n +
+            '</span><button class="sq" onclick="wAddBtn(\'' + m + '\')">&#43;</button></div>' +
+            '<div class="r2"><span class="flash">' + BTN[m].h + '</span></div></div>';
       /* ввод уставок дозатора: Доза / Упреждение / Перелив */
       for (const s in INPS)
-        h += '<div class="wrow"><div class="r1"><span>＋ Ввод: ' + INPS[s].n +
-          '</span><button class="sq" onclick="wAddInp(\'' + s + '\')">&#43;</button></div>' +
-          '<div class="r2"><span class="flash">уставка дозатора</span></div></div>';
+        if (!widgets.some(w => w.t === 'inp' && w.src === s))
+          h += '<div class="wrow"><div class="r1"><span>＋ Ввод: ' + INPS[s].n +
+            '</span><button class="sq" onclick="wAddInp(\'' + s + '\')">&#43;</button></div>' +
+            '<div class="r2"><span class="flash">уставка дозатора</span></div></div>';
       p.innerHTML = h;
       npMirror();
     }

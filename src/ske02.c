@@ -14,6 +14,7 @@
 #include "ske02.h"
 
 #include <stdio.h>
+#include <stdlib.h>   /* atoi: lockout seconds */
 #include <string.h>
 
 #include "driver/uart.h"
@@ -322,6 +323,7 @@ typedef struct
 {
     int status;   /* first ERR code seen, 0 = none */
     bool seen_ok; /* "OK " line seen */
+    uint16_t wait_s; /* lockout remainder from "access: none (lockout)" */
     char value_line[128]; /* the resulting parameter line after "OK " */
 } reply_ctx_t;
 
@@ -357,7 +359,28 @@ static void unlock_cb(char *line, void *user)
 {
     reply_ctx_t *rc_ = (reply_ctx_t *)user;
     if (!strncmp(line, "access:", 7))
-        rc_->seen_ok = true;
+    {
+        /*
+         * "access: menu ..." = уровни разблокированы - успех.
+         * "access: none (lockout ~48s)" = пароль ВЕРНЫЙ не был принят
+         * (или введён во время блокировки): честно ждём, "ok" нельзя.
+         */
+        if (strstr(line, " none"))
+        {
+            const char *lk = strstr(line, "lockout");
+            if (lk)
+            {
+                rc_->status = BS_WAIT;
+                rc_->wait_s = (uint16_t)atoi(lk + 7);
+            }
+            /* none без lockout: пароль просто не подошёл ни одному
+             * уровню - это ошибка доступа */
+            else
+                rc_->status = BS_ACCESS;
+        }
+        else
+            rc_->seen_ok = true;
+    }
     else if (!strncmp(line, "ERR", 3) && !rc_->status)
         rc_->status = strstr(line, "wait") ? BS_WAIT : BS_ACCESS;
 }
@@ -440,6 +463,7 @@ static void exec_request(ske_req_t *req)
         }
         req->result = rc_.seen_ok ? BS_OK
                                   : (rc_.status ? rc_.status : BS_ACCESS);
+        req->wait_s = rc_.wait_s;
         if (req->result == BS_OK)
             sLastOk = xTaskGetTickCount();
         break;

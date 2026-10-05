@@ -12,10 +12,10 @@ function toggleEdit() {
   $('btnEdit').classList.toggle('act', editing);
   const g = $('gear');
   if (g) {
-    /* в режиме правки шестерёнка становится кнопкой "Закрепить" */
-    g.textContent = editing ? '#' : '⚙';
+    /* обычный режим - шестерёнка; режим правки - якорь (закрепить) */
+    g.textContent = editing ? '\u2693' : '\u2699';
     g.classList.toggle('ok', editing);
-    g.title = editing ? 'Сохранить раскладку' : 'Панель';
+    g.title = editing ? 'Закрепить раскладку' : 'Панель';
   }
   setDrag();
 }

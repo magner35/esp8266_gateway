@@ -230,6 +230,13 @@ class H(http.server.SimpleHTTPRequestHandler):
         elif self.path == "/api/params":
             dump_maybe_reload()
             self._json(params_json())
+        elif self.path.startswith("/scan"):
+            self._json({"nets": [
+                {"s": "CALIPSO1703", "r": -42, "e": 1},
+                {"s": "DIR-320-Home", "r": -58, "e": 1},
+                {"s": "Keenetic-911", "r": -71, "e": 1},
+                {"s": "FreeWiFi", "r": -85, "e": 0}
+            ]})
         elif self.path == "/api/widgets":
             self._json(self.WCFG)
         elif self.path == "/stamp":

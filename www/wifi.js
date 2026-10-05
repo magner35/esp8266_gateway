@@ -1,9 +1,8 @@
         let NETS = [];
-        async function wifiLoad(restart) {
-            if (restart) await fetch('/scan?restart=1');
+        async function wifiLoad() {
+            /* /scan блокирующий: отвечает готовым списком (~2 с) */
             const r = await (await fetch('/scan')).json();
-            if (r.running) { setTimeout(() => load(0), 1500); return }
-            NETS = r.nets;
+            NETS = r.nets || [];
             let h = '<table>';
             NETS.forEach((n, i) => {
                 h += '<tr><td>' + esc(n.s) + '</td><td class="dbm">' + n.r + ' dBm</td><td>' +
@@ -12,5 +11,5 @@
             document.getElementById('nets').innerHTML = h + '</table>';
         }
         function pick(i) { document.getElementById('ssid').value = NETS[i].s }
-        wifiLoad(1);
+        wifiLoad();
     
