@@ -1,5 +1,3 @@
-    const $ = i => document.getElementById(i);
-    function hms(t) { const s = t % 60, m = (t / 60 | 0) % 60, h = t / 3600 | 0; return h ? h + 'ч ' + m + 'м' : m ? m + 'м ' + s + 'с' : s + 'с' }
 
     /*
      * Конфиг виджетов лежит в шлюзе (/api/widgets) блобом v2:
@@ -8,15 +6,15 @@
      */
     let blob = { rev: 0, cur: null, profiles: {} };
 
-    async function load() {
+    async function panelLoad() {
       try {
         const d = await (await fetch('/api/widgets')).json();
         blob = { rev: d.rev || 0, cur: d.cur || d.cfg || null, profiles: d.profiles || {} };
       } catch (e) { }
-      render();
+      profRender();
     }
 
-    function render() {
+    function profRender() {
       let h = '';
       const names = Object.keys(blob.profiles);
       if (!names.length) h = '<div class="prow"><span class="pname" style="color:#8b94a7">профилей нет</span></div>';
@@ -29,7 +27,7 @@
       $('profiles').innerHTML = h;
     }
 
-    function esc(s) { return String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])) }
+    function profEsc(s) { return String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])) }
 
     async function post() {
       const r = await (await fetch('/api/widgets', { method: 'POST', body: JSON.stringify(blob) })).json();
@@ -45,7 +43,7 @@
       if (!Array.isArray(blob.cur)) { alert('текущий набор ещё не сохранён в шлюз'); return }
       blob.profiles[n] = blob.cur;
       blob.rev++;
-      if (await post()) { $('newName').value = ''; render() }
+      if (await post()) { $('newName').value = ''; profRender() }
     }
 
     /* применить профиль: он становится текущим набором (rev++), главная
@@ -54,14 +52,14 @@
       if (!confirm('Применить профиль «' + n + '»? Текущий набор будет заменён.')) return;
       blob.cur = blob.profiles[n];
       blob.rev++;
-      if (await post()) render();
+      if (await post()) profRender();
     }
 
     async function profDel(n) {
       if (!confirm('Удалить профиль «' + n + '»?')) return;
       delete blob.profiles[n];
       blob.rev++;
-      if (await post()) render();
+      if (await post()) profRender();
     }
 
     /* отладочная панель */
@@ -78,5 +76,5 @@
     async function rescan() { await fetch('/api/rescan', { method: 'POST' }); infoTick() }
     function rebootDev() { if (confirm('Перезагрузить прибор?')) fetch('/api/reboot', { method: 'POST' }) }
     infoTick(); setInterval(infoTick, 5000);
-    load();
+    panelLoad();
   

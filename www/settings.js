@@ -1,7 +1,5 @@
     const COMMON = '\x01';              /* pseudo tab for params directly in the section */
     let P = [], SECT = [], built = '', cur = 0, curT = {}, curS = {}, pwMap = {}, dirty = new Set();
-    const $ = i => document.getElementById(i);
-    const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
     const p2 = v => String(v).padStart(2, '0');
     /* manual refresh only: values never change under the user's fingers */
     let retryT = 0;
@@ -9,7 +7,7 @@
       try {
         const d = await (await fetch('/api/params')).json();
         P = d.params; SECT = d.sections; dirty = new Set();
-        render(d.count + '|' + d.params.length + '|' + d.sections.length + '|' + d.rc);
+        setRender(d.count + '|' + d.params.length + '|' + d.sections.length + '|' + d.rc);
         applyFilter();
         /* the tree is empty while a rescan/listing is in flight on the
          * gateway - poll instead of demanding a wiring check */
@@ -77,7 +75,7 @@
       return rows;
     }
     let curTab = COMMON;                 /* active L2 tab name of the section */
-    function render(fp) {
+    function setRender(fp) {
       if (!P.length) { $('tabs').innerHTML = ''; $('subtabs').innerHTML = ''; $('sections').innerHTML = '<p>Опрос прибора… если через минуту пусто — проверьте подключение UART и питание, затем нажмите «Обновить».</p>'; built = fp; return }
       let h = '';
       SECT.forEach((s, k) => h += '<button class="' + (k === cur ? 'act' : '') + '" onclick="go(' + k + ')">' + esc(s) + '</button>');
@@ -135,12 +133,12 @@
       $('sections').innerHTML = h || '<p>Ничего не найдено.</p>';
       $('tabs').innerHTML = ''; $('subtabs').innerHTML = '';
     }
-    function go(k) { cur = k; render(built); syncPw(); applyFilter() }
+    function go(k) { cur = k; setRender(built); syncPw(); applyFilter() }
     function go2(k) { curT[cur] = k; applyFilter() }
     function go3(k) { curS[cur + '|' + curTab] = k; applyFilter() }
     function applyFilter() {
       const f = $('filter').value.trim().toLowerCase();
-      if (!f) { render(built); return }
+      if (!f) { setRender(built); return }
       renderSearch(f);
     }
     function curVal(q) {

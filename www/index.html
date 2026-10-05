@@ -27,7 +27,7 @@
       color: #ffffff;
       /* основной цвет текста */
       margin: 0;
-      padding: 12px
+      padding: 4px
         /* внешний отступ страницы */
     }
 
@@ -53,6 +53,14 @@
 
     .gear:hover {
       background: #2a3140
+    }
+
+    /* в режиме правки шестерёнка = зелёная кнопка "Закрепить" */
+    .gear.ok {
+      background: #1d5c2f;
+      color: #fff;
+      font-size: 13px;
+      padding: 4px 10px
     }
 
     h1 {
@@ -145,17 +153,39 @@
      *   барграф            span 4 -> не более ОДНОГО в ряд
      *   бит                span 1 -> не более ЧЕТЫРЁХ в ряд
      *   график             1/-1   -> один на всю ширину (как и было) */
-    @media (max-width: 640px) {
+    /*
+     * МОБИЛЬНЫЙ ВАРИАНТ: узкий экран ИЛИ тач-устройство без мыши
+     * (pointer: coarse - планшет/телефон в альбомной ориентации тоже
+     * широкий, но им нужен тот же компактный лайоут).
+     * Ширины виджетов:
+     *   барграф и график - весь экран
+     *   параметр и ввод  - 1/2 экрана
+     *   кнопка и индикатор - 1/4 экрана
+     */
+    @media (max-width: 640px), (pointer: coarse) and (hover: none) {
       #values {
         grid-template-columns: repeat(4, minmax(0, 1fr))
       }
 
-      .vcard {
+      /* специфичность выше базовых правил (#values), иначе каскад
+         побеждает более поздний .vcard.winp{span 4} */
+
+      /* параметр, ввод и значение - половина экрана */
+      #values .vcard,
+      #values .vcard.winp {
         grid-column: auto / span 2
       }
 
-      .vcard.wbit {
+      /* индикатор и кнопка - четверть экрана */
+      #values .vcard.wbit,
+      #values .vcard.wbtn {
         grid-column: auto / span 1
+      }
+
+      /* барграф и график - весь экран */
+      #values .vcard.wbar,
+      #values .vcard.chart {
+        grid-column: 1 / -1
       }
     }
 
@@ -429,7 +459,7 @@
     <span id="link" class="tag">…</span>
     <!-- шестерёнка справа вверху: страница панели (раскладка/виджеты/
          Wi-Fi/перезагрузка/прибор/профили); отладочная панель теперь там -->
-    <a href="/panel" class="gear">&#9881;</a>
+    <a href="#" class="gear" id="gear" onclick="gearClick();return false">&#9881;</a>
   </header>
   <div id="values"></div>
   <!-- панели редактирования всё ещё живут здесь (режим правки и

@@ -1,4 +1,5 @@
     const $ = i => document.getElementById(i);
+const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
     /* live values window: MeterData_t fields, names as the struct members;
      * bitwise members render as FSETPOINT_/FSTATUS_/FISR_ flag chips */
     const FLAGS = {

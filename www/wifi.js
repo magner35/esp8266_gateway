@@ -1,6 +1,5 @@
         let NETS = [];
-        const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
-        async function load(restart) {
+        async function wifiLoad(restart) {
             if (restart) await fetch('/scan?restart=1');
             const r = await (await fetch('/scan')).json();
             if (r.running) { setTimeout(() => load(0), 1500); return }
@@ -13,5 +12,5 @@
             document.getElementById('nets').innerHTML = h + '</table>';
         }
         function pick(i) { document.getElementById('ssid').value = NETS[i].s }
-        load(1);
+        wifiLoad(1);
     

@@ -25,7 +25,7 @@
       background: #000000;
       color: #d8dee9;
       margin: 0;
-      padding: 12px
+      padding: 4px
     }
 
     /* шапка: заголовок, метки связи, кнопки навигации */
@@ -272,17 +272,23 @@
 
     /* --- 6. F|V-грид линеаризации ----------------------------------- */
 
-    /* сетка пар калибровки F01|V01, F02|V02, ... */
+    /* сетка пар калибровки: поле ПРИЖАТО к своей метке (F01[поле] V01[поле]),
+     * зазор между парами - побольше */
     .lingrid {
       display: grid;
-      grid-template-columns: auto auto auto auto;
-      gap: 8px 18px;
+      grid-template-columns: auto minmax(70px, 1fr) auto minmax(70px, 1fr);
+      gap: 6px 6px;               /* поле прижато к метке */
       align-items: center;
       background: #1b202a;
       border: 1px solid #2a3140;
       border-radius: 8px;
-      padding: 12px;
+      padding: 8px;
       margin-bottom: 8px
+    }
+
+    /* зазор МЕЖДУ парами: отступ меток V-колонки (каждый 3-й элемент) */
+    .lingrid > :nth-child(4n + 3) {
+      margin-left: 16px
     }
 
     /* подписи F01/V01 в сетке линеаризации */
@@ -292,9 +298,15 @@
       white-space: nowrap
     }
 
-    /* поля грида - влево, а не вправо */
+    /* поля грида - вплотную к метке, узкие */
     .lingrid .set {
-      justify-content: flex-start
+      justify-content: flex-start;
+      gap: 2px
+    }
+
+    .lingrid .set input {
+      width: 76px;
+      padding: 2px 4px
     }
 
     /* изменённое поле линеаризации - жёлтая рамка */
@@ -308,7 +320,7 @@
   <header>
     <h1>SKE-02 Прибор</h1>
     <!-- меток UART/fw и кнопки Wi-Fi здесь больше нет: всё это на /panel -->
-    <a href="/panel" style="margin-left:auto"><button>&#8592; Назад</button></a>
+    <a href="#panel" style="margin-left:auto"><button>&#8592; Назад</button></a>
   </header>
   <div id="nav"></div>
   <div id="tabs"></div>

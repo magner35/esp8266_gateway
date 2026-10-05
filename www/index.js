@@ -6,9 +6,24 @@ function vBuild() {
 let editing = false;
 function toggleEdit() {
   editing = !editing;
-  document.body.className = editing ? 'edit' : '';
+  const sec = document.getElementById('sec-main');
+  /* classList, НЕ className: класс .sec нужен роутеру и CSS секций */
+  if (sec) sec.classList.toggle('edit', editing);
   $('btnEdit').classList.toggle('act', editing);
+  const g = $('gear');
+  if (g) {
+    /* в режиме правки шестерёнка становится кнопкой "Закрепить" */
+    g.textContent = editing ? '#' : '⚙';
+    g.classList.toggle('ok', editing);
+    g.title = editing ? 'Сохранить раскладку' : 'Панель';
+  }
   setDrag();
+}
+/* шестерёнка: в обычном режиме - на панель; в режиме правки -
+ * зелёная галочка: сохранить компоновку и выйти из правки */
+function gearClick() {
+  if (editing) { wSave(); toggleEdit() }
+  else routeTo('panel');
 }
 function setDrag() {
   const el = $('values'); if (!el) return;
@@ -223,6 +238,4 @@ setInterval(valuesTick, 200); valuesTick();
 /* отладочная информация (fw/ip/rssi/uptime/heap) переехала на /panel */
 paramsTick(); setInterval(paramsTick, 30000);
 wSync();
-/* /panel открывает режимы правки ссылками с query-параметрами */
-if (location.search.includes('edit')) toggleEdit();
 

@@ -215,9 +215,9 @@ class H(http.server.SimpleHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-    PAGES = {"/": "index.html", "/index.html": "index.html",
-             "/settings": "settings.html", "/wifi": "wifi.html",
-             "/panel": "panel.html", "/widgets": "widgets.html"}
+    # SPA: все страницы отдают скомпонованный app.html (роутер внутри)
+    PAGES = {p: "app.html" for p in
+             ["/", "/index.html", "/settings", "/wifi", "/panel", "/widgets"]}
 
     def do_GET(self):
         if self.path == "/api/values":

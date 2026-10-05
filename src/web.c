@@ -113,33 +113,14 @@ static void send_page(httpd_req_t *req, const char *page)
 /* ------------------------------------------------------------------ */
 /* pages                                                               */
 
-static esp_err_t h_root(httpd_req_t *req)
+/*
+ * Single-page app: every page URI serves the SAME composed app.html
+ * (built by tools/pages.py from the split www/ modules); the router
+ * inside picks the section by path/hash, no page reloads on nav.
+ */
+static esp_err_t h_app(httpd_req_t *req)
 {
-    send_page(req, wifi_ap_ssid() ? PAGE_WIFI : PAGE_INDEX);
-    return ESP_OK;
-}
-
-static esp_err_t h_wifi(httpd_req_t *req)
-{
-    send_page(req, PAGE_WIFI);
-    return ESP_OK;
-}
-
-static esp_err_t h_settings(httpd_req_t *req)
-{
-    send_page(req, PAGE_SETTINGS);
-    return ESP_OK;
-}
-
-static esp_err_t h_panel(httpd_req_t *req)
-{
-    send_page(req, PAGE_PANEL);
-    return ESP_OK;
-}
-
-static esp_err_t h_widgets(httpd_req_t *req)
-{
-    send_page(req, PAGE_WIDGETS);
+    send_page(req, PAGE_APP);
     return ESP_OK;
 }
 
@@ -697,15 +678,15 @@ void web_start(void)
 
     httpd_uri_t u;
 
-    u = (httpd_uri_t){.uri = "/", .method = HTTP_GET, .handler = h_root};
+    u = (httpd_uri_t){.uri = "/", .method = HTTP_GET, .handler = h_app};
     httpd_register_uri_handler(sServer, &u);
-    u = (httpd_uri_t){.uri = "/wifi", .method = HTTP_GET, .handler = h_wifi};
+    u = (httpd_uri_t){.uri = "/wifi", .method = HTTP_GET, .handler = h_app};
     httpd_register_uri_handler(sServer, &u);
-    u = (httpd_uri_t){.uri = "/settings", .method = HTTP_GET, .handler = h_settings};
+    u = (httpd_uri_t){.uri = "/settings", .method = HTTP_GET, .handler = h_app};
     httpd_register_uri_handler(sServer, &u);
-    u = (httpd_uri_t){.uri = "/panel", .method = HTTP_GET, .handler = h_panel};
+    u = (httpd_uri_t){.uri = "/panel", .method = HTTP_GET, .handler = h_app};
     httpd_register_uri_handler(sServer, &u);
-    u = (httpd_uri_t){.uri = "/widgets", .method = HTTP_GET, .handler = h_widgets};
+    u = (httpd_uri_t){.uri = "/widgets", .method = HTTP_GET, .handler = h_app};
     httpd_register_uri_handler(sServer, &u);
     u = (httpd_uri_t){.uri = "/scan", .method = HTTP_GET, .handler = h_scan};
     httpd_register_uri_handler(sServer, &u);

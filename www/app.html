@@ -1,0 +1,1867 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>SKE-02</title>
+<style>
+body{background:#000;color:#d8dee9;font:13px/1.45 system-ui,sans-serif;margin:0;padding:4px}
+html{-moz-text-size-adjust:100%;-webkit-text-size-adjust:100%;text-size-adjust:100%}
+button,input,select,textarea{font:inherit;color:inherit}
+:root{color-scheme:dark}
+.sec{display:none!important}
+.sec.on{display:block!important}
+/* --- index.html --- */
+#sec-main {
+      font: 13px/1.45 system-ui, sans-serif;
+      background: #000000;
+      color: #ffffff;
+      margin: 0;
+      padding: 4px
+    }#sec-main header {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: center;
+      margin-bottom: 10px
+    }#sec-main .gear {
+      margin-left: auto;
+      font-size: 22px;
+      line-height: 1;
+      color: #d8dee9;
+      text-decoration: none;
+      padding: 2px 6px;
+      border-radius: 4px
+    }#sec-main .gear:hover {
+      background: #2a3140
+    }#sec-main .gear.ok {
+      background: #1d5c2f;
+      color: #fff;
+      font-size: 13px;
+      padding: 4px 10px
+    }#sec-main h1 {
+      font-size: 18px;
+      margin: 0 8px 0 0
+    }#sec-main .tag {
+      background: #2a3140;
+      border-radius: 4px;
+      padding: 2px 8px;
+      font-size: 12px;
+      white-space: nowrap
+    }#sec-main .ok {
+      background: #1d5c2f
+    }#sec-main .bad {
+      background: #6c2431
+    }#sec-main button {
+      background: #1e3264;
+      color: #fff;
+      border: 0;
+      border-radius: 4px;
+      padding: 5px 5px;
+      cursor: pointer;
+      font-size: 12px
+    }#sec-main button.warn {
+      background: #7d3127
+    }#sec-main #debug {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      align-items: center;
+      margin: 0 0 8px 0;
+      padding: 4px 8px;
+      border: 1px dashed #39414f;
+      border-radius: 4px;
+      color: #8b94a7;
+      font-size: 12px
+    }#sec-main #debug .tag {
+      background: transparent;
+      border: 1px solid #2a3140;
+      padding: 1px 6px
+    }#sec-main #debug button {
+      font-size: 12px;
+      padding: 4px 4px
+    }#sec-main #values {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(60px, 1fr));
+      gap: 6px;
+      margin: 0 0 10px 0
+    }@media (max-width: 640px), (pointer: coarse) and (hover: none){#sec-main #values {
+        grid-template-columns: repeat(4, minmax(0, 1fr))
+      }#sec-main #values .vcard, #sec-main #values .vcard.winp {
+        grid-column: auto / span 2
+      }#sec-main #values .vcard.wbit, #sec-main #values .vcard.wbtn {
+        grid-column: auto / span 1
+      }#sec-main #values .vcard.wbar, #sec-main #values .vcard.chart {
+        grid-column: 1 / -1
+      }
+    }#sec-main .vcard {
+      grid-column: span 2
+    }#sec-main .vcard.wbar {
+      grid-column: span 4
+    }#sec-main .vcard {
+      background: #1b202a;
+      border: 2px solid #2a3140;
+      border-radius: 4px;
+      padding: 2px 4px;
+      min-height: 36px
+    }#sec-main .vname {
+      color: #ffffff;
+      font-size: 11px
+    }#sec-main .vval {
+      font-family: ui-monospace, Consolas, monospace;
+      font-size: 16px;
+      white-space: nowrap
+    }#sec-main .vcard.wide {
+      grid-column: span 4
+    }#sec-main .vcard.chart {
+      grid-column: 1/-1
+    }#sec-main .vcard.chart canvas {
+      width: 100%;
+      height: 120px;
+      display: block
+    }#sec-main #btnEdit.act {
+      background: #1d5c2f
+    }#sec-main.edit .vcard {
+      outline: 1px dashed #39414f;
+      cursor: grab;
+      touch-action: none;
+      -webkit-touch-callout: none
+    }#sec-main.edit .vcard.dragging {
+      opacity: .35;
+      cursor: grabbing
+    }#sec-main.edit #values {
+      user-select: none
+    }#sec-main .hbar {
+      position: relative;         
+      background: #0e1116;
+      border: 1px solid #39414f;
+      border-radius: 2px;
+      height: 14px;
+      margin-top: 6px;
+      overflow: hidden
+    }#sec-main .hfill {
+      height: 100%;
+      width: 0;
+      transition: width .25s ease-out;
+      background: repeating-linear-gradient(90deg, #3f5dbf 0 8px, transparent 8px 10px) 
+    }#sec-main .vcard.wbar {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      padding: 3px
+    }#sec-main .vcard.wbar .hbar {
+      height: 16px;
+      margin-top: 0
+    }#sec-main .bpct {
+      position: absolute;
+      left: 50%;
+      top: 50%;
+      transform: translate(-50%, -50%);
+      color: #fff;
+      font-size: 11px;
+      line-height: 1;
+      font-family: ui-monospace, Consolas, monospace;
+      text-shadow: 0 0 3px #000, 0 0 3px #000   
+    }#sec-main .vrow {
+      display: flex;
+      justify-content: flex-end;
+      align-items: baseline;
+      gap: 4px
+    }#sec-main .vunit {
+      color: #8b94a7;             
+      font-size: 11px;
+      white-space: nowrap
+    }#sec-main .bsub {
+      float: right;
+      color: #8b94a7;
+      font-size: 11px;
+      white-space: nowrap
+    }#sec-main .utop {
+      float: right;
+      color: #8b94a7;
+      font-size: 11px;
+      white-space: nowrap
+    }#sec-main .vcard.wbit {
+      grid-column: span 1;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      gap: 2px;
+      padding: 3px 4px
+    }#sec-main .vcard.wbit .vname {
+      white-space: normal;
+      font-size: 10px;
+      line-height: 1.15;
+      color: #ffffff;
+      overflow: hidden
+    }#sec-main .bitlamp {
+      height: 16px;
+      border: 1px solid #39414f;
+      border-radius: 6px;
+      background: #0e1116;
+      transition: background .15s
+    }#sec-main .bitlamp.on {
+      box-shadow: 0 0 6px 0 currentColor
+    }#sec-main .vcard.wbtn {
+      grid-column: span 1;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      gap: 2px;
+      padding: 3px 4px;
+      align-items: center;
+      text-align: center;
+      cursor: pointer;
+      user-select: none;
+      font-weight: 650;
+      font-size: 16px;
+      color: #fff
+    }#sec-main .vcard.wbtn:active {
+      filter: brightness(1.3)
+    }#sec-main .vcard.winp {
+      grid-column: span 4;
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      padding: 3px
+    }#sec-main .vcard.winp input {
+      background: #0e1116;
+      color: #d8dee9;
+      border: 1px solid #39414f;
+      border-radius: 4px;
+      padding: 4px 6px;
+      font: 14px ui-monospace, Consolas, monospace;
+      text-align: right;
+      width: 100%;              
+      box-sizing: border-box
+    }
+/* --- widgets.html --- */
+#sec-widgets {
+      font: 13px/1.45 system-ui, sans-serif;
+      background: #000000;       
+      color: #d8dee9;
+      margin: 0;
+      padding: 4px
+    }#sec-widgets header {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: center;
+      margin-bottom: 10px
+    }#sec-widgets h1 {
+      font-size: 18px;
+      margin: 0 8px 0 0
+    }#sec-widgets header .back {
+      margin-left: auto
+    }#sec-widgets button {
+      background: #2a5bdb;
+      color: #fff;
+      border: 0;
+      border-radius: 4px;
+      padding: 5px 5px;
+      cursor: pointer;
+      font-size: 12px
+    }#sec-widgets button.warn { background: #a23b2e }#sec-widgets { color-scheme: dark }#sec-widgets .flash {
+      color: #7aa2f7;
+      font-size: 12px
+    }#sec-widgets #wpanel {
+      display: flex;
+      flex-direction: column;
+      gap: 6px
+    }#sec-widgets .wrow {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      background: #141821;
+      border: 1px solid #232a38;
+      border-radius: 4px;
+      padding: 4px 8px;
+      font-size: 13px
+    }#sec-widgets .r1, #sec-widgets .r2 {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      align-items: center
+    }#sec-widgets .r1 span {
+      flex: 1              
+    }#sec-widgets button.sq {
+      width: 26px;
+      height: 26px;
+      padding: 0;
+      flex: 0 0 auto;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center
+    }#sec-widgets .r1 .autolbl {
+      flex: 0 0 auto;
+      white-space: nowrap
+    }#sec-widgets .wsec {
+      color: #8b94a7;
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: .08em;
+      margin-top: 6px
+    }#sec-widgets select, #sec-widgets input[type=number] {
+      background: #0e1116;
+      color: #d8dee9;
+      border: 1px solid #39414f;
+      border-radius: 4px;
+      padding: 2px 4px;
+      font-size: 13px
+    }#sec-widgets select:disabled {
+      color: #565f6e;
+      background: #141821
+    }#sec-widgets .r2 select, #sec-widgets .r2 input {
+      min-width: 0;
+      max-width: 26vw;            
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      flex: 0 1 auto              
+    }#sec-widgets .r2 {
+      flex-wrap: nowrap           
+    }#sec-widgets .r2 label {
+      white-space: nowrap;
+      flex: 0 0 auto
+    }
+/* --- panel.html --- */
+#sec-panel {
+      font: 14px/1.45 system-ui, sans-serif;
+      background: #000000;       
+      color: #d8dee9;
+      margin: 0;
+      padding: 4px
+    }#sec-panel header {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: center;
+      margin-bottom: 10px
+    }#sec-panel h1 {
+      font-size: 18px;
+      margin: 0 8px 0 0
+    }#sec-panel button {
+      background: #2a5bdb;       
+      color: #fff;
+      border: 0;
+      border-radius: 4px;
+      padding: 5px 5px;
+      cursor: pointer;
+      font-size: 12px
+    }#sec-panel button.warn { background: #a23b2e }#sec-panel button.ok { background: #1d5c2f }#sec-panel input {
+      background: #0e1116;       
+      color: #d8dee9;
+      border: 1px solid #39414f;
+      border-radius: 4px;
+      padding: 4px 8px;
+      box-sizing: border-box
+    }#sec-panel { color-scheme: dark }#sec-panel .tag {
+      background: #2a3140;
+      border-radius: 4px;
+      padding: 2px 8px;
+      font-size: 12px;
+      white-space: nowrap
+    }#sec-panel h2 {
+      font-size: 13px;
+      color: #8b94a7;
+      text-transform: uppercase;
+      letter-spacing: .08em;
+      margin: 16px 0 6px
+    }#sec-panel .tiles {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 8px
+    }#sec-panel .tile {
+      background: #1b202a;       
+      border: 1px solid #2a3140;
+      border-radius: 4px;
+      padding: 14px 10px;
+      text-align: center;
+      cursor: pointer;
+      color: #d8dee9;
+      text-decoration: none;
+      font-size: 14px
+    }#sec-panel .tile:hover { background: #232a38 }#sec-panel .tile .ic { font-size: 20px; display: block; margin-bottom: 4px }#sec-panel .prow {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      align-items: center;
+      background: #1b202a;
+      border: 1px solid #232a38;
+      border-radius: 4px;
+      padding: 4px 8px;
+      margin-bottom: 6px;
+      font-size: 13px
+    }#sec-panel .prow .pname { flex: 1 }#sec-panel #newName { width: 160px }#sec-panel #debug {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      align-items: center;
+      margin: 0 0 8px 0;
+      padding: 4px 8px;
+      border: 1px dashed #39414f;
+      border-radius: 4px;
+      color: #8b94a7;
+      font-size: 12px
+    }#sec-panel #debug .tag {
+      background: transparent;
+      border: 1px solid #2a3140;
+      padding: 1px 6px
+    }
+/* --- settings.html --- */
+#sec-settings {
+      font: 13px/1.45 system-ui, sans-serif;
+      background: #000000;
+      color: #d8dee9;
+      margin: 0;
+      padding: 4px
+    }#sec-settings header {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: center;
+      margin-bottom: 10px
+    }#sec-settings h1 {
+      font-size: 18px;
+      margin: 0 8px 0 0
+    }#sec-settings .tag {
+      background: #2a3140;
+      border-radius: 4px;
+      padding: 2px 8px;
+      font-size: 12px;
+      white-space: nowrap
+    }#sec-settings .ok {
+      background: #1d5c2f
+    }#sec-settings .bad {
+      background: #6c2431
+    }#sec-settings button {
+      background: #2a5bdb;
+      color: #fff;
+      border: 0;
+      border-radius: 4px;
+      padding: 5px 5px;
+      cursor: pointer;
+      font-size: 12px
+    }#sec-settings input, #sec-settings select {
+      background: #0e1116;
+      color: #d8dee9;
+      border: 1px solid #39414f;
+      border-radius: 4px;
+      padding: 4px 4px;
+      box-sizing: border-box
+    }#sec-settings #filter {
+      width: 200px
+    }#sec-settings #nav {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-bottom: 10px
+    }#sec-settings #nav button {
+      background: #2a3140;
+      font-size: 12px;
+      padding: 8px 8px
+    }#sec-settings #nav button.act {
+      background: #2a5bdb
+    }#sec-settings .tabs {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 4px;
+      border-bottom: 2px solid #2a3140;
+      margin-bottom: 8px
+    }#sec-settings .tabs button {
+      background: transparent;
+      color: #8b94a7;
+      border: 0;
+      border-bottom: 2px solid transparent;
+      border-radius: 6px 6px 0 0;
+      padding: 7px 14px;
+      cursor: pointer;
+      font-size: 12px
+    }#sec-settings .tabs button.act {
+      color: #d8dee9;
+      background: #1b202a;
+      border-bottom-color: #2a5bdb
+    }#sec-settings .subtabs {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 4px;
+      margin: 0 0 8px 8px
+    }#sec-settings .subtabs button {
+      background: #232a38;
+      color: #8b94a7;
+      border: 0;
+      border-radius: 10px;
+      padding: 3px 5px;
+      cursor: pointer;
+      font-size: 12px
+    }#sec-settings .subtabs button.act {
+      background: #1d5c2f;
+      color: #d8dee9
+    }#sec-settings table {
+      width: 100%;
+      border-collapse: collapse
+    }#sec-settings td, #sec-settings th {
+      padding: 5px 5px;
+      border-top: 1px solid #2a3140;
+      text-align: left;
+      vertical-align: middle
+    }#sec-settings th {
+      color: #8b94a7;
+      font-weight: 500;
+      font-size: 12px
+    }#sec-settings .val {
+      font-family: ui-monospace, Consolas, monospace;
+      white-space: nowrap
+    }#sec-settings .stale {
+      color: #8b94a7
+    }#sec-settings .ctl {
+      text-align: right;
+      vertical-align: middle
+    }#sec-settings .where {
+      color: #8b94a7;
+      font-size: 12px;
+      margin-top: 1px
+    }#sec-settings .set {
+      display: flex;
+      gap: 6px;
+      align-items: center;
+      flex-wrap: wrap;
+      justify-content: flex-end
+    }#sec-settings .set input[type=number], #sec-settings .set input[type=text] {
+      width: 80px
+    }#sec-settings .set input.fnum {
+      width: 80px
+    }#sec-settings .set select {
+      max-width: 100px
+    }#sec-settings .t2 {
+      width: 56px !important;
+      text-align: center
+    }#sec-settings .dv {
+      color: #8b94a7
+    }#sec-settings #actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      align-items: center;
+      margin: 0 0 8px 0
+    }#sec-settings #secPw {
+      width: 140px
+    }#sec-settings button.run {
+      background: #1d5c2f
+    }#sec-settings tr.dirty td {
+      background: #2a2517
+    }#sec-settings .flash {
+      color: #7aa2f7
+    }#sec-settings .lingrid {
+      display: grid;
+      grid-template-columns: auto minmax(70px, 1fr) auto minmax(70px, 1fr);
+      gap: 6px 6px;               
+      align-items: center;
+      background: #1b202a;
+      border: 1px solid #2a3140;
+      border-radius: 8px;
+      padding: 8px;
+      margin-bottom: 8px
+    }#sec-settings .lingrid > :nth-child(4n + 3) {
+      margin-left: 16px
+    }#sec-settings .lingrid label {
+      color: #8b94a7;
+      font-size: 12px;
+      white-space: nowrap
+    }#sec-settings .lingrid .set {
+      justify-content: flex-start;
+      gap: 2px
+    }#sec-settings .lingrid .set input {
+      width: 76px;
+      padding: 2px 4px
+    }#sec-settings .lingrid input.dirty {
+      border-color: #e3b341
+    }
+/* --- wifi.html --- */
+#sec-wifi {
+            font: 13px/1.45 system-ui, sans-serif;
+            background: #000000;
+            color: #d8dee9;
+            max-width: 520px;
+            margin: auto;
+            padding: 0 12px
+        }#sec-wifi h1 {
+            font-size: 18px
+        }#sec-wifi label {
+            display: block;
+            margin: 12px 0 4px;
+            color: #8b94a7
+        }#sec-wifi input {
+            width: 100%;
+            box-sizing: border-box;
+            background: #0e1116;
+            color: #d8dee9;
+            border: 1px solid #39414f;
+            border-radius: 4px;
+            padding: 8px
+        }#sec-wifi button {
+            margin-top: 14px;
+            background: #2a5bdb;
+            color: #fff;
+            border: 0;
+            border-radius: 4px;
+            padding: 9px 9px;
+            cursor: pointer;
+            font-size: 12px
+        }#sec-wifi table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 6px
+        }#sec-wifi td {
+            padding: 6px 8px;
+            border-top: 1px solid #2a3140
+        }#sec-wifi .pick {
+            background: #233047;
+            color: #d8dee9;
+            border: 1px solid #39414f;
+            border-radius: 6px;
+            padding: 3px 10px;
+            cursor: pointer
+        }#sec-wifi .dbm {
+            color: #8b94a7
+        }
+</style>
+</head>
+<body>
+<section class="sec" id="sec-main">
+<header>
+    <h1>SKE-02 Gateway</h1>
+    <span id="link" class="tag">…</span>
+    <a href="#" class="gear" id="gear" onclick="gearClick();return false">&#9881;</a>
+  </header>
+  <div id="values"></div>
+  <button id="btnEdit" onclick="toggleEdit()" hidden>&#9998; Раскладка</button>
+</section>
+<section class="sec" id="sec-widgets">
+<header>
+    <h1>SKE-02 Виджеты</h1>
+    <a class="back" href="#panel"><button>&#8592; Назад</button></a>
+  </header>
+  <div id="wpanel">
+    <div id="wlist"></div>
+  </div>
+</section>
+<section class="sec" id="sec-panel">
+<header>
+    <h1>SKE-02 Панель</h1>
+    <a href="#main" style="margin-left:auto"><button>&#8592; Назад</button></a>
+  </header>
+  <div class="tiles">
+    <a class="tile" href="#main" onclick="setTimeout(()=>{ if(!editing) toggleEdit() },80)"><span class="ic">&#9998;</span>Раскладка</a>
+    <a class="tile" href="#widgets"><span class="ic">&#9633;</span>Виджеты</a>
+    <a class="tile" href="#settings"><span class="ic">&#9881;</span>Прибор</a>
+    <a class="tile" href="#wifi"><span class="ic">&#128246;</span>Wi-Fi</a>
+    <a class="tile" href="#" onclick="rebootDev();return false"><span class="ic">&#8635;</span>Перезагрузить</a>
+  </div>
+  <h2>Профили виджетов</h2>
+  <div id="profiles"></div>
+  <div class="prow">
+    <input id="newName" placeholder="имя профиля" onkeydown="if(event.key==='Enter')this.blur()">
+    <button onclick="profCreate()">Сохранить текущий набор</button>
+  </div>
+  <h2>Отладочная панель</h2>
+  <div id="debug">
+    <button onclick="rescan()">Пересканировать</button>
+    <span id="fw" class="tag"></span>
+    <span class="tag" id="ip"></span><span class="tag" id="rss"></span>
+    <span class="tag" id="upt"></span><span class="tag" id="heap"></span>
+  </div>
+</section>
+<section class="sec" id="sec-settings">
+<header>
+    <h1>SKE-02 Прибор</h1>
+    <a href="#panel" style="margin-left:auto"><button>&#8592; Назад</button></a>
+  </header>
+  <div id="nav"></div>
+  <div id="tabs"></div>
+  <div id="subtabs"></div>
+  <div id="actions">
+    <input id="secPw" type="password" inputmode="numeric" maxlength="6" placeholder="пароль меню" oninput="pwInput()">
+    <button id="btnApply" onclick="applyAll()">Применить</button>
+    <button id="btnRefresh" onclick="refreshAll()">Обновить</button>
+    <span id="applyMsg" class="flash"></span>
+  </div>
+  <div id="bar">
+    <input id="filter" placeholder="фильтр по имени или id" oninput="applyFilter()">
+  </div>
+  <div id="sections">
+    <p>Опрос прибора…</p>
+  </div>
+</section>
+<section class="sec" id="sec-wifi">
+<div style="display:flex;align-items:center;gap:8px">
+      <h1>SKE-02 Wi-Fi шлюз</h1>
+      <a href="#panel" style="margin-left:auto"><button type="button">&#8592; Назад</button></a>
+    </div>
+    <form method="POST" action="/save">
+        <label>SSID сети</label><input name="ssid" id="ssid" maxlength="32" autocapitalize="off" autocorrect="off"
+            spellcheck="false" required>
+        <label>Пароль (для открытой сети оставьте пустым)</label><input name="pass" type="password" maxlength="64"
+            autocapitalize="off" autocorrect="off">
+        <button type="submit">Подключиться</button>
+    </form>
+    <h3>Найденные сети</h3>
+    <div id="nets">сканирование…</div>
+</section>
+<script>
+/* --- shared.js --- */
+    const $ = i => document.getElementById(i);
+const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    const FLAGS = {
+      setpoint: ['RATEQMAX', 'RATEHIGH', 'RATELOW', 'FLOW', 'TOTAL', 'GTOTAL', 'BATCH', 'PREEMPTION'],
+      status: ['ACCESERROR', 'BATCHER_TIMEOUT', 'BATCHER_PAUSE', 'BATCHER_FINISH', 'RTCERROR', 'RAMERROR', 'REVERSE', 'LOGFULL'],
+      isr: ['DOUT0', 'DOUT1', 'DOUT2', 'BUZZER', 'HIGHFREQ', 'LOWFREQ', 'DUTY', 'PHASE']
+    };
+    const FLBL = {
+      RATEQMAX: 'Расх>Qмакс', RATEHIGH: 'Расх>макс', RATELOW: 'Расх<мин',
+      FLOW: 'Поток', TOTAL: 'Объём', GTOTAL: 'Общий объём', BATCH: 'Порция',
+      PREEMPTION: 'Прерывание',
+      ACCESERROR: 'Ошибка доступа', BATCHER_TIMEOUT: 'Таймаут порции',
+      BATCHER_PAUSE: 'Порция: пауза', BATCHER_FINISH: 'Порция: конец',
+      RTCERROR: 'Ошибка RTC', RAMERROR: 'Ошибка RAM', REVERSE: 'Реверс',
+      LOGFULL: 'Журнал полон',
+      DOUT0: 'Вых0', DOUT1: 'Вых1', DOUT2: 'Вых2', BUZZER: 'Звук',
+      HIGHFREQ: 'Частота>', LOWFREQ: 'Частота<', DUTY: 'Скважность', PHASE: 'Фаза'
+    };
+    const VFLOATS = ['kf_value', 'batch'];
+    const VUINTS = ['pulses_packet', 'pulses'];
+    const LBL = {
+      frequency: 'Частота, Гц',
+      rate_raw: 'Расход (raw)',
+      rate_fast: 'Расход (fast)',
+      rateMLPM: 'Расход, мл/мин',
+      rate: 'Расход',
+      total_plus: 'Объём +',
+      total_minus: 'Объём −',
+      total: 'Объём',
+      total_sum: 'Объём (сумма)',
+      totalml_plus: 'Объём +, мл',
+      totalml_minus: 'Объём −, мл',
+      gtotal: 'Общий объём',
+      gtotalml: 'Общий объём, мл',
+      kf_value: 'K-фактор',
+      batch: 'Порция',
+      pulses_packet: 'Импульсы (пакет)',
+      pulses: 'Импульсы',
+      setpoint: 'Уставки (биты)',
+      status: 'Состояние (биты)',
+      isr: 'Флаги ISR (биты)'
+    };
+    const prec7 = x => Number(x.toPrecision(7));
+    const round2 = x => Number(x.toFixed(2));
+    const MY_CONST = {
+      my_const: 10
+    };
+    const CUSTOM = {
+      frequency_hz: { calc: d => round2(d.frequency), label: 'Частота, Гц', on: true },
+      k_factor: { calc: d => prec7(d.kf_value), label: 'К-фактор', on: true },
+      imp_weight: { calc: d => prec7(d.kf_value), label: 'Цена имп', on: true },
+    };
+    const VOLU = { ml: 1, l: 1000, m3: 1000000 };   
+    const VOLN = { ml: 'мл', l: 'л', m3: 'м³' };
+    const PSEC = { s: 1, m: 60, h: 3600 };          
+    const PERN = { s: 'с', m: 'мин', h: 'ч' };
+    const BARM = {
+      qmax: { n: 'Расход (Qmax)', src: 'rate', sp: 'Qmax,л', un: 'rate' },
+      rate: { n: 'Расход', src: 'rate', sp: 'Расход+', un: 'rate' },
+      total: { n: 'Объём', src: 'total', sp: 'Объём', un: 'obj' },
+      gtotal: { n: 'Общий', src: 'gtotal', sp: 'Общий', un: 'ob' },
+      dose: { n: 'Доза', src: 'batch', sp: 'Доза', un: 'obj' }
+    };
+    let SP = {};   
+    const UNSHORT = { 'Миллилитр': 'мл', 'Литр': 'л', 'Метр куб.': 'м³' };
+    const PERSHORT = { 'Секунда': 'с', 'Минута': 'мин', 'Час': 'ч' };
+    let UN = { rate: '', obj: '', ob: '', time: '' };
+    const MULM = { kf: 'К-фактор', price: 'Цена имп' };
+    let MULT = { type: 'price', value: NaN };   
+    let MULU = '';    
+    const UNKEY = { 'мл': 'ml', 'л': 'l', 'м³': 'm3', 'с': 's', 'мин': 'm', 'ч': 'h' };
+    function parSyncAuto(w) {
+      if (w.t !== 'par' || w.auto === false) return;
+      const un = CHSRC[w.src].un;
+      const u = un === 'kf' || un === 'price' ? MULU : UN[un];
+      if (u && UNKEY[u]) w.vol = UNKEY[u];
+      if (un === 'rate' && UNKEY[UN.time]) w.time = UNKEY[UN.time];
+    }
+    function parUnit(w) {
+      const un = CHSRC[w.src].un;
+      if (un === 'hz') return 'Гц';          
+      if (un === 'none') return '';          
+      if (un === 'kf' || un === 'price') {
+        const u = w.auto !== false ? MULU : VOLN[w.vol];
+        return un === 'kf' ? 'имп/' + u : u + '/имп';
+      }
+      const isRate = un === 'rate';
+      if (w.auto !== false) {
+        const u = UN[un];
+        if (!u) return '';
+        return isRate ? u + (UN.time ? '/' + UN.time : '') : u;
+      }
+      return isRate ? VOLN[w.vol] + '/' + PERN[w.time] : VOLN[w.vol];
+    }
+    function parValue(w, d) {
+      const un = CHSRC[w.src].un;
+      if (un === 'kf' || un === 'price') {
+        if (!isFinite(MULT.value) || MULT.value <= 0) return undefined;
+        const v = CHSRC[w.src].src === MULT.type ? MULT.value : 1 / MULT.value;
+        if (w.auto !== false) return v;
+        const devK = VOLU[UNKEY[MULU]] || VOLU.l;   
+        const tgtK = VOLU[w.vol];                   
+        return un === 'kf' ? v * tgtK / devK : v * devK / tgtK;
+      }
+      const v = d[CHSRC[w.src].src];
+      if (v === undefined) return undefined;
+      if (w.auto !== false) return v;   
+      const devKey = UNKEY[UN[un]] || 'l';
+      const k = VOLU[devKey] / VOLU[w.vol];
+      if (un === 'rate') {
+        const ds = PSEC[{ 'с': 's', 'мин': 'm', 'ч': 'h' }[UN.time]] || 60;
+        return v * k * (PSEC[w.time] / ds);
+      }
+      return v * k;
+    }
+    const BITCOL = ['#1d5c2f', '#a23b2e', '#2a5bdb', '#e3b341'];
+    const BITOFF = '#14171c';  
+    const BTN = {
+      stop:  { n: 'СТОП',  col: '#a23b2e', h: 'стоп дозатора' },
+      start: { n: 'СТАРТ', col: '#1d5c2f', h: 'старт дозатора' },
+      pause: { n: 'ПАУЗА', col: '#b58a2e', h: 'пауза дозатора' },
+      reset: { n: 'СБРОС', col: '#2a5bdb', h: 'сброс объёма' }
+    };
+    let BTNP = { mode: 89, reset: 142 };   
+    async function btnAct(mode) {
+      try {
+        if (mode === 'start') {
+          await fetch('/api/set', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: 'id=' + BTNP.mode + '&v=' + encodeURIComponent('Старт') + '&pw='
+          });
+        } else if (mode === 'stop' || mode === 'pause') {
+          await fetch('/api/set', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: 'id=' + BTNP.mode + '&v=' + encodeURIComponent('Стоп') + '&pw='
+          });
+        } else if (mode === 'reset') {
+          await fetch('/api/run', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: 'id=' + BTNP.reset + '&pw='
+          });
+        }
+      } catch (e) { }
+    }
+    const INPS = {
+      dose: { n: 'Доза' },
+      pre: { n: 'Упреждение' },
+      over: { n: 'Перелив' }
+    };
+    let INP = {};   
+    async function wInpSet(k) {
+      const w = widgets.find(x => x.k === k);
+      const e = $('wi_' + k);
+      if (!w || !e || !INP[w.src]) return;
+      try {
+        const body = 'id=' + INP[w.src].id + '&v=' + encodeURIComponent(e.value);
+        const r = await (await fetch('/api/set', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body
+        })).json();
+        if (r.ok) { INP[w.src].v = parseFloat(r.value); paramsTick() }
+        else alert((INPS[w.src].n) + ': ' + r.error);
+      } catch (e2) { alert('нет ответа от шлюза') }
+    }
+    const CHSRC = {
+      rate: { n: 'Расход', src: 'rate', sp: 'rate', un: 'rate' },
+      total: { n: 'Объём', src: 'total', sp: 'total', un: 'obj' },
+      tplus: { n: 'Объём +', src: 'total_plus', sp: 'total', un: 'obj' },
+      tminus: { n: 'Объём −', src: 'total_minus', sp: 'total', un: 'obj' },
+      tsum: { n: 'Объём #', src: 'total_sum', sp: 'total', un: 'obj' },
+      gtotal: { n: 'Общий', src: 'gtotal', sp: 'gtotal', un: 'ob' },
+      batch: { n: 'Доза', src: 'batch', sp: 'dose', un: 'obj' },
+      kf: { n: 'К-фактор', src: 'kf', un: 'kf' },
+      price: { n: 'Цена имп.', src: 'price', un: 'price' },
+      freq: { n: 'Частота', src: 'frequency', un: 'hz' },  
+      pulses: { n: 'Импульсы', src: 'pulses', un: 'none' } 
+    };
+    function chUnit(s) {
+      const u = UN[CHSRC[s].un];
+      if (!u) return '';
+      return CHSRC[s].un === 'rate' ? u + (UN.time ? '/' + UN.time : '') : u;
+    }
+    const CHPER = {
+      60: '1 мин', 300: '5 мин', 600: '10 мин', 1800: '30 мин',
+      3600: '60 мин', 86400: '24 ч'
+    };
+    const CHCOL = [
+      { n: 'красный', c: '#e05252' },
+      { n: 'оранжевый', c: '#e08a3c' },
+      { n: 'жёлтый', c: '#e3d041' },
+      { n: 'зелёный', c: '#3fbf5f' },
+      { n: 'голубой', c: '#4cc7e0' },
+      { n: 'синий', c: '#5a7de0' },
+      { n: 'фиолетовый', c: '#9a5ae0' },
+      { n: 'белый', c: '#e8e8e8' }
+    ];
+    const chartHist = {};               
+    function chartCol(w) {
+      const e = CHCOL.find(x => x.c === w.col);
+      return e ? e.c : CHCOL[5].c;      
+    }
+    function chartPush(k, v, per) {
+      const iv = per <= 1200 ? 1 : Math.ceil(per / 1200);
+      const now = Date.now();
+      const h = chartHist[k] || (chartHist[k] = { arr: [], min: 0, max: 1, lastT: 0 });
+      if (now - h.lastT < iv * 1000) return;
+      h.lastT = now;
+      h.arr.push(v);
+      if (h.arr.length > 1200) h.arr.shift();
+    }
+    function chartDrawAll() {
+      for (const w of widgets || []) if (w.t === 'chart' && w.on) chartDraw(w);
+    }
+    function chartDraw(w) {
+      const cv = $('rc_' + w.k); if (!cv) return;
+      const hist = chartHist[w.k]; if (!hist) return;
+      const per = CHPER[w.per] ? w.per : 600;
+      const col = chartCol(w);
+      const dpr = window.devicePixelRatio || 1;
+      const cw = cv.offsetWidth, ch = 120;
+      if (cv.width !== cw * dpr || cv.height !== ch * dpr) { cv.width = cw * dpr; cv.height = ch * dpr }
+      const g = cv.getContext('2d');
+      g.setTransform(dpr, 0, 0, dpr, 0, 0);
+      g.clearRect(0, 0, cw, ch);
+      const arr = hist.arr, n = arr.length;
+      g.strokeStyle = '#2a3140'; g.lineWidth = 1;
+      for (let k = 1; k < 4; k++) { const y = ch * k / 4; g.beginPath(); g.moveTo(0, y); g.lineTo(cw, y); g.stroke() }
+      if (n < 2) { g.fillStyle = '#8b94a7'; g.font = '12px system-ui'; g.fillText('накопление данных…', 8, ch / 2); return }
+      let lo, hi;
+      if (w.auto === false) {
+        hi = SP[CHSRC[w.src].sp];
+        if (!(hi > 0)) hi = 1;           
+        lo = 0;
+      } else {
+        lo = Infinity; hi = -Infinity;
+        for (const v of arr) { if (v < lo) lo = v; if (v > hi) hi = v }
+        if (hi - lo < 1e-9) { lo -= 0.5; hi += 0.5 }
+        const pad = (hi - lo) * 0.08; lo -= pad; hi += pad;
+      }
+      hist.min = lo; hist.max = hi;
+      const X = i => cw * i / (per - 1), Y = v => ch - 2 - (v - lo) / (hi - lo) * (ch - 4);
+      g.beginPath();
+      const off = per - n * (per <= 1200 ? 1 : Math.ceil(per / 1200)); 
+      for (let i = 0; i < n; i++) { const x = X(off + i * (per <= 1200 ? 1 : Math.ceil(per / 1200))), y = Y(arr[i]); i ? g.lineTo(x, y) : g.moveTo(x, y) }
+      g.strokeStyle = col; g.lineWidth = 1.5; g.stroke();
+      g.lineTo(X(per - 1), ch); g.lineTo(X(off), ch); g.closePath();
+      g.fillStyle = col + '26'; 
+      g.fill();
+      g.fillStyle = '#d8dee9'; g.font = '12px ui-monospace,Consolas,monospace';
+      g.fillText(arr[n - 1].toFixed(3), 8, 12);
+      g.fillStyle = '#8b94a7';
+      g.fillText('max ' + hist.max.toFixed(3), cw - 86, 12);
+      g.fillText('min ' + hist.min.toFixed(3), cw - 86, ch - 4);
+    }
+    window.addEventListener('resize', chartDrawAll);
+    let vBuilt = false;
+    function baseWidgets() {
+      const w = [];
+      for (const n of VFLOATS.concat(VUINTS)) w.push({ k: n, t: 'val', src: n, on: true });
+      for (const id in CUSTOM) w.push({ k: id, t: 'cval', on: CUSTOM[id].on !== false });
+      return w;
+    }
+    let widgets = null;
+    let wRev = parseInt(localStorage.getItem('wrev')) || 0;
+    let wDirty = false;
+    function saveWidgets() {
+      localStorage.setItem('widgets', JSON.stringify(widgets));
+      wDirty = true;
+      const m = $('wmsg'); if (m) m.textContent = 'не сохранено';
+    }
+    let PROFILES = {};
+    async function wSave() {
+      try {
+        const body = JSON.stringify({ rev: wRev + 1, cur: widgets, profiles: PROFILES });
+        const r = await (await fetch('/api/widgets', { method: 'POST', body })).json();
+        if (!r.ok) { alert('шлюз не смог записать конфиг'); return }
+        wRev++; localStorage.setItem('wrev', wRev); wDirty = false;
+        const m = $('wmsg'); if (m) m.textContent = 'сохранено (rev ' + wRev + ')';
+      } catch (e) { alert('нет ответа от шлюза') }
+    }
+    async function wSync() {
+      try {
+        const d = await (await fetch('/api/widgets')).json();
+        if (d && d.profiles) PROFILES = d.profiles;
+        const cur = d && (d.cur || d.cfg);   
+        if (Array.isArray(cur) && d.rev > wRev) {
+          widgets = cur; wRev = d.rev;
+          localStorage.setItem('widgets', JSON.stringify(widgets));
+          localStorage.setItem('wrev', wRev);
+          pageRender();
+        } else if (d.rev === 0 && widgets.length && !wDirty) {
+          const body = JSON.stringify({ rev: 1, cur: widgets, profiles: {} });
+          const r = await (await fetch('/api/widgets', { method: 'POST', body })).json();
+          if (r.ok) { wRev = 1; localStorage.setItem('wrev', 1) }
+        }
+      } catch (e) { }
+    }
+    function loadWidgets() {
+      try { widgets = JSON.parse(localStorage.getItem('widgets')) } catch (e) { widgets = null }
+      if (!Array.isArray(widgets)) {
+        widgets = baseWidgets();
+        try {
+          const o = JSON.parse(localStorage.getItem('vorder'));
+          if (Array.isArray(o))
+            widgets.sort((a, b) => (o.indexOf(a.k) + 1 || 1e9) - (o.indexOf(b.k) + 1 || 1e9));
+        } catch (e) { }
+        saveWidgets();
+      }
+      const TOT2SRC = { plus: 'tplus', minus: 'tminus', diff: 'total', sum: 'tsum' };
+      for (const w of widgets) {
+        if (w.t === 'flow') { w.t = 'par'; w.src = 'rate'; w.auto = false }
+        else if (w.t === 'vol') { w.t = 'par'; w.src = 'gtotal'; w.auto = false }
+        else if (w.t === 'tot') { w.t = 'par'; w.src = TOT2SRC[w.m] || 'total'; w.auto = false }
+        else if (w.t === 'mul') { w.t = 'par'; w.src = w.mode === 'kf' ? 'kf' : 'price'; w.auto = w.auto !== false }
+      }
+      const AUTOCREATED = ['rateChart', 'chart_rate', 'bar_qmax', 'par_rate',
+        'mul_auto', 'bit_flow', 'flow_l_m', 'vol_l', 'tot_plus_l'];
+      widgets = widgets.filter(w => !AUTOCREATED.includes(w.k));
+      widgets = widgets.filter(w => w.t === 'bar' || w.t === 'chart' || w.t === 'par' || w.t === 'bit' || w.t === 'btn' || w.t === 'inp' || (w.t === 'cval' && CUSTOM[w.k]) ||
+        (w.src && (w.src === 'rate' || VFLOATS.includes(w.src) || VUINTS.includes(w.src))));
+      for (const w of widgets) if (w.t === 'btn' && !BTN[w.mode]) w.mode = 'stop';
+      for (const w of widgets) if (w.t === 'inp' && !INPS[w.src]) w.src = 'dose';
+      for (const w of widgets) if (w.t === 'bar' && !BARM[w.mode]) w.mode = 'qmax';
+      for (const w of widgets) if (w.t === 'par') {
+        if (!CHSRC[w.src]) w.src = 'rate';
+        if (!VOLU[w.vol]) w.vol = 'l';
+        if (!PSEC[w.time]) w.time = 'm';
+        if (w.auto === undefined) w.auto = true;
+      }
+      for (const w of widgets)
+        if (w.t === 'bit' && (!(w.src in FLAGS) || !(w.b >= 0 && w.b < FLAGS[w.src].length))) { w.src = 'setpoint'; w.b = 0 }
+      for (const w of widgets) if (w.t === 'bit' && !/^#[0-9a-fA-F]{6}$/.test(w.col || '')) w.col = BITCOL[0];
+      for (const w of widgets)
+        if (w.t === 'chart') {
+          if (!CHSRC[w.src]) w.src = 'rate';
+          if (!CHPER[w.per]) w.per = 600;
+          if (!CHCOL.some(x => x.c === w.col)) w.col = CHCOL[5].c;
+          if (w.auto === undefined) w.auto = true;
+        }
+      const OWNED = ['chart', 'bar', 'flow', 'vol', 'tot', 'bit', 'par', 'btn', 'inp'];
+      for (const b of baseWidgets())
+        if (!OWNED.includes(b.t) && !wHid().includes(b.k) &&
+          !widgets.some(w => w.k === b.k))
+          widgets.push(b);
+    }
+    function wHid() {
+      try { return JSON.parse(localStorage.getItem('whid')) || [] } catch (e) { return [] }
+    }
+    function listName(w) {
+      if (w.t === 'chart') return 'График';
+      if (w.t === 'bar') return 'Барграф';
+      if (w.t === 'bit') return 'Индикатор';
+      if (w.t === 'btn') return BTN[w.mode] ? 'Кнопка ' + BTN[w.mode].n : w.mode;
+      if (w.t === 'inp') return INPS[w.src] ? 'Уставка: ' + INPS[w.src].n : w.src;
+      return 'Параметр';         // par, val и cval - всё это "параметры"
+    }
+    function widgetName(w) {
+      if (w.t === 'chart') {
+        const u = chUnit(w.src);
+        return 'График: ' + CHSRC[w.src].n + (u ? ', ' + u : '') +
+          ', ' + (CHPER[w.per] || '10 мин');
+      }
+      if (w.t === 'bar') {
+        const m = BARM[w.mode];
+        if (!m) return 'Бар: ' + w.mode;
+        const u = UN[m.un];
+        const suffix = m.un === 'rate'
+          ? u + (UN.time ? '/' + UN.time : '')
+          : u;
+        return 'Бар: ' + m.n + (suffix ? ', ' + suffix : '');
+      }
+      if (w.t === 'cval') return (CUSTOM[w.k] && CUSTOM[w.k].label) || w.k;
+      if (w.t === 'par') {
+        const u = parUnit(w);
+        return CHSRC[w.src].n + (u ? ', ' + u : '');
+      }
+      if (w.t === 'bit') return (FLBL[FLAGS[w.src][w.b]] || FLAGS[w.src][w.b]);
+      return LBL[w.src] || w.src;
+    }
+    function widgetHtml(w) {
+      if (w.t === 'chart')
+        return '<div class="vcard chart" data-k="' + w.k + '"><div class="vname">' + CHSRC[w.src].n + (chUnit(w.src) ? ', ' + chUnit(w.src) : '') + ', последние ' + (CHPER[w.per] || '10 мин') + '</div><canvas id="rc_' + w.k + '"></canvas></div>';
+      if (w.t === 'val')
+        return '<div class="vcard" data-k="' + w.k + '"><div class="vname">' + (LBL[w.src] || w.src) + '</div><div class="vval" id="vf_' + w.src + '">—</div></div>';
+      if (w.t === 'cval') 
+        return '<div class="vcard" data-k="' + w.k + '"><div class="vname">' + widgetName(w) + '</div><div class="vval" id="vfc_' + w.k + '">—</div></div>';
+      if (w.t === 'par') 
+        return '<div class="vcard" data-k="' + w.k + '"><div class="vname">' + CHSRC[w.src].n +
+          '<span class="utop" id="vu_' + w.k + '">' + parUnit(w) + '</span></div>' +
+          '<div class="vrow"><span class="vval" id="vp_' + w.k + '">—</span></div></div>';
+      if (w.t === 'bit') 
+        return '<div class="vcard wbit" data-k="' + w.k + '"><div class="vname">' + widgetName(w) + '</div><div class="bitlamp" id="bl_' + w.k + '"></div></div>';
+      if (w.t === 'btn') 
+        return '<div class="vcard wbtn" data-k="' + w.k + '" style="background:' + BTN[w.mode].col +
+          '" onclick="btnAct(\'' + w.mode + '\')">' + BTN[w.mode].n + '</div>';
+      if (w.t === 'inp') 
+        return '<div class="vcard winp" data-k="' + w.k + '"><div class="vname">' + INPS[w.src].n +
+          '<span class="utop" id="iu_' + w.k + '">' + (UN.obj || '') + '</span></div>' +
+          '<div class="vrow"><input type="text" inputmode="decimal" id="wi_' + w.k +
+          '" value="' + (INP[w.src] ? INP[w.src].v : '') +
+          '" onchange="wInpSet(\'' + w.k + '\')" onfocus="this.select()" onkeydown="if(event.key===\'Enter\')this.blur()"></div></div>';
+      return '<div class="vcard wbar" data-k="' + w.k + '"><div class="vname">' + BARM[w.mode].n +
+        '<span class="bsub" id="su_' + w.k + '"></span></div>' +
+        '<div class="hbar"><div class="hfill" id="hf_' + w.k + '"></div>' +
+        '<span class="bpct" id="bp_' + w.k + '"></span></div></div>';
+    }
+    let wView = 'list';
+    function renderPanel() {
+      const p = $('wlist'); if (!p) return;
+      if (wView === 'add') { renderAddView(p); return }
+      let h = '<div class="wrow"><div class="r1"><button id="btnWsave" onclick="wSave()">Сохранить</button>' +
+        '<span id="wmsg" class="flash">' + (wDirty ? 'не сохранено' : 'сохранено (rev ' + wRev + ')') + '</span>' +
+        '<button onclick="wView=\'add\';renderPanel()" style="margin-left:auto">Добавить</button></div></div>';
+      h += '<div class="wsec">Виджеты</div>';
+      widgets.forEach((w, i) => {
+        let r1Auto = '';
+        if (w.t === 'par') r1Auto = autoChk('wPar', i, w.auto);
+        if (w.t === 'chart') r1Auto = autoChk('wChart', i, w.auto);
+        h += '<div class="wrow"><div class="r1"><span>' + listName(w) + '</span>' + r1Auto +
+          ' <button class="warn sq" onclick="wDel(' + i + ')">&#10005;</button></div><div class="r2">';
+        if (w.t === 'bar') {
+          let sb = '<select onchange="wFlow(' + i + ',\'mode\',this.value)">';
+          for (const m in BARM) sb += '<option value="' + m + '"' + (w.mode === m ? ' selected' : '') + '>' + BARM[m].n + '</option>';
+          h += sb + '</select>';
+        }
+        if (w.t === 'par') {
+          let ss = '<select onchange="wPar(' + i + ',\'src\',this.value)">';
+          for (const s in CHSRC) ss += '<option value="' + s + '"' + (w.src === s ? ' selected' : '') + '>' + CHSRC[s].n + '</option>';
+          const noVol = ['hz', 'none'].includes(CHSRC[w.src].un);
+          let sv = '<select' + (w.auto === false && !noVol ? '' : ' disabled') +
+            ' onchange="wPar(' + i + ',\'vol\',this.value)">';
+          for (const u in VOLU) sv += '<option value="' + u + '"' + (w.vol === u ? ' selected' : '') + '>' + VOLN[u] + '</option>';
+          let st = '<select' + (CHSRC[w.src].un === 'rate' && w.auto === false ? '' : ' disabled') +
+            ' onchange="wPar(' + i + ',\'time\',this.value)">';
+          for (const u in PSEC) st += '<option value="' + u + '"' + (w.time === u ? ' selected' : '') + '>' + PERN[u] + '</option>';
+          h += ss + '</select> ' + sv + '</select> ' + st + '</select>';
+        }
+        if (w.t === 'bit') {
+          h += '<select onchange="wBit(' + i + ',\'bit\',this.value)">' +
+            bitOptions(w.src + ':' + w.b) + '</select>' +
+            ' <input type="color" value="' + w.col + '" onchange="wBit(' + i + ',\'col\',this.value)">';
+        }
+        if (w.t === 'chart') {
+          let ss = '<select onchange="wChart(' + i + ',\'src\',this.value)">';
+          for (const s in CHSRC) ss += '<option value="' + s + '"' + (w.src === s ? ' selected' : '') + '>' + CHSRC[s].n + '</option>';
+          let sp = '<select onchange="wChart(' + i + ',\'per\',this.value)">';
+          for (const p in CHPER) sp += '<option value="' + p + '"' + (w.per == p ? ' selected' : '') + '>' + CHPER[p] + '</option>';
+          let sc = '<select onchange="wChart(' + i + ',\'col\',this.value)">';
+          for (const c of CHCOL) sc += '<option value="' + c.c + '"' + (w.col === c.c ? ' selected' : '') + ' style="color:' + c.c + '">' + c.n + '</option>';
+          h += ss + '</select> ' + sp + '</select> ' + sc + '</select>';
+        }
+        h += '</div></div>';
+      });
+      p.innerHTML = h;
+    }
+    function autoChk(fn, i, on) {
+      const q = String.fromCharCode(39);   
+      return ' <label class="autolbl"><input type="checkbox"' + (on !== false ? ' checked' : '') +
+        ' onchange="' + fn + '(' + i + ',' + q + 'auto' + q + ',this.checked ? ' + q + '1' + q + ' : ' + q + '0' + q + ')"> авто</label>';
+    }
+    function renderAddView(p) {
+      let h = '<div class="wrow"><div class="r1"><button onclick="wView=\'list\';renderPanel()">&lt;</button>' +
+        '<span>Добавление виджетов</span></div></div>';
+      h += '<div class="wrow"><div class="r1"><span>＋ График</span>' +
+        ' <label class="autolbl"><input id="ncAuto" type="checkbox" checked> авто</label>' +
+        '<button class="sq" onclick="wAddChart()">&#43;</button></div><div class="r2">' +
+        '<select id="ncSrc">';
+      for (const s in CHSRC) h += '<option value="' + s + '"' + (s === 'rate' ? ' selected' : '') + '>' + CHSRC[s].n + '</option>';
+      h += '</select> <select id="ncPer">';
+      for (const p in CHPER) h += '<option value="' + p + '"' + (p == 600 ? ' selected' : '') + '>' + CHPER[p] + '</option>';
+      h += '</select> <select id="ncCol">';
+      for (const c of CHCOL) h += '<option value="' + c.c + '"' + (c.c === CHCOL[5].c ? ' selected' : '') + ' style="color:' + c.c + '">' + c.n + '</option>';
+      h += '</select></div></div>';
+      h += '<div class="wrow"><div class="r1"><span>＋ Барграф</span><button class="sq" onclick="wAddBar()">&#43;</button></div>' +
+        '<div class="r2"><select id="nbMode">';
+      for (const m in BARM) h += '<option value="' + m + '"' + (m === 'qmax' ? ' selected' : '') + '>' + BARM[m].n + '</option>';
+      h += '</select></div></div>';
+      h += '<div class="wrow"><div class="r1"><span>＋ Параметр</span>' +
+        ' <label class="autolbl"><input id="npAuto" type="checkbox" checked> авто</label>' +
+        '<button class="sq" onclick="wAddPar()">&#43;</button></div>' +
+        '<div class="r2"><select id="npSrc">';
+      for (const s in CHSRC) h += '<option value="' + s + '"' + (s === 'rate' ? ' selected' : '') + '>' + CHSRC[s].n + '</option>';
+      h += '</select> <select id="npVol" disabled><option value="ml">мл</option><option value="l">л</option><option value="m3">м³</option></select>' +
+        ' <select id="npTime" disabled><option value="s">с</option><option value="m">мин</option><option value="h">ч</option></select></div></div>';
+      h += '<div class="wrow"><div class="r1"><span>＋ Индикатор</span><button class="sq" onclick="wAddBit()">&#43;</button></div>' +
+        '<div class="r2"><select id="nbiBit">' + bitOptions('setpoint:0') + '</select>' +
+        ' <input id="nbiCol" type="color" value="' + BITCOL[0] + '"></div></div>';
+      for (const m in BTN)
+        h += '<div class="wrow" title="' + BTN[m].h + '"><div class="r1"><span style="color:' + BTN[m].col + '">＋ Кнопка ' + BTN[m].n +
+          '</span><button class="sq" onclick="wAddBtn(\'' + m + '\')">&#43;</button></div>' +
+          '<div class="r2"><span class="flash">' + BTN[m].h + '</span></div></div>';
+      for (const s in INPS)
+        h += '<div class="wrow"><div class="r1"><span>＋ Ввод: ' + INPS[s].n +
+          '</span><button class="sq" onclick="wAddInp(\'' + s + '\')">&#43;</button></div>' +
+          '<div class="r2"><span class="flash">уставка дозатора</span></div></div>';
+      p.innerHTML = h;
+      npMirror();
+    }
+    function bitOptions(cur) {
+      let s = '';
+      for (const g in FLAGS)
+        FLAGS[g].forEach((f, bi) => {
+          s += '<option value="' + g + ':' + bi + '"' + (cur === g + ':' + bi ? ' selected' : '') +
+            '>' + (FLBL[f] || f) + '</option>';
+        });
+      return s;
+    }
+    function npMirror() {
+      const auto = $('npAuto').checked, src = $('npSrc').value;
+      const un = CHSRC[src] ? CHSRC[src].un : 'rate';
+      const noVol = ['hz', 'none'].includes(un);
+      if (auto) {
+        if (un === 'kf' || un === 'price') {
+          if (UNKEY[MULU]) $('npVol').value = UNKEY[MULU];
+        } else {
+          const u = UN[un];
+          if (u && UNKEY[u]) $('npVol').value = UNKEY[u];
+        }
+        if (un === 'rate' && UNKEY[UN.time]) $('npTime').value = UNKEY[UN.time];
+      }
+      $('npVol').disabled = auto || noVol;
+      $('npTime').disabled = auto || un !== 'rate';
+    }
+    function wFlow(i, which, v) { widgets[i][which] = v; saveWidgets(); pageRender() }
+    function wDel(i) {
+      const w = widgets[i];
+      if (w && (w.t === 'val' || w.t === 'cval')) {
+        const hid = wHid();
+        if (!hid.includes(w.k)) { hid.push(w.k); localStorage.setItem('whid', JSON.stringify(hid)) }
+      }
+      widgets.splice(i, 1); saveWidgets(); pageRender();
+    }
+    function wChart(i, which, v) {
+      if (which === 'per') { widgets[i].per = parseInt(v); delete chartHist[widgets[i].k] }
+      else if (which === 'auto') widgets[i].auto = v === '1';
+      else widgets[i][which] = v;
+      saveWidgets(); pageRender();
+    }
+    function wAddChart() {         
+      widgets.push({
+        k: 'chart' + Date.now(), t: 'chart', src: $('ncSrc').value,
+        per: parseInt($('ncPer').value), col: $('ncCol').value,
+        auto: $('ncAuto').checked, on: true
+      });
+      saveWidgets(); pageRender();
+    }
+    function wAddBar() {           
+      widgets.push({ k: 'bar' + Date.now(), t: 'bar', mode: $('nbMode').value, on: true });
+      saveWidgets(); pageRender();
+    }
+    function wAddPar() {           
+      const w = {
+        k: 'par' + Date.now(), t: 'par', src: $('npSrc').value,
+        vol: $('npVol').value, time: $('npTime').value,
+        auto: $('npAuto').checked, on: true
+      };
+      parSyncAuto(w);
+      widgets.push(w);
+      saveWidgets(); pageRender();
+    }
+    function wPar(i, which, v) {
+      if (which === 'auto') widgets[i].auto = v === '1';
+      else widgets[i][which] = v;
+      saveWidgets(); pageRender();
+    }
+    function wAddBtn(mode) {       
+      widgets.push({ k: 'btn' + Date.now(), t: 'btn', mode, on: true });
+      saveWidgets(); pageRender();
+    }
+    function wAddInp(src) {        
+      widgets.push({ k: 'inp' + Date.now(), t: 'inp', src, on: true });
+      saveWidgets(); pageRender();
+    }
+    function wAddBit() {           
+      const [g, bi] = $('nbiBit').value.split(':');
+      widgets.push({
+        k: 'bit' + Date.now(), t: 'bit', src: g,
+        b: parseInt(bi) || 0, col: $('nbiCol').value, on: true
+      });
+      saveWidgets(); pageRender();
+    }
+    function wBit(i, which, v) {
+      if (which === 'bit') {       
+        const [g, bi] = v.split(':');
+        widgets[i].src = g; widgets[i].b = parseInt(bi) || 0;
+      } else widgets[i][which] = v;
+      saveWidgets(); pageRender();
+    }
+    document.addEventListener('change', e => {
+      if (e.target.id === 'npSrc' || e.target.id === 'npAuto') npMirror();
+    });
+    async function paramsTick() {
+      try {
+        const d = await (await fetch('/api/params')).json();
+        SP = {};
+        const un = { rate: '', obj: '', ob: '', time: '' };
+        const mult = { type: MULT.type, value: MULT.value };
+        let mulU = MULU;
+        const btnp = { mode: BTNP.mode, reset: BTNP.reset };
+        const inp = {};
+        for (const p of d.params) {
+          if (!p.n) continue;
+          if (p.t === 11 && p.tb === 'Дозатор' && p.n === 'Режим' &&
+            p.o && p.o.includes('Старт')) btnp.mode = p.i;
+          if (p.cx && p.n.indexOf('Сброс') === 0 && p.tb === 'Сброс объёма') btnp.reset = p.i;
+          if (p.t === 0 && p.tb === 'Уставки') {
+            if (p.n === 'Доза') inp.dose = { id: p.i, v: parseFloat(p.v) };
+            if (p.n === 'Упреждение') inp.pre = { id: p.i, v: parseFloat(p.v) };
+            if (p.n === 'Перелив') inp.over = { id: p.i, v: parseFloat(p.v) };
+          }
+          if (p.t === 0 && p.w)
+            for (const m in BARM)
+              if (p.n === BARM[m].sp && (m === 'qmax' || p.tb === 'Уставки'))
+                SP[m] = parseFloat(p.v);
+          if (p.t === 11 && p.tb === 'Единицы измерения') {
+            if (p.n === 'Расход') un.rate = UNSHORT[p.v] || '';
+            if (p.n === 'Объём') un.obj = UNSHORT[p.v] || '';
+            if (p.n === 'Общий') un.ob = UNSHORT[p.v] || '';
+            if (p.n === 'Период') un.time = PERSHORT[p.v] || '';
+          }
+          if (p.tb === 'Множитель') {
+            if (p.t === 10 && p.n === 'Тип')
+              mult.type = (p.r === 0 || p.v === 'K-фактор') ? 'kf' : 'price';
+            if (p.t === 0 && p.n === 'Значение')
+              mult.value = parseFloat(p.v);
+            if (p.t === 11 && p.n === 'Единицы')
+              mulU = UNSHORT[p.v] || '';
+          }
+        }
+        if (mult.type !== MULT.type || mult.value !== MULT.value || mulU !== MULU) {
+          MULT = mult;
+          MULU = mulU;
+          pageRender();               
+        }
+        if (un.rate !== UN.rate || un.obj !== UN.obj || un.ob !== UN.ob ||
+          un.time !== UN.time) {
+          UN = un;
+          for (const w of widgets) parSyncAuto(w);
+          pageRender();               
+        }
+        const inpChanged = Object.keys(INP).length !== Object.keys(inp).length ||
+          Object.keys(inp).some(s => INP[s] && inp[s] && (INP[s].id !== inp[s].id || INP[s].v !== inp[s].v));
+        if (btnp.mode !== BTNP.mode || btnp.reset !== BTNP.reset) BTNP = btnp;
+        if (inpChanged) { INP = inp; pageRender() }
+      } catch (e) { }
+    }
+function pageRender() { (window.vBuild || renderPanel)() }
+;
+/* --- index.js --- */
+function vBuild() {
+  loadWidgets();
+  $('values').innerHTML = widgets.filter(w => w.on).map(widgetHtml).join('');
+  vBuilt = true; chartDrawAll(); setDrag(); renderPanel();
+}
+let editing = false;
+function toggleEdit() {
+  editing = !editing;
+  const sec = document.getElementById('sec-main');
+  if (sec) sec.classList.toggle('edit', editing);
+  $('btnEdit').classList.toggle('act', editing);
+  const g = $('gear');
+  if (g) {
+    g.textContent = editing ? '#' : '⚙';
+    g.classList.toggle('ok', editing);
+    g.title = editing ? 'Сохранить раскладку' : 'Панель';
+  }
+  setDrag();
+}
+function gearClick() {
+  if (editing) { wSave(); toggleEdit() }
+  else routeTo('panel');
+}
+function setDrag() {
+  const el = $('values'); if (!el) return;
+  [...el.children].forEach(c => c.draggable = editing);
+}
+let dragK = null;
+document.addEventListener('dragstart', e => {
+  const c = e.target.closest && e.target.closest('.vcard');
+  if (!editing || !c) return;
+  dragK = c.dataset.k; c.classList.add('dragging');
+  e.dataTransfer.effectAllowed = 'move';
+});
+document.addEventListener('dragend', e => {
+  const c = e.target.closest && e.target.closest('.vcard');
+  if (c) c.classList.remove('dragging');
+  dragK = null;
+});
+document.addEventListener('dragover', e => {
+  if (!editing || !dragK) return;
+  if (e.target.closest && e.target.closest('.vcard')) e.preventDefault();
+});
+function flipReorder(mutate) {
+  const pos = new Map();
+  for (const c of $('values').children)
+    pos.set(c, c.getBoundingClientRect());
+  mutate();
+  for (const c of $('values').children) {
+    const b = pos.get(c);
+    if (!b) continue;
+    const r = c.getBoundingClientRect();
+    const dx = b.left - r.left, dy = b.top - r.top;
+    if (!dx && !dy) continue;
+    c.style.transition = 'none';
+    c.style.transform = 'translate(' + dx + 'px,' + dy + 'px)';
+    requestAnimationFrame(() => {
+      c.style.transition = 'transform .2s ease-out';
+      c.style.transform = '';
+    });
+  }
+}
+function saveOrderFromDom() {
+  const ord = [...$('values').children].map(x => x.dataset.k);
+  widgets.sort((a, b) =>
+    (ord.indexOf(a.k) + 1 || 1e9) - (ord.indexOf(b.k) + 1 || 1e9));
+  saveWidgets();
+}
+document.addEventListener('drop', e => {
+  const c = e.target.closest && e.target.closest('.vcard');
+  if (!editing || !dragK || !c || c.dataset.k === dragK) return;
+  e.preventDefault();
+  const src = document.querySelector('.vcard[data-k="' + dragK + '"]');
+  if (!src) return;
+  const r = c.getBoundingClientRect();
+  const after = (e.clientY - r.top) > r.height / 2 || (e.clientX - r.left) > r.width / 2;
+  flipReorder(() => c.parentNode.insertBefore(src, after ? c.nextSibling : c));
+  saveOrderFromDom();
+});
+let touchDrag = null;
+document.addEventListener('touchstart', e => {
+  if (!editing) return;
+  const c = e.target.closest && e.target.closest('.vcard');
+  if (!c) return;
+  touchDrag = { el: c, moved: false };
+}, { passive: true });
+document.addEventListener('touchmove', e => {
+  if (!editing || !touchDrag) return;
+  const t = e.touches[0];
+  const over = document.elementFromPoint(t.clientX, t.clientY);
+  const tgt = over && over.closest && over.closest('.vcard');
+  if (tgt && tgt !== touchDrag.el) {
+    const r = tgt.getBoundingClientRect();
+    const after = (t.clientY - r.top) > r.height / 2 || (t.clientX - r.left) > r.width / 2;
+    flipReorder(() => tgt.parentNode.insertBefore(touchDrag.el, after ? tgt.nextSibling : tgt));
+    touchDrag.moved = true;
+  }
+  if (touchDrag.moved) e.preventDefault();   
+}, { passive: false });
+document.addEventListener('touchend', () => {
+  if (editing && touchDrag && touchDrag.moved) saveOrderFromDom();
+  touchDrag = null;
+});
+function vApply(d) {
+  const barLo = vApply.lo || (vApply.lo = {}), barHi = vApply.hi || (vApply.hi = {});
+  for (const n of VFLOATS) { const e = $('vf_' + n); if (e && d[n] !== undefined) e.textContent = d[n] }
+  for (const n of VUINTS) { const e = $('vf_' + n); if (e && d[n] !== undefined) e.textContent = d[n] }
+  for (const w of widgets || []) {
+    if (w.t !== 'cval' || !w.on) continue;
+    const c = CUSTOM[w.k], e = $('vfc_' + w.k);
+    if (c && e && c.calc) {
+      const v = c.calc(d, MY_CONST);
+      if (isFinite(v)) e.textContent = String(v)
+    }
+  }
+  function fmtF8(v) {
+    for (let dec = 7; dec >= 0; dec--) {
+      const s = v.toFixed(dec);
+      if (s.length <= 8) return s;
+    }
+    return v.toFixed(0).slice(0, 8);
+  }
+  function fmtU10(v) {
+    return String(Math.round(v)).slice(0, 10);
+  }
+  for (const w of widgets || []) {
+    if (w.t !== 'par' || !w.on) continue;
+    const e = $('vp_' + w.k), v = parValue(w, d);
+    if (e && v !== undefined && isFinite(v))
+      e.textContent = CHSRC[w.src].un === 'none' ? fmtU10(v) : fmtF8(v);
+    const u = $('vu_' + w.k);
+    if (u) u.textContent = parUnit(w);
+  }
+  for (const w of widgets || []) {
+    if (w.t !== 'inp' || !w.on) continue;
+    const u = $('iu_' + w.k);
+    if (u) u.textContent = UN.obj || '';
+  }
+  for (const w of widgets || []) {
+    if (w.t !== 'bit' || !w.on) continue;
+    const e = $('bl_' + w.k);
+    if (e && d[w.src] !== undefined) {
+      const on = (d[w.src] >> w.b) & 1;
+      e.style.background = on ? w.col : BITOFF;
+      e.style.color = w.col;               
+      e.classList.toggle('on', !!on);
+    }
+  }
+  for (const w of widgets || []) {
+    if (w.t !== 'bar' || !w.on) continue;
+    const m = BARM[w.mode], f = $('hf_' + w.k);
+    let v = m ? d[m.src] : undefined;
+    if (w.mode === 'qmax' && v !== undefined) {
+      const devKey = UNKEY[UN.rate] || 'l';
+      const ds = PSEC[{ 'с': 's', 'мин': 'm', 'ч': 'h' }[UN.time]] || 60;
+      v = v * (VOLU[devKey] / VOLU.l) * (60 / ds);
+    }
+    if (f && v !== undefined) {
+      let hi = SP[w.mode];
+      if (!(hi > 0)) {
+        if (!(w.k in barLo) || v < barLo[w.k]) barLo[w.k] = v;
+        if (!(w.k in barHi) || v > barHi[w.k]) barHi[w.k] = v;
+        hi = barHi[w.k];
+        if (hi - (barLo[w.k] || 0) < 1e-9) hi = (barLo[w.k] || 0) + 1;
+      }
+      const pct = Math.max(0, Math.min(100, v / hi * 100));
+      f.style.width = pct.toFixed(1) + '%';
+      const t = $('bp_' + w.k);
+      if (t) t.textContent = pct.toFixed(0) + '%';
+      const su = $('su_' + w.k);
+      if (su) {
+        if (SP[w.mode] > 0) {
+          const u = UN[m.un];
+          const suffix = w.mode === 'qmax' ? 'л/мин'
+            : m.un === 'rate' ? u + (UN.time ? '/' + UN.time : '') : u;
+          su.textContent = Number(SP[w.mode].toPrecision(4)) + (suffix ? ' ' + suffix : '');
+        } else su.textContent = '';
+      }
+    }
+  }
+}
+async function valuesTick() {
+  try {
+    const d = await (await fetch('/api/values')).json();
+    if (d.link !== undefined) {
+      $('link').textContent = d.link ? 'ONLINE' : 'OFFLINE';
+      $('link').className = 'tag ' + (d.link ? 'ok' : 'bad');
+    }
+    if (!d.ok) { return }
+    if (!vBuilt) vBuild();
+    vApply(d);
+    for (const w of widgets || [])
+      if (w.t === 'chart' && w.on && CHSRC[w.src]) {
+        const v = d[CHSRC[w.src].src];
+        if (v !== undefined) { chartPush(w.k, v, CHPER[w.per] ? w.per : 600); chartDraw(w) }
+      }
+  } catch (e) { }
+}
+setInterval(valuesTick, 200); valuesTick();
+paramsTick(); setInterval(paramsTick, 30000);
+wSync();
+;
+/* --- widgets.js --- */
+    loadWidgets();
+    renderPanel();
+;
+/* --- panel.js --- */
+    let blob = { rev: 0, cur: null, profiles: {} };
+    async function panelLoad() {
+      try {
+        const d = await (await fetch('/api/widgets')).json();
+        blob = { rev: d.rev || 0, cur: d.cur || d.cfg || null, profiles: d.profiles || {} };
+      } catch (e) { }
+      profRender();
+    }
+    function profRender() {
+      let h = '';
+      const names = Object.keys(blob.profiles);
+      if (!names.length) h = '<div class="prow"><span class="pname" style="color:#8b94a7">профилей нет</span></div>';
+      for (const n of names) {
+        h += '<div class="prow"><span class="pname">' + esc(n) +
+          ' <span style="color:#8b94a7">(' + blob.profiles[n].length + ' видж.)</span></span>' +
+          '<button class="ok" onclick="profApply(\'' + esc(n) + '\')">Применить</button>' +
+          '<button class="warn" onclick="profDel(\'' + esc(n) + '\')">Удалить</button></div>';
+      }
+      $('profiles').innerHTML = h;
+    }
+    function profEsc(s) { return String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])) }
+    async function post() {
+      const r = await (await fetch('/api/widgets', { method: 'POST', body: JSON.stringify(blob) })).json();
+      if (!r.ok) alert('шлюз не смог записать конфиг');
+      return r.ok;
+    }
+    async function profCreate() {
+      const n = $('newName').value.trim();
+      if (!n) { alert('введите имя профиля'); return }
+      if (blob.profiles[n] && !confirm('Профиль «' + n + '» уже есть. Перезаписать?')) return;
+      if (!Array.isArray(blob.cur)) { alert('текущий набор ещё не сохранён в шлюз'); return }
+      blob.profiles[n] = blob.cur;
+      blob.rev++;
+      if (await post()) { $('newName').value = ''; profRender() }
+    }
+    async function profApply(n) {
+      if (!confirm('Применить профиль «' + n + '»? Текущий набор будет заменён.')) return;
+      blob.cur = blob.profiles[n];
+      blob.rev++;
+      if (await post()) profRender();
+    }
+    async function profDel(n) {
+      if (!confirm('Удалить профиль «' + n + '»?')) return;
+      delete blob.profiles[n];
+      blob.rev++;
+      if (await post()) profRender();
+    }
+    async function infoTick() {
+      try {
+        const r = await (await fetch('/api/info')).json();
+        $('fw').textContent = r.fw + ' · параметров: ' + r.count;
+        $('ip').textContent = r.ip;
+        $('rss').textContent = r.ap ? r.rssi + ' dBm' : r.ssid + ': ' + r.rssi + ' dBm';
+        $('upt').textContent = 'uptime ' + hms(r.uptime);
+        $('heap').textContent = 'heap ' + (r.heap / 1024 | 0) + ' KiB';
+      } catch (e) { }
+    }
+    async function rescan() { await fetch('/api/rescan', { method: 'POST' }); infoTick() }
+    function rebootDev() { if (confirm('Перезагрузить прибор?')) fetch('/api/reboot', { method: 'POST' }) }
+    infoTick(); setInterval(infoTick, 5000);
+    panelLoad();
+;
+/* --- settings.js --- */
+    const COMMON = '\x01';              
+    let P = [], SECT = [], built = '', cur = 0, curT = {}, curS = {}, pwMap = {}, dirty = new Set();
+    const p2 = v => String(v).padStart(2, '0');
+    let retryT = 0;
+    async function tick() {
+      try {
+        const d = await (await fetch('/api/params')).json();
+        P = d.params; SECT = d.sections; dirty = new Set();
+        setRender(d.count + '|' + d.params.length + '|' + d.sections.length + '|' + d.rc);
+        applyFilter();
+        if (!P.length && !retryT)
+          retryT = setTimeout(() => { retryT = 0; tick() }, 3000);
+      } catch (e) { }
+    }
+    function pwInput() { pwMap[cur] = $('secPw').value }
+    function syncPw() { $('secPw').value = pwMap[cur] || '' }
+    function mark(i) {
+      dirty.add(i);
+      const tr = document.querySelector('tr[data-i="' + i + '"]');
+      if (tr) tr.className = 'dirty';
+      const w = $('w' + i);            
+      if (w) w.classList.add('dirty');
+    }
+    function unmark(i) {
+      const tr = document.querySelector('tr[data-i="' + i + '"]');
+      if (tr) tr.className = '';
+      const w = $('w' + i);
+      if (w) w.classList.remove('dirty');
+    }
+    function widget(q) {
+      if (!q.w) return '';
+      const i = q.i, m = ' oninput="mark(' + i + ')" onchange="mark(' + i + ')"';
+      if ((q.t === 10 || q.t === 11) && q.o && q.o.length) {
+        let h = '<select id="w' + i + '"' + m + '>';
+        q.o.forEach((s, k) => h += '<option value="' + k + '"' + (String(k) === String(q.r) ? ' selected' : '') + '>' + esc(s) + '</option>');
+        return '<div class="set">' + h + '</select></div>';
+      }
+      if (q.m) return '<div class="set"><input id="w' + i + '" type="password" maxlength="6" inputmode="numeric" placeholder="******"' + m + '></div>';
+      if (q.t === 0) return '<div class="set"><input id="w' + i + '" type="text" class="fnum" inputmode="decimal" maxlength="12" title="' + esc((q.lo || '?') + ' .. ' + (q.hi || '?')) + '" value="' + esc(q.v) + '"' + m + '></div>';
+      if (q.t === 1) return '<div class="set"><input id="w' + i + '" type="text" maxlength="6" inputmode="numeric" title="' + esc((q.lo || '?') + ' .. ' + (q.hi || '?')) + '" value="' + esc(q.v) + '"' + m + '></div>';
+      if (q.t === 2 || q.t === 3) {
+        const m2 = q.v.split(/[:.]/);
+        if (q.t === 2) return '<div class="set"><input class="t2" id="wh' + i + '" type="number" min="0" max="23" step="1" value="' + esc(m2[0]) + '"' + m + '><span class="dv">:</span><input class="t2" id="wm' + i + '" type="number" min="0" max="59" step="1" value="' + esc(m2[1]) + '"' + m + '></div>';
+        return '<div class="set"><input class="t2" id="wd' + i + '" type="number" min="1" max="31" step="1" value="' + esc(m2[0]) + '"' + m + '><span class="dv">.</span><input class="t2" id="wm2' + i + '" type="number" min="1" max="12" step="1" value="' + esc(m2[1]) + '"' + m + '><span class="dv">.</span><input class="t2" id="wy' + i + '" type="number" min="0" max="99" step="1" value="' + esc(m2[2]) + '"' + m + '></div>';
+      }
+      const st = ' min="' + (q.lo !== '' ? esc(q.lo) : '0') + '" max="' + (q.hi !== '' ? esc(q.hi) : '65535') + '"';
+      return '<div class="set"><input id="w' + i + '" type="number" step="1"' + st + ' value="' + esc(q.v) + '"' + m + '></div>';
+    }
+    function row(q, where) {
+      let ctrl;
+      if (q.cx) ctrl = '<button class="run" onclick="runParam(' + q.i + ')">Выполнить</button>';
+      else ctrl = q.w ? widget(q) : '<span class="val' + (q.a > 90 ? ' stale' : '') + '" id="v' + q.i + '">' + esc(q.v) + '</span>';
+      return '<tr data-n="' + esc((q.n + ' ' + q.i).toLowerCase()) + '" data-i="' + q.i + '"><td>' + esc(q.n || ('P' + q.i)) +
+        (where ? '<div class="where">' + esc(where) + '</div>' : '') + '</td><td class="ctl">' + ctrl + '</td></tr>';
+    }
+    const THEAD = '<tr><th>Параметр</th><th></th></tr>';
+    function decorate(arr) {
+      const rows = [];
+      for (const q of arr) {
+        rows.push({ q, l2: q.tb || COMMON, l3: (q.gl === 3 && q.g) ? q.g : '' });
+      }
+      return rows;
+    }
+    let curTab = COMMON;                 
+    function setRender(fp) {
+      if (!P.length) { $('tabs').innerHTML = ''; $('subtabs').innerHTML = ''; $('sections').innerHTML = '<p>Опрос прибора… если через минуту пусто — проверьте подключение UART и питание, затем нажмите «Обновить».</p>'; built = fp; return }
+      let h = '';
+      SECT.forEach((s, k) => h += '<button class="' + (k === cur ? 'act' : '') + '" onclick="go(' + k + ')">' + esc(s) + '</button>');
+      $('nav').innerHTML = h;
+      if (cur >= SECT.length) cur = 0;
+      syncPw();
+      const rows = decorate(P.filter(q => q.s === cur || SECT.length <= 1));
+      const tabs = [...new Set(rows.map(r => r.l2))];
+      if (!(cur in curT) || curT[cur] >= tabs.length) curT[cur] = 0;
+      const t = tabs[curT[cur]];
+      curTab = t;
+      const tr = rows.filter(r => r.l2 === t);
+      const subs = [...new Set(tr.map(r => r.l3))];
+      const sk = cur + '|' + t;
+      if (!(sk in curS) || curS[sk] >= subs.length) curS[sk] = 0;
+      const s = subs[curS[sk]];
+      h = '';
+      tabs.forEach((n, k) => h += '<button class="' + (n === t ? 'act' : '') + '" onclick="go2(' + k + ')">' + esc(n === COMMON ? 'Общие' : n) + '</button>');
+      $('tabs').innerHTML = '<div class="tabs">' + h + '</div>';
+      h = '';
+      if (subs.length > 1 || subs[0] !== '')
+        subs.forEach((n, k) => h += '<button class="' + (n === s ? 'act' : '') + '" onclick="go3(' + k + ')">' + esc(n || 'Общие') + '</button>');
+      $('subtabs').innerHTML = h ? '<div class="subtabs">' + h + '</div>' : '';
+      const vis = tr.filter(r => r.l3 === s);
+      const linRe = /^[FV]\d\d/;
+      if (vis.length >= 4 && vis.every(r => linRe.test(r.q.n))) {
+        const F = {}, V = {};
+        for (const r of vis) (r.q.n[0] === 'F' ? F : V)[r.q.n.slice(1, 3)] = r.q;
+        const keys = [...new Set([...Object.keys(F), ...Object.keys(V)])].sort();
+        const cell = q => q ? '<label>' + esc(q.n) + '</label>' + widget(q) : '<label></label><span></span>';
+        h = '<div class="lingrid">';
+        for (const k of keys) h += cell(F[k]) + cell(V[k]);
+        h += '</div>';
+      } else {
+        h = '<table>' + THEAD;
+        for (const r of vis) h += row(r.q);
+        h += '</table>';
+      }
+      $('sections').innerHTML = h; built = fp;
+    }
+    function renderSearch(f) {
+      let h = '<table>' + THEAD;
+      for (const q of P) {
+        if (!(q.n + ' ' + q.i).toLowerCase().includes(f)) continue;
+        const sec = q.s >= 0 && q.s < SECT.length ? SECT[q.s] : '';
+        h += row(q, sec ? (sec + (q.g ? ' · ' + q.g : '')) : '');
+      }
+      h += '</table>';
+      $('sections').innerHTML = h || '<p>Ничего не найдено.</p>';
+      $('tabs').innerHTML = ''; $('subtabs').innerHTML = '';
+    }
+    function go(k) { cur = k; setRender(built); syncPw(); applyFilter() }
+    function go2(k) { curT[cur] = k; applyFilter() }
+    function go3(k) { curS[cur + '|' + curTab] = k; applyFilter() }
+    function applyFilter() {
+      const f = $('filter').value.trim().toLowerCase();
+      if (!f) { setRender(built); return }
+      renderSearch(f);
+    }
+    function curVal(q) {
+      const i = q.i, g = x => $(x + i);
+      if (q.t === 10 || q.t === 11) return g('w').value;
+      if (q.t === 2) return p2(g('wh').value) + ':' + p2(g('wm').value);
+      if (q.t === 3) return p2(g('wd').value) + '.' + p2(g('wm2').value) + '.' + p2(g('wy').value);
+      return g('w').value;
+    }
+    function flash(msg) {
+      $('applyMsg').textContent = msg;
+      setTimeout(() => { if ($('applyMsg').textContent === msg) $('applyMsg').textContent = '' }, 2500);
+    }
+    async function applyAll() {
+      const ids = [...dirty];
+      if (!ids.length) { flash('нет изменений'); return }
+      $('btnApply').disabled = true;
+      let done = 0;
+      for (const i of ids) {
+        const q = P.find(x => x.i === i);
+        if (!q) continue;
+        const body = 'id=' + i + '&v=' + encodeURIComponent(curVal(q)) + '&pw=' + encodeURIComponent(pwMap[q.s] || '');
+        try {
+          const r = await (await fetch('/api/set', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body })).json();
+          if (!r.ok) { alert('«' + (q.n || ('P' + i)) + '»: ' + r.error); break }
+          dirty.delete(i); done++;
+          unmark(i);
+          if (r.value !== undefined) {
+            q.v = r.value;
+            if ((q.t === 10 || q.t === 11) && q.o)
+              q.r = q.o.findIndex(s => s === r.value);
+          }
+          if (q.m) { const w = $('w' + i); if (w) w.value = '' }
+        } catch (e) { alert('нет ответа от шлюза'); break }
+      }
+      $('btnApply').disabled = false;
+      if (done) flash('применено: ' + done);
+    }
+    async function runParam(i) {
+      const q = P.find(x => x.i === i);
+      if (!q || !q.cx) return;
+      if (!confirm('Выполнить «' + (q.n || ('P' + i)) + '»?')) return;
+      try {
+        const r = await (await fetch('/api/run', {
+          method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: 'id=' + i + '&pw=' + encodeURIComponent(pwMap[q.s] || '')
+        })).json();
+        if (!r.ok) alert('«' + (q.n || ('P' + i)) + '»: ' + r.error);
+        else flash('команда выполнена');
+      } catch (e) { alert('нет ответа от шлюза') }
+    }
+    async function refreshAll() {
+      if (dirty.size && !confirm('Есть несохранённые изменения. Обновить без применения?')) return;
+      const b = $('btnRefresh'); b.disabled = true; b.textContent = 'Обновление…';
+      try {
+        const r = await (await fetch('/api/refresh', { method: 'POST' })).json();
+        if (!r.ok) alert('Прибор не ответил на запрос листинга');
+        await tick();
+      } catch (e) { alert('нет ответа от шлюза') }
+      b.disabled = false; b.textContent = 'Обновить';
+    }
+    tick();
+;
+/* --- wifi.js --- */
+        let NETS = [];
+        async function wifiLoad(restart) {
+            if (restart) await fetch('/scan?restart=1');
+            const r = await (await fetch('/scan')).json();
+            if (r.running) { setTimeout(() => load(0), 1500); return }
+            NETS = r.nets;
+            let h = '<table>';
+            NETS.forEach((n, i) => {
+                h += '<tr><td>' + esc(n.s) + '</td><td class="dbm">' + n.r + ' dBm</td><td>' +
+                    (n.e ? '🔒' : '') + '</td><td><button class="pick" onclick="pick(' + i + ')">выбрать</button></td></tr>';
+            });
+            document.getElementById('nets').innerHTML = h + '</table>';
+        }
+        function pick(i) { document.getElementById('ssid').value = NETS[i].s }
+        wifiLoad(1);
+;/* --- router --- */
+/* SPA-роутер: один html, переходы между секциями без подгрузок.
+ * Секция = hash (#main/#widgets/#panel/#settings/#wifi); путь
+ * /settings и т.п. тоже открывает свою секцию. Видимость - ТОЛЬКО
+ * класс .on (CSS ниже), атрибут hidden не используется. */
+function routeTo(id) {
+  if (location.hash !== '#' + id) location.hash = id;
+  else showSec(id);
+}
+function showSec(id) {
+  let found = false;
+  document.querySelectorAll('.sec').forEach(s => {
+    const on = s.id === 'sec-' + id;
+    if (on) found = true;
+    s.classList.toggle('on', on);
+  });
+  if (!found) showSec('main');
+  else if (id === 'main') chartDrawAll && chartDrawAll();
+}
+function spaRoute() {
+  const h = location.hash.replace('#', '');
+  if (h) return showSec(h);
+  const p = location.pathname.replace(/\/$/, '');
+  const map = { '/settings': 'settings', '/panel': 'panel',
+                '/widgets': 'widgets', '/wifi': 'wifi' };
+  showSec(map[p] || 'main');
+}
+window.addEventListener('hashchange', spaRoute);
+spaRoute();
+</script>
+</body>
+</html>
