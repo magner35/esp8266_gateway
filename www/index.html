@@ -176,8 +176,11 @@
       border: 2px solid #2a3140;
       /* рамка карточки */
       border-radius: 4px;
-      padding: 2px 4px
-        /* vertical horizontal */
+      padding: 2px 4px;
+      /* vertical horizontal */
+      min-height: 36px
+        /* единая высота ВСЕХ карточек (параметр - эталон); график выше
+         * за счёт своего содержимого */
     }
 
     /* подпись (имя параметра) внутри карточки */
@@ -226,7 +229,10 @@
     body.edit .vcard {
       outline: 1px dashed #39414f;
       /* перетаскиваемая карточка: пунктир */
-      cursor: grab
+      cursor: grab;
+      /* мобильный вариант: без этого жест уходит в нативный скролл */
+      touch-action: none;
+      -webkit-touch-callout: none
     }
 
     body.edit .vcard.dragging {
@@ -245,6 +251,7 @@
 
     /* дорожка барграфа: тёмный фон, заливка едет внутри */
     .hbar {
+      position: relative;         /* контейнер для процента (.bpct) */
       background: #0e1116;
       /* цвет пустой дорожки */
       border: 1px solid #39414f;
@@ -262,7 +269,7 @@
       transition: width .25s ease-out;
       /* плавность движения заливки */
       /* green torn stripe: wide dashes, hairline gaps */
-      background: repeating-linear-gradient(90deg, #3fbf5f 0 10px, transparent 10px 11px)
+      background: repeating-linear-gradient(90deg, #3f5dbf 0 8px, transparent 8px 10px) /* штрих 8px, зазор 2px */
         /* цвет штриха */
     }
 
@@ -281,11 +288,48 @@
     }
 
     /* percent readout, right-aligned in the bar label line */
+    /* процент ВНУТРИ полоски, по центру, поверх заливки */
     .bpct {
+      position: absolute;
+      left: 50%;
+      top: 50%;
+      transform: translate(-50%, -50%);
+      color: #fff;
+      font-size: 11px;
+      line-height: 1;
+      font-family: ui-monospace, Consolas, monospace;
+      text-shadow: 0 0 3px #000, 0 0 3px #000   /* читаемость поверх штрихов */
+    }
+
+    /* строка значения виджета "Параметр": число + единицы прижаты вправо */
+    .vrow {
+      display: flex;
+      justify-content: flex-end;
+      align-items: baseline;
+      gap: 4px
+    }
+
+    .vunit {
+      color: #8b94a7;             /* единицы мельче и тусклее числа */
+      font-size: 11px;
+      white-space: nowrap
+    }
+
+    /* уставка-100% прогрессбара: прижата вправо в строке имени */
+    .bsub {
       float: right;
-      color: #ffffff;
-      font-size: 12px;
-      font-family: ui-monospace, Consolas, monospace
+      color: #8b94a7;
+      font-size: 11px;
+      white-space: nowrap
+    }
+
+    /* единицы измерения виджетов "Параметр"/"Ввод": всегда справа ВВЕРХУ
+     * карточки, в строке имени */
+    .utop {
+      float: right;
+      color: #8b94a7;
+      font-size: 11px;
+      white-space: nowrap
     }
 
     /* --- 5. виджет БИТ (t:'bit', .vcard.wbit) ------------------------- */
@@ -299,9 +343,8 @@
       flex-direction: column;
       justify-content: space-between;
       gap: 2px;
-      padding: 3px 4px;
-      min-height: 28px
-        /* минимальная высота карточки бита */
+      padding: 3px 4px
+        /* высота наследует общий min-height карточек */
     }
 
     /* подпись карточки бита: мелкая, переносится по пробелам */
@@ -331,26 +374,24 @@
     }
 
     /* --- 6. виджет КНОПКА (.vcard.wbtn) ------------------------------ */
-    /* квадрат шириной с индикатор (высота = ширине), подпись в теле;
-     * цвет фона задаётся видом кнопки (СТОП/СТАРТ/ПАУЗА/СБРОС) */
+    /* размер и паддинги - как у индикатора (.vcard.wbit): span 1,
+     * flex-колонка, gap 2, padding 3px 4px, min-height 28; подпись
+     * кнопки стоит в теле, цвет фона задаёт вид (СТОП/СТАРТ/ПАУЗА/СБРОС) */
     .vcard.wbtn {
       grid-column: span 1;
-      box-sizing: border-box;
-      /* aspect-ratio считает с рамкой */
-      aspect-ratio: 1 / 1;
-      /* высота = ширине */
-      align-self: start;
-      /* иначе grid растянет по высоте ряда */
       display: flex;
-      align-items: center;
+      flex-direction: column;
       justify-content: center;
+      gap: 2px;
+      padding: 3px 4px;
+      /* высота наследует общий min-height карточек (как у параметра) */
+      align-items: center;
       text-align: center;
       cursor: pointer;
       user-select: none;
-      font-weight: 600;
-      font-size: 12px;
-      color: #fff;
-      padding: 3px 5px
+      font-weight: 650;
+      font-size: 16px;
+      color: #fff
     }
 
     .vcard.wbtn:active {
@@ -375,7 +416,9 @@
       border-radius: 4px;
       padding: 4px 6px;
       font: 14px ui-monospace, Consolas, monospace;
-      text-align: right
+      text-align: right;
+      width: 100%;              /* поле на всю ширину карточки */
+      box-sizing: border-box
     }
   </style>
 </head>

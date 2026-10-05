@@ -1,0 +1,6 @@
+mock: 184 params, 4 sections, on :8099
+mock: 184 params, 4 sections, on :8099
+  http://192.168.1.223:8099  <- телефон из той же Wi-Fi сети
+  http://192.168.56.1:8099 (виртуальный адаптер: VBox/WSL/Hyper-V)
+  http://172.24.192.1:8099 (виртуальный адаптер: VBox/WSL/Hyper-V)
+  http://192.168.0.72:8099

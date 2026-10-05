@@ -171,11 +171,13 @@
       if (v === undefined) return undefined;
       if (w.auto !== false) return v;   /* already in device units */
       /* dev -> target: multiply by (ml per DEV unit)/(ml per TARGET) */
-      const dev = UN[un];
-      const k = (VOLU[dev] || 1) / VOLU[w.vol];
+      /* глобальная единица прибора ('мл') -> ключ VOLU ('ml') через UNKEY */
+      const devKey = UNKEY[UN[un]] || 'l';
+      const k = VOLU[devKey] / VOLU[w.vol];
       if (un === 'rate') {
+        /* X за ds секунд -> за ts секунд: X * ts/ds (не ds/ts!) */
         const ds = PSEC[{ 'с': 's', 'мин': 'm', 'ч': 'h' }[UN.time]] || 60;
-        return v * k * (ds / PSEC[w.time]);
+        return v * k * (PSEC[w.time] / ds);
       }
       return v * k;
     }
@@ -523,20 +525,30 @@
         return '<div class="vcard" data-k="' + w.k + '"><div class="vname">' + (LBL[w.src] || w.src) + '</div><div class="vval" id="vf_' + w.src + '">—</div></div>';
       if (w.t === 'cval') /* custom: src × factor, label from CUSTOM */
         return '<div class="vcard" data-k="' + w.k + '"><div class="vname">' + widgetName(w) + '</div><div class="vval" id="vfc_' + w.k + '">—</div></div>';
-      if (w.t === 'par') /* единый виджет "Параметр" (был flow/vol/tot/mul) */
-        return '<div class="vcard" data-k="' + w.k + '"><div class="vname">' + widgetName(w) + '</div><div class="vval" id="vp_' + w.k + '">—</div></div>';
+      if (w.t === 'par') /* единицы всегда справа ВВЕРХУ, значение вправо */
+        return '<div class="vcard" data-k="' + w.k + '"><div class="vname">' + CHSRC[w.src].n +
+          '<span class="utop" id="vu_' + w.k + '">' + parUnit(w) + '</span></div>' +
+          '<div class="vrow"><span class="vval" id="vp_' + w.k + '">—</span></div></div>';
       if (w.t === 'bit') /* single flag bit as a lamp, label wraps */
         return '<div class="vcard wbit" data-k="' + w.k + '"><div class="vname">' + widgetName(w) + '</div><div class="bitlamp" id="bl_' + w.k + '"></div></div>';
       if (w.t === 'btn') /* квадратная кнопка, подпись в теле */
         return '<div class="vcard wbtn" data-k="' + w.k + '" style="background:' + BTN[w.mode].col +
           '" onclick="btnAct(\'' + w.mode + '\')">' + BTN[w.mode].n + '</div>';
-      if (w.t === 'inp') /* ввод уставки дозатора: подпись с единицами */
+      /* ввод уставки дозатора: значение ВСЕГДА в глобальных единицах
+       * прибора (UN.obj), единицы - подсказка справа от поля */
+      if (w.t === 'inp') /* единицы всегда справа ВВЕРХУ */
         return '<div class="vcard winp" data-k="' + w.k + '"><div class="vname">' + INPS[w.src].n +
-          (UN.obj ? ', ' + UN.obj : '') + '</div><input type="number" step="any" inputmode="decimal" id="wi_' + w.k +
+          '<span class="utop" id="iu_' + w.k + '">' + (UN.obj || '') + '</span></div>' +
+          '<div class="vrow"><input type="text" inputmode="decimal" id="wi_' + w.k +
           '" value="' + (INP[w.src] ? INP[w.src].v : '') +
-          '" onchange="wInpSet(\'' + w.k + '\')" onkeydown="if(event.key===\'Enter\')this.blur()"></div>';
+          '" onchange="wInpSet(\'' + w.k + '\')" onfocus="this.select()" onkeydown="if(event.key===\'Enter\')this.blur()"></div></div>';
       /* bar: torn-stripe progress bar clamped to min..max, no value text */
-      return '<div class="vcard wbar" data-k="' + w.k + '"><div class="vname">' + widgetName(w).replace('Бар: ', '') + '<span class="bpct" id="bp_' + w.k + '"></span></div><div class="hbar"><div class="hfill" id="hf_' + w.k + '"></div></div></div>';
+      /* прогрессбар: имя слева, уставка-100% с единицами справа,
+       * процент - внутри полоски по центру */
+      return '<div class="vcard wbar" data-k="' + w.k + '"><div class="vname">' + BARM[w.mode].n +
+        '<span class="bsub" id="su_' + w.k + '"></span></div>' +
+        '<div class="hbar"><div class="hfill" id="hf_' + w.k + '"></div>' +
+        '<span class="bpct" id="bp_' + w.k + '"></span></div></div>';
     }
 
     /* панель имеет два экрана: список виджетов и добавление ("отдельная
@@ -547,9 +559,8 @@
       if (wView === 'add') { renderAddView(p); return }
       /* ── экран 1: список виджетов ── */
       let h = '<div class="wrow"><div class="r1"><button id="btnWsave" onclick="wSave()">Сохранить</button>' +
-        '<span id="wmsg" class="flash">' + (wDirty ? 'не сохранено' : 'сохранено (rev ' + wRev + ')') + '</span></div></div>';
-      h += '<div class="wrow"><div class="r1"><span>Добавить виджеты</span>' +
-        '<button onclick="wView=\'add\';renderPanel()">＋</button></div></div>';
+        '<span id="wmsg" class="flash">' + (wDirty ? 'не сохранено' : 'сохранено (rev ' + wRev + ')') + '</span>' +
+        '<button onclick="wView=\'add\';renderPanel()" style="margin-left:auto">Добавить</button></div></div>';
       h += '<div class="wsec">Виджеты</div>';
       widgets.forEach((w, i) => {
         /* строка 1: имя + удаление (чекбокса видимости нет);

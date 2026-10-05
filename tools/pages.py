@@ -103,20 +103,38 @@ def c_literal(html: str) -> str:
     return "\n".join(out)
 
 
+def js_minified(fname: str) -> str:
+    """comment-stripped body of a www js file"""
+    js = (WWW / fname).read_text(encoding="utf-8")
+    js = re.sub(r"/[*].*?[*]/", "", js, flags=re.S)
+    return "\n".join(l for l in js.split("\n")
+                     if l.strip() and not l.lstrip().startswith("//"))
+
+
 def build() -> None:
+    """
+    Firmware pages: every <script src="/x.js"> is INLINED back into the
+    html before packing - the www/ sources stay split for editing, but a
+    device page opens with ONE request instead of html + N js (saves
+    httpd sockets on the ESP8266). The mock serves the split files as-is.
+    """
     parts = [HEADER]
     for fname, lit in PAGES.items():
-        html = minify((WWW / fname).read_text(encoding="utf-8"))
+        html = (WWW / fname).read_text(encoding="utf-8")
+
+        def inline(m):
+            return "<script>" + js_minified(m.group(1)) + "</script>"
+        html = re.sub(r'<script src="/([\w.\-]+\.js)"></script>',
+                      inline, html)
+        # html comments out too; blank lines squeezed
+        html = re.sub(r"<!--.*?-->", "", html, flags=re.S)
+        html = minify(html)
+        html = "\n".join(l for l in html.split("\n") if l.strip())
         parts.append(f"static const char {lit}[] =\n{c_literal(html)};\n\n")
-    for fname, lit in discover_js().items():
-        js = (WWW / fname).read_text(encoding="utf-8")
-        js = re.sub(r"/[*].*?[*]/", "", js, flags=re.S)
-        js = "\n".join(l for l in js.split("\n")
-                       if l.strip() and not l.lstrip().startswith("//"))
-        parts.append(f"static const char {lit}[] =\n{c_literal(js)};\n\n")
     parts.append("#endif /* GW_PAGES_H */\n")
     HDR.write_text("".join(parts), encoding="utf-8", newline="\n")
-    print(f"{HDR} written from: {', '.join(PAGES)} + js: {', '.join(discover_js())}")
+    print(f"{HDR} written from: {', '.join(PAGES)} "
+          f"(js inlined: {', '.join(discover_js())})")
 
 
 def extract() -> None:

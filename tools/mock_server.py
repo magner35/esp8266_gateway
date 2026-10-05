@@ -1,4 +1,4 @@
-import http.server, json, math, time, random, pathlib, re, urllib.parse
+import http.server, json, math, time, random, pathlib, re, urllib.parse, socket
 
 ROOT = pathlib.Path(__file__).parent.parent
 WWW = ROOT / "www"
@@ -280,6 +280,11 @@ class H(http.server.SimpleHTTPRequestHandler):
             self.send_response(404)
             self.end_headers()
 
+    def end_headers(self):
+        # телефон не должен сидеть на старых html/js после правок
+        self.send_header('Cache-Control', 'no-store')
+        super().end_headers()
+
     def log_message(self, *a):
         pass
 
@@ -294,4 +299,31 @@ RELOAD_JS = ("<script>setInterval(async()=>{try{const r=await"
              "location.reload();window.__st=r.t}catch(e){}},1000)</script>")
 
 print(f"mock: {COUNT} params, {len(SECTIONS)} sections, on :8099", flush=True)
-http.server.ThreadingHTTPServer(("127.0.0.1", 8099), H).serve_forever()
+def lan_ips():
+    """все IPv4 машины; первым - адрес основного маршрута (для телефона)"""
+    ips = []
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        sock.connect(("8.8.8.8", 1))          # не шлёт ничего, только выбирает маршрут
+        ips.append(sock.getsockname()[0])
+    except OSError:
+        pass
+    finally:
+        sock.close()
+    try:
+        for ip in socket.gethostbyname_ex(socket.gethostname())[2]:
+            if ip not in ips and not ip.startswith("127."):
+                ips.append(ip)
+    except OSError:
+        pass
+    return ips
+
+
+PORT = 8099
+print(f"mock: {COUNT} params, {len(SECTIONS)} sections, on :{PORT}", flush=True)
+for ip in lan_ips():
+    virtual = ip.startswith(("192.168.56.", "172.1", "172.2", "172.3"))
+    tag = " (виртуальный адаптер)" if virtual else " (реальная сеть - подходит для телефона)"
+    print(f"  http://{ip}:{PORT}{tag}", flush=True)
+# 0.0.0.0: мок доступен и с телефона в той же Wi-Fi сети
+http.server.ThreadingHTTPServer(("0.0.0.0", PORT), H).serve_forever()

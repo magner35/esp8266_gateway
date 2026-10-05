@@ -143,39 +143,6 @@ static esp_err_t h_widgets(httpd_req_t *req)
     return ESP_OK;
 }
 
-/*
- * Page scripts, embedded by tools/pages.py (it auto-discovers every
- * <script src="/xxx.js"> in the www pages): one table + one handler.
- * Adding a js file = one table row, nothing else.
- */
-static const struct
-{
-    const char *path;
-    const char *body;
-} sJsFiles[] = {
-    {"/shared.js", PAGE_SHARED_JS},
-    {"/index.js", PAGE_INDEX_JS},
-    {"/panel.js", PAGE_PANEL_JS},
-    {"/settings.js", PAGE_SETTINGS_JS},
-    {"/wifi.js", PAGE_WIFI_JS},
-    {"/widgets.js", PAGE_WIDGETS_JS},
-};
-
-static esp_err_t h_js(httpd_req_t *req)
-{
-    int i;
-    for (i = 0; i < sizeof(sJsFiles) / sizeof(sJsFiles[0]); i++)
-        if (!strcmp(req->uri, sJsFiles[i].path))
-        {
-            httpd_resp_set_type(req, "application/javascript");
-            httpd_resp_send(req, sJsFiles[i].body, strlen(sJsFiles[i].body));
-            return ESP_OK;
-        }
-    httpd_resp_set_status(req, "404 Not Found");
-    httpd_resp_send(req, NULL, 0);
-    return ESP_FAIL;
-}
-
 static esp_err_t h_scan(httpd_req_t *req)
 {
     static TickType_t scanStart; /* when the current scan was kicked off */
@@ -331,13 +298,13 @@ static esp_err_t h_api_values(httpd_req_t *req)
     }
     off += snprintf(out + off, sizeof(out) - off,
                     "{\"ok\":1,\"age\":%lu,\"link\":%d,\"ready\":%d,"
-                    "\"frequency\":%.3f,\"rate_raw\":%.3f,\"rate_fast\":%.3f,"
-                    "\"rateMLPM\":%.3f,\"rate\":%.3f,"
-                    "\"total_plus\":%.3f,\"total_minus\":%.3f,"
-                    "\"total\":%.3f,\"total_sum\":%.3f,"
-                    "\"totalml_plus\":%.3f,\"totalml_minus\":%.3f,"
-                    "\"gtotal\":%.3f,\"gtotalml\":%.3f,"
-                    "\"kf_value\":%.3f,\"batch\":%.3f,"
+                    "\"frequency\":%.2f,\"rate_raw\":%f,\"rate_fast\":%f,"
+                    "\"rateMLPM\":%f,\"rate\":%f,"
+                    "\"total_plus\":%f,\"total_minus\":%f,"
+                    "\"total\":%f,\"total_sum\":%f,"
+                    "\"totalml_plus\":%f,\"totalml_minus\":%f,"
+                    "\"gtotal\":%f,\"gtotalml\":%f,"
+                    "\"kf_value\":%f,\"batch\":%f,"
                     "\"pulses_packet\":%lu,\"pulses\":%lu,"
                     "\"status\":%u,\"setpoint\":%u,\"isr\":%u}",
                     (unsigned long)((xTaskGetTickCount() * portTICK_PERIOD_MS -
@@ -740,15 +707,6 @@ void web_start(void)
     httpd_register_uri_handler(sServer, &u);
     u = (httpd_uri_t){.uri = "/widgets", .method = HTTP_GET, .handler = h_widgets};
     httpd_register_uri_handler(sServer, &u);
-    {
-        int i;
-        for (i = 0; i < sizeof(sJsFiles) / sizeof(sJsFiles[0]); i++)
-        {
-            u = (httpd_uri_t){.uri = sJsFiles[i].path, .method = HTTP_GET,
-                              .handler = h_js};
-            httpd_register_uri_handler(sServer, &u);
-        }
-    }
     u = (httpd_uri_t){.uri = "/scan", .method = HTTP_GET, .handler = h_scan};
     httpd_register_uri_handler(sServer, &u);
     u = (httpd_uri_t){.uri = "/save", .method = HTTP_POST, .handler = h_save};
