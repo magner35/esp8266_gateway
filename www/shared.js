@@ -113,6 +113,8 @@ const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;'
      */
     const MULM = { kf: 'К-фактор', price: 'Цена имп' };
     let MULT = { type: 'price', value: NaN };   /* from the params tree */
+    let LINM = '';    /* Линеаризация → Метод (Выкл/Линейный/Сплайн-A/Б):
+                       * ≠ Выкл => К-фактор динамический, из kf_value */
     let MULU = '';    /* объёмная единица множителя (меню Множитель → Единицы) */
     /*
      * ── PARAM WIDGET (t:'par') ─────────────────────────────────────
@@ -154,13 +156,23 @@ const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;'
     }
     function parValue(w, d) {
       const un = CHSRC[w.src].un;
-      /* множитель: значение из дерева; другой тип = обратное число.
-       * В "авто" значение уже в единицах прибора - как есть. Вручную:
-       * K-фактор растёт с укрупнением единицы (имп/мл -> имп/л = ×1000),
-       * Цена импульса наоборот падает (мл/имп -> л/имп = ÷1000) */
+      /* К-фактор / цена импульса. При включённой линеаризации
+       * (Линеаризация → Метод ≠ Выкл) К-фактор ДИНАМИЧЕСКИЙ: прибор
+       * интерполирует его по частоте сигнала, живое значение едет
+       * в каждом кадре 'm' как kf_value. Цена = обратное число.
+       * Без линеаризации — константа из Множителя (другой тип =
+       * обратное). Вручную: K-фактор растёт с укрупнением единицы
+       * (имп/мл -> имп/л = ×1000), цена наоборот падает (÷1000). */
       if (un === 'kf' || un === 'price') {
-        if (!isFinite(MULT.value) || MULT.value <= 0) return undefined;
-        const v = CHSRC[w.src].src === MULT.type ? MULT.value : 1 / MULT.value;
+        let v;
+        if (LINM && LINM !== 'Выкл') {
+          const kv = d.kf_value;
+          if (!(kv > 0)) return undefined;   /* потока нет / интерп. 0 */
+          v = un === 'kf' ? kv : 1 / kv;
+        } else {
+          if (!isFinite(MULT.value) || MULT.value <= 0) return undefined;
+          v = CHSRC[w.src].src === MULT.type ? MULT.value : 1 / MULT.value;
+        }
         if (w.auto !== false) return v;
         const devK = VOLU[UNKEY[MULU]] || VOLU.l;   /* ml per device unit */
         const tgtK = VOLU[w.vol];                   /* ml per chosen unit */
@@ -275,12 +287,20 @@ const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;'
       pulses: { n: 'Импульсы', src: 'pulses', un: 'none' } /* без единиц */
     };
     /* единица измерения источника графика: расход = объём + период,
-     * объёмы = просто единица объёма (как у барграфа, из UN) */
+     * объёмы = единица объёма (как у барграфа, из UN); частота/множитель —
+     * свои: К-фактор и цена в единицах множителя (Множитель → Единицы) */
     function chUnit(s) {
-      const u = UN[CHSRC[s].un];
+      const un = CHSRC[s].un;
+      if (un === 'hz') return 'Гц';
+      if (un === 'kf') return MULU ? 'имп/' + MULU : '';
+      if (un === 'price') return MULU ? MULU + '/имп' : '';
+      const u = UN[un];
       if (!u) return '';
-      return CHSRC[s].un === 'rate' ? u + (UN.time ? '/' + UN.time : '') : u;
+      return un === 'rate' ? u + (UN.time ? '/' + UN.time : '') : u;
     }
+    /* источники графика, для которых масштаб всегда авто
+     * (уставок в приборе для них нет) */
+    const CHART_AUTO_ONLY = ['kf', 'price', 'freq', 'pulses'];
     const CHPER = {
       60: '1 мин', 300: '5 мин', 600: '10 мин', 1800: '30 мин',
       3600: '60 мин', 86400: '24 ч'
@@ -521,10 +541,22 @@ const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;'
       for (let k = 1; k < 4; k++) { const y = ch * k / 4; g.beginPath(); g.moveTo(0, y); g.lineTo(cw, y); g.stroke() }
       let lo, hi, minV = Infinity, maxV = -Infinity;
       for (const p of pts) { if (p.v < minV) minV = p.v; if (p.v > maxV) maxV = p.v }
-      if (w.auto === false) {
-        hi = SP[CHSRC[w.src].sp];
-        if (!(hi > 0)) hi = maxV || 1;
-        lo = 0;
+      if (w.auto === false && !CHART_AUTO_ONLY.includes(w.src)) {
+        /*
+         * Фиксированная шкала по уставкам прибора. График расхода:
+         * min = Уставки→Расход-, max = Уставки→Расход+. Остальные
+         * графики — своя уставка сверху (BARM sp), снизу 0.
+         * Защита: если уставки не заданы/мусор (hi<=lo) — автоскейл.
+         */
+        if (CHSRC[w.src].un === 'rate') {
+          hi = SP.rate;
+          lo = SP['rate-'] || 0;
+          if (!(hi > lo)) { hi = maxV || 1; lo = 0; }
+        } else {
+          hi = SP[CHSRC[w.src].sp];
+          if (!(hi > 0)) hi = maxV || 1;
+          lo = 0;
+        }
       } else {
         /*
          * Стабилизация автоскейла: при 10 Гц пересчёт lo/hi из min/max
@@ -651,8 +683,12 @@ const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;'
       g.fillStyle = '#d8dee9'; g.font = '12px ui-monospace,Consolas,monospace';
       g.fillText(pts[n - 1].v.toFixed(3), 8, 12);
       g.fillStyle = '#8b94a7';
-      g.fillText('max ' + maxV.toFixed(3), cw - 86, 12);
-      g.fillText('min ' + minV.toFixed(3), cw - 86, ch - 4);
+      /* max/min = ГРАНИЦЫ ШКАЛЫ: в авто это экстремумы данных,
+       * при фиксированной — уставки прибора */
+      const showMax = w.auto === false ? hi : maxV;
+      const showMin = w.auto === false ? lo : minV;
+      g.fillText('max ' + showMax.toFixed(3), cw - 86, 12);
+      g.fillText('min ' + showMin.toFixed(3), cw - 86, ch - 4);
     }
     window.addEventListener('resize', chartDrawAll);
     /*
@@ -839,7 +875,7 @@ const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;'
         if (!CHARTS_ON)
           /* выключенный график — компактная строка, не огромный canvas */
           return '<div class="vcard chart off" data-k="' + w.k + '"><div class="vname">' + CHSRC[w.src].n + '</div><div class="chartsoff">графики отключены</div></div>';
-        return '<div class="vcard chart" data-k="' + w.k + '"><div class="vname">' + CHSRC[w.src].n + (chUnit(w.src) ? ', ' + chUnit(w.src) : '') + ', последние ' + (CHPER[w.per] || '10 мин') + '</div><canvas id="rc_' + w.k + '"></canvas></div>';
+        return '<div class="vcard chart" data-k="' + w.k + '"><div class="vname">' + CHSRC[w.src].n + (chUnit(w.src) ? ', ' + chUnit(w.src) : '') + ', ' + (CHPER[w.per] || '10 мин') + '</div><canvas id="rc_' + w.k + '"></canvas></div>';
       }
       if (w.t === 'val')
         return '<div class="vcard" data-k="' + w.k + '"><div class="vname">' + (LBL[w.src] || w.src) + '</div><div class="vval" id="vf_' + w.src + '">—</div></div>';
@@ -887,7 +923,12 @@ const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;'
         /* чекбокс "авто" (par/chart) ВСЕГДА на первой строке, перед ✕ */
         let r1Auto = '';
         if (w.t === 'par') r1Auto = autoChk('wPar', i, w.auto);
-        if (w.t === 'chart') r1Auto = autoChk('wChart', i, w.auto);
+        /* график: авто-масштаб нельзя отключить для источников без
+         * уставок (к-фактор, цена импульса, частота, импульсы) */
+        if (w.t === 'chart')
+          r1Auto = CHART_AUTO_ONLY.includes(w.src)
+            ? ' <span class="autolbl" style="color:#8b94a7">авто</span>'
+            : autoChk('wChart', i, w.auto);
         h += '<div class="wrow"><div class="r1"><span>' + listName(w) + '</span>' + r1Auto +
           ' <button class="warn sq" onclick="wDel(' + i + ')">&#10005;</button></div><div class="r2">';
         /* ── БАРГРАФ ('bar'): источник-режим; 100% = уставка режима ── */
@@ -1117,7 +1158,11 @@ const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;'
             if (p.n === 'Доза') inp.dose = { id: p.i, v: parseFloat(p.v) };
             if (p.n === 'Упреждение') inp.pre = { id: p.i, v: parseFloat(p.v) };
             if (p.n === 'Перелив') inp.over = { id: p.i, v: parseFloat(p.v) };
+            /* нижняя уставка расхода: min фиксированной шкалы графика */
+            if (p.n === 'Расход-') SP['rate-'] = parseFloat(p.v);
           }
+          /* метод линеаризации: активен => kf динамический (parValue) */
+          if (p.tb === 'Линеаризация' && p.n === 'Метод') LINM = p.v;
           /* setpoints: floats for the bar 100% levels */
           if (p.t === 0 && p.w)
             for (const m in BARM)
@@ -1126,10 +1171,14 @@ const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;'
           /* units: enums in "Основные → Единицы измерения" (Расход/Объём/
            * Общий + Период: за какое время считается расход) */
           if (p.t === 11 && p.tb === 'Единицы измерения') {
-            if (p.n === 'Расход') un.rate = UNSHORT[p.v] || '';
-            if (p.n === 'Объём') un.obj = UNSHORT[p.v] || '';
-            if (p.n === 'Общий') un.ob = UNSHORT[p.v] || '';
-            if (p.n === 'Период') un.time = PERSHORT[p.v] || '';
+            /* enum-значение может прийти текстом или (после чьей-то
+             * кривой установки) индексом — лечим оба случая */
+            const ev = UNSHORT[p.v] || (p.o && p.o.length ? (UNSHORT[p.o[+p.v]] || p.o[+p.v]) : '') || '';
+            const tv = PERSHORT[p.v] || (p.o && p.o.length ? (PERSHORT[p.o[+p.v]] || p.o[+p.v]) : '') || '';
+            if (p.n === 'Расход') un.rate = ev;
+            if (p.n === 'Объём') un.obj = ev;
+            if (p.n === 'Общий') un.ob = ev;
+            if (p.n === 'Период') un.time = tv;
           }
           /* multiplier: "Тип" (bool) + "Значение" (float) + "Единицы"
            * (enum мл/л/м³) in Множитель */

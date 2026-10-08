@@ -272,13 +272,18 @@ function replaySeq(seq, off) {
       if (!vBuilt) vBuild();
       vApply(sv);
       lastSeqT = sv.t;
-      /* график питается теми же снимками: 5 точек/с без запросов */
+      /* график питается теми же снимками: 5 точек/с без запросов.
+       * Значение — через parValue (как у виджетов-параметров): он
+       * умеет к-фактор/цену импульса из множителя прибора и прочие
+       * производные; авто=true = всегда в единицах прибора */
       if (CHARTS_ON && widgets)
         for (const w of widgets)
-          if (w.t === 'chart' && w.on && CHSRC[w.src] &&
-              sv[CHSRC[w.src].src] !== undefined)
-            chartAppend(w.src, sv[CHSRC[w.src].src],
-                        sv.t ? sv.t + off : undefined);
+          if (w.t === 'chart' && w.on && CHSRC[w.src]) {
+            const val = parValue({ ...w, auto: true }, sv);
+            if (val !== undefined && isFinite(val))
+              chartAppend(w.src, val,
+                          sv.t ? sv.t + off : undefined);
+          }
     }, i * step));
   });
 }

@@ -39,7 +39,10 @@
       const i = q.i, m = ' oninput="mark(' + i + ')" onchange="mark(' + i + ')" onfocus="this.select()" onkeydown="if(event.key===' + q1 + 'Enter' + q1 + ')this.blur()"';
       if ((q.t === 10 || q.t === 11) && q.o && q.o.length) {
         let h = '<select id="w' + i + '"' + m + '>';
-        q.o.forEach((s, k) => h += '<option value="' + k + '"' + (String(k) === String(q.r) ? ' selected' : '') + '>' + esc(s) + '</option>');
+        /* value = ТЕКСТ опции: прибор принимает текст, индекс здесь
+         * только для подсветки selected (иначе 'Применить' слало '1'
+         * вместо 'Литр' и ломало единицы) */
+        q.o.forEach((s, k) => h += '<option value="' + esc(s) + '"' + (String(k) === String(q.r) ? ' selected' : '') + '>' + esc(s) + '</option>');
         return '<div class="set">' + h + '</select></div>';
       }
       if (q.m) return '<div class="set"><input id="w' + i + '" type="password" maxlength="6" inputmode="numeric" placeholder="******"' + m + '></div>';
