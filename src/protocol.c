@@ -876,7 +876,8 @@ void proto_values_restart(ProtoCtx *ctx)
 
 bool proto_values_ready(const ProtoCtx *ctx)
 {
-    return ctx->valsLine == 3;
+    /* новый кадр 'm' — две строки */
+    return ctx->valsLine == 2;
 }
 
 static bool vals_next(char **pp, char *field, size_t cap)
@@ -913,39 +914,26 @@ void proto_values_line(ProtoCtx *ctx, char *line)
 
     switch (ctx->valsLine)
     {
-    case 0: /* m,frequency,rate_raw,rate_fast,rateMLPM,rate */
+    case 0: /* m,frequency,rateMLPM,totalml_plus,totalml_minus,gtotalml */
         if (strncmp(line, "m,", 2))
             return; /* console chatter */
         p = line + 2;
         v->frequency = vals_float(&p, f, sizeof(f));
-        v->rate_raw = vals_float(&p, f, sizeof(f));
-        v->rate_fast = vals_float(&p, f, sizeof(f));
         v->rateMLPM = vals_float(&p, f, sizeof(f));
-        v->rate = vals_float(&p, f, sizeof(f));
-        ctx->valsLine = 1;
-        break;
-    case 1: /* totals, 8 fields */
-        p = line;
-        v->total_plus = vals_float(&p, f, sizeof(f));
-        v->total_minus = vals_float(&p, f, sizeof(f));
-        v->total = vals_float(&p, f, sizeof(f));
-        v->total_sum = vals_float(&p, f, sizeof(f));
         v->totalml_plus = vals_float(&p, f, sizeof(f));
         v->totalml_minus = vals_float(&p, f, sizeof(f));
-        v->gtotal = vals_float(&p, f, sizeof(f));
         v->gtotalml = vals_float(&p, f, sizeof(f));
-        ctx->valsLine = 2;
+        ctx->valsLine = 1;
         break;
-    case 2: /* kf,pulses_packet,pulses,batch,status,setpoint,isr (%02X) */
+    case 1: /* kf_value,pulses,batch,status,setpoint,isr (%02X) */
         p = line;
         v->kf_value = vals_float(&p, f, sizeof(f));
-        v->pulses_packet = vals_ulong(&p, f, sizeof(f), 10);
         v->pulses = vals_ulong(&p, f, sizeof(f), 10);
         v->batch = vals_float(&p, f, sizeof(f));
         v->status = (uint8_t)vals_ulong(&p, f, sizeof(f), 16);
         v->setpoint = (uint8_t)vals_ulong(&p, f, sizeof(f), 16);
         v->isr = (uint8_t)vals_ulong(&p, f, sizeof(f), 16);
-        ctx->valsLine = 3; /* frame complete */
+        ctx->valsLine = 2; /* frame complete */
         v->updated = ctx->nowMs;
         break;
     default:

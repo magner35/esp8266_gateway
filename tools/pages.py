@@ -265,6 +265,13 @@ def build() -> None:
     parts = [HEADER]
     app = assemble_app()
     parts.append(f"static const char PAGE_APP[] =\n{c_literal(app)};\n\n")
+    # gzip-копия: телефон с энергосбережением тянет 80 КБ по B+G
+    # медленно и упирается в send-таймаут — сжатая уходит в разы
+    # быстрее. Браузеры Accept-Encoding: gzip понимают все.
+    import gzip as _gz
+    gz = _gz.compress(app.encode("utf-8"), 9)
+    hexarr = ",".join(str(b) for b in gz)
+    parts.append(f"static const unsigned char PAGE_APP_GZ[{len(gz)}] =\n{{{hexarr}}};\n\n")
     parts.append("#endif /* GW_PAGES_H */\n")
     HDR.write_text("".join(parts), encoding="utf-8", newline="\n")
     print(f"{HDR} written: single-page app from {', '.join(SECTIONS)} "

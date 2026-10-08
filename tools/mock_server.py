@@ -1,4 +1,4 @@
-import http.server, json, math, time, random, pathlib, re, urllib.parse, socket
+import http.server, json, math, os, time, random, pathlib, re, urllib.parse, socket, threading, collections
 
 ROOT = pathlib.Path(__file__).parent.parent
 WWW = ROOT / "www"
@@ -134,8 +134,12 @@ FLAGS = {
 }
 
 def rate_now(t):
-    base = 12 + 6 * math.sin(t * 0.11) + 3 * math.sin(t * 0.9)
-    return max(0.0, base + 0.4 * math.sin(t * 7.3))
+    # под выборку 10 Гц, частоты вдвое ниже прежних:
+    # 0.04/0.24/0.95/2.4 Гц — плавная волна даже на длинных окнах
+    return max(0.0, 12 + 4 * math.sin(t * 0.25)
+               + 3 * math.sin(t * 1.5)
+               + 2 * math.sin(t * 6.0)
+               + 0.5 * math.sin(t * 15.0))
 
 def flag_byte(t, group):
     period, bits = FLAGS[group]
@@ -160,45 +164,75 @@ def per_sec():
     return {'Секунда': 1.0, 'Минута': 60.0, 'Час': 3600.0}.get(
         _enum_val(53, 'Минута'), 60.0)
 
-def values():
+CHART_HIST = collections.deque(maxlen=512)   # (t_ms, rate) как chartbuf на ESP
+
+def _chart_sampler():
+    """1 Гц независимо от браузера — как meter_task на ESP."""
+    while True:
+        t = time.time() - STATE["t0"]
+        # то же число, что values() кладёт в "rate"
+        CHART_HIST.append((int(time.time() * 1000),
+                           rate_now(t) * (1000.0 / unit_ml(54)) * per_sec() / 60.0))
+        time.sleep(1.0)
+
+VAL_RING = collections.deque(maxlen=8)   # кольцо снимков, как ske02_valring
+
+def _values_sampler():
+    """5 Гц независимо от браузера: эволюция модели + снимок в кольцо."""
+    while True:
+        now = time.time()
+        t = now - STATE["t0"]
+        dt = max(0.0, now - STATE["last"])
+        STATE["last"] = now
+        rate = rate_now(t)
+        freq = rate * KF / 60.0
+        STATE["t_plus"] += rate * dt / 60.0
+        STATE["t_minus"] += 0.002 * dt
+        STATE["gtotal"] = STATE["t_plus"] + STATE["t_minus"]
+        STATE["pulses"] += freq * dt
+        STATE["batch"] = 2.5 + 1.2 * math.sin(t * 0.05)
+        ph = (t % 6000.0) / 3000.0
+        mlpm = 1000.0 + (100000.0 - 1000.0) * (ph if ph <= 1 else 2 - ph)
+        tp, tm = STATE["t_plus"], STATE["t_minus"]
+        ur = 1000.0 / unit_ml(54)
+        uo = 1000.0 / unit_ml(55)
+        ug = 1000.0 / unit_ml(56)
+        ps = per_sec()
+        VAL_RING.append({
+            "t": int(now * 1000),
+            "frequency": freq,
+            "rate_raw": rate / KF,
+            "rate_fast": (rate + 0.2 * math.sin(t * 3.1)) * ur * ps / 60.0,
+            "rateMLPM": mlpm, "rate": rate * ur * ps / 60.0,
+            "total_plus": tp * uo, "total_minus": tm * uo,
+            "total": (tp - tm) * uo, "total_sum": (tp + tm) * uo,
+            "totalml_plus": tp * 1000.0, "totalml_minus": tm * 1000.0,
+            "gtotal": STATE["gtotal"] * ug, "gtotalml": STATE["gtotal"] * 1000.0,
+            "kf_value": KF,
+            "pulses_packet": int(freq) & 0xFFFF,
+            "pulses": int(STATE["pulses"]),
+            "batch": STATE["batch"] * uo,
+            "status": flag_byte(t, "status"),
+            "setpoint": flag_byte(t, "setpoint"),
+            "isr": flag_byte(t, "isr"),
+        })
+        time.sleep(0.2)
+
+def values(since=0):
     now = time.time()
-    t = now - STATE["t0"]
-    dt = max(0.0, now - STATE["last"])
-    STATE["last"] = now
-    rate = rate_now(t)                 # L/min, the physical model
-    freq = rate * KF / 60.0
-    STATE["t_plus"] += rate * dt / 60.0
-    STATE["t_minus"] += 0.002 * dt
-    STATE["gtotal"] = STATE["t_plus"] + STATE["t_minus"]
-    STATE["pulses"] += freq * dt
-    STATE["batch"] = 2.5 + 1.2 * math.sin(t * 0.05)
-    # rateMLPM: independent triangle sweep 1000 -> 100000 -> 1000 in 50 s
-    ph = (t % 6000.0) / 3000.0
-    mlpm = 1000.0 + (100000.0 - 1000.0) * (ph if ph <= 1 else 2 - ph)
-    tp, tm = STATE["t_plus"], STATE["t_minus"]
-    # emit in the DEVICE units (like the real meter does): volumes in
-    # the unit picked by params 55/56, rate in unit/period (54 + 53)
-    ur = 1000.0 / unit_ml(54)          # L -> rate volume unit
-    uo = 1000.0 / unit_ml(55)          # L -> Объём unit
-    ug = 1000.0 / unit_ml(56)          # L -> Общий unit
-    ps = per_sec()
-    return {
-        "ok": True, "link": True,
-        "frequency": freq,
-        "rate_raw": rate / KF,
-        "rate_fast": (rate + 0.2 * math.sin(t * 3.1)) * ur * ps / 60.0,
-        "rateMLPM": mlpm, "rate": rate * ur * ps / 60.0,
-        "total_plus": tp * uo, "total_minus": tm * uo,
-        "total": (tp - tm) * uo, "total_sum": (tp + tm) * uo,
-        "totalml_plus": tp * 1000.0, "totalml_minus": tm * 1000.0,
-        "gtotal": STATE["gtotal"] * ug, "gtotalml": STATE["gtotal"] * 1000.0,
-        "kf_value": KF,
-        "pulses_packet": int(freq) & 0xFFFF, "pulses": int(STATE["pulses"]),
-        "batch": STATE["batch"] * uo,
-        "status": flag_byte(t, "status"),
-        "setpoint": flag_byte(t, "setpoint"),
-        "isr": flag_byte(t, "isr"),
+    ap = bool(os.environ.get("MOCK_AP"))
+    seq = [x for x in VAL_RING if x["t"] > since]
+    if since == 0:
+        seq = seq[-1:]       # загрузка страницы: только свежий снимок
+    d = {
+        "ok": True, "link": True, "ready": True,
+        "now": int(now * 1000),
+        "ap": ap,
+        "ip": "10.0.0.1" if ap else "127.0.0.1",
+        "ssid": "ske02setup-TEST" if ap else "mock",
+        "seq": seq,
     }
+    return d
 # ------------------------------------------------------------------------
 
 class H(http.server.SimpleHTTPRequestHandler):
@@ -206,6 +240,12 @@ class H(http.server.SimpleHTTPRequestHandler):
 
     def __init__(self, *a, **kw):
         super().__init__(*a, directory=str(WWW), **kw)
+
+    def end_headers(self):
+        """no-store на ВСЁ: webview кэширует /index.js и после
+        пересборки страница исполняет старый скрипт"""
+        self.send_header("Cache-Control", "no-store")
+        super().end_headers()
 
     def _json(self, obj, code=200):
         body = json.dumps(obj, ensure_ascii=False).encode()
@@ -220,16 +260,27 @@ class H(http.server.SimpleHTTPRequestHandler):
              ["/", "/index.html", "/settings", "/wifi", "/panel", "/widgets"]}
 
     def do_GET(self):
-        if self.path == "/api/values":
-            self._json(values())
-        elif self.path == "/api/info":
+        self._path = urllib.parse.urlparse(self.path).path
+        if self._path == "/api/values":
+            qs = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+            self._json(values(since=int(qs.get("since", ["0"])[0])))
+        elif self._path == "/api/info":
+            ap = bool(os.environ.get("MOCK_AP"))
             self._json({"link": True, "fw": "SKE02/3425", "count": COUNT,
-                        "ip": "127.0.0.1", "rssi": -50, "ssid": "mock",
+                        "ip": "10.0.0.1" if ap else "127.0.0.1",
+                        "rssi": -50 if not ap else 0,
+                        "ssid": "ske02setup-TEST" if ap else "mock",
                         "uptime": int(time.time() - STATE["t0"]),
-                        "heap": 20000, "ap": False})
-        elif self.path == "/api/params":
+                        "heap": 20000, "ap": ap})
+        elif self._path == "/api/params":
             dump_maybe_reload()
             self._json(params_json())
+        elif self.path.startswith("/api/chart"):
+            qs = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+            since = int(qs.get("since", ["0"])[0])
+            pts = [(t, v) for (t, v) in CHART_HIST if t > since]
+            self._json({"now": int(time.time() * 1000), "n": len(pts),
+                        "t": [t for t, _ in pts], "v": [round(v, 4) for _, v in pts]})
         elif self.path.startswith("/scan"):
             self._json({"nets": [
                 {"s": "CALIPSO1703", "r": -42, "e": 1},
@@ -237,14 +288,24 @@ class H(http.server.SimpleHTTPRequestHandler):
                 {"s": "Keenetic-911", "r": -71, "e": 1},
                 {"s": "FreeWiFi", "r": -85, "e": 0}
             ]})
-        elif self.path == "/api/widgets":
+        elif self._path == "/api/widgets":
             self._json(self.WCFG)
-        elif self.path == "/stamp":
+        elif self._path == "/stamp":
             self._json({"t": www_stamp()})
-        elif self.path in self.PAGES:
+        elif self._path in self.PAGES:
             # serve the page with an auto-reload probe injected (mock only,
             # never in pages.h): saving any www/*.html reloads the browser
-            html = (WWW / self.PAGES[self.path]).read_text(encoding='utf-8')
+            html = (WWW / self.PAGES[urllib.parse.urlparse(self.path).path]).read_text(encoding='utf-8')
+            # версионирование скриптов: браузеры кэшируют /xx.js
+            # эвристически и гоняют СТАРЫЙ код после пересборки
+            import re as _re
+            st = www_stamp()
+            html = _re.sub(r'src="/([a-z]+\.js)"',
+                           lambda m: 'src="/%s.js?v=%d"' % (m.group(1), st), html)
+            # захват JS-ошибок страницы для диагностики
+            html = html.replace('<head>',
+                '<head><script>window.__errs=[];window.onerror='
+                '(m,s,l)=>{window.__errs.push(m+" @"+l)};</script>', 1)
             html = html.replace('</body>', RELOAD_JS + '</body>')
             body = html.encode()
             self.send_response(200)
@@ -260,7 +321,9 @@ class H(http.server.SimpleHTTPRequestHandler):
         n = int(self.headers.get('Content-Length') or 0)
         body = self.rfile.read(n).decode() if n else ''
         f = dict(urllib.parse.parse_qsl(body))
-        if self.path == "/api/set":
+        if self.path == "/api/forgetwifi":
+            self._json({"ok": True})
+        elif self.path == "/api/set":
             p = PARAMS.get(int(f.get('id', -1)))
             if p is None or not p['w']:
                 self._json({"ok": False, "error": "parametr nedostupen"}, 400)
@@ -272,7 +335,7 @@ class H(http.server.SimpleHTTPRequestHandler):
             self._json({"ok": True, "value": v})
         elif self.path == "/api/run":
             self._json({"ok": True})
-        elif self.path == "/api/widgets":
+        elif self._path == "/api/widgets":
             try:
                 d = json.loads(body)
                 assert 'rev' in d and isinstance(d.get('cur') or d.get('cfg'), list)
@@ -333,4 +396,6 @@ for ip in lan_ips():
     tag = " (виртуальный адаптер)" if virtual else " (реальная сеть - подходит для телефона)"
     print(f"  http://{ip}:{PORT}{tag}", flush=True)
 # 0.0.0.0: мок доступен и с телефона в той же Wi-Fi сети
+threading.Thread(target=_values_sampler, daemon=True).start()
+threading.Thread(target=_chart_sampler, daemon=True).start()
 http.server.ThreadingHTTPServer(("0.0.0.0", PORT), H).serve_forever()

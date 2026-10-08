@@ -300,9 +300,118 @@ static void values_cb(char *line, void *user)
     xSemaphoreGive(sLock);
 }
 
+/*
+ * Новый кадр 'm' прибора несёт только ml-базис (rateMLPM мл/мин,
+ * totalml_*, gtotalml). Производные в единицах прибора считаем тут
+ * по тем же формулам, что раньше считал сам прибор (settings.c):
+ *   rate = rateMLPM x [сек/периода] / (60 x [мл на ед. расхода])
+ *   total_* = totalml_* / 1000^ед, gtotal = gtotalml / 1000^ед
+ * Единицы берём из дерева параметров: enum-индексы "Единицы
+ * измерения" (Расход/Объём/Общий/Период) — индекс есть множитель.
+ * Множитель K-фактора и коррекция уже встроены в rateMLPM.
+ */
+static void vals_derive(ProtoCtx *ctx)
+{
+    SkeValues *v = &ctx->vals;
+    float ml_per_rate = 1000.0f;   /* л по умолчанию */
+    float tb = 60.0f;              /* за минуту */
+    float tot_div = 1000.0f;
+    float gtot_div = 1000.0f;
+    static const float P3[4] = {1.0f, 1000.0f, 1000000.0f, 1000000.0f};
+    static const float TB[4] = {1.0f, 60.0f, 3600.0f, 3600.0f};
+    int i;
+
+    for (i = 0; i < ctx->count && i < SKE_MAX_PARAMS; i++)
+    {
+        SkeParam *p = &ctx->params[i];
+        uint32_t idx = p->value;
+        if (p->type != SKT_ENUM)
+            continue;
+        if (!strcmp(p->name, "Расход"))
+            ml_per_rate = P3[idx < 4 ? idx : 1];
+        else if (!strcmp(p->name, "Период"))
+            tb = TB[idx < 4 ? idx : 1];
+        else if (!strcmp(p->name, "Объём"))
+            tot_div = P3[idx < 4 ? idx : 1];
+        else if (!strcmp(p->name, "Общий"))
+            gtot_div = P3[idx < 4 ? idx : 1];
+    }
+
+    {
+        static bool sLogged;
+        if (!sLogged)
+        {
+            sLogged = true;
+            DBG("ske02: units rate 1/%.0f ml, per %.0fs, vol 1/%.0f, gvol 1/%.0f\n",
+                (double)ml_per_rate, (double)tb,
+                (double)tot_div, (double)gtot_div);
+        }
+    }
+
+    v->rate = v->rateMLPM * tb / (60.0f * ml_per_rate);
+    v->rate_raw = v->rate;
+    v->rate_fast = v->rate;
+    v->total_plus = v->totalml_plus / tot_div;
+    v->total_minus = v->totalml_minus / tot_div;
+    v->total = v->total_plus - v->total_minus;
+    v->total_sum = v->total_plus + v->total_minus;
+    v->gtotal = v->gtotalml / gtot_div;
+}
+
+/*
+ * Кольцо последних снимков значений (5 Гц опрос прибора):
+ * /api/values отдаёт ПАЧКУ за секунду одним запросом, страница
+ * проигрывает её по 200 мс. 8 x (SkeValues + ts) ~ 700 Б статики.
+ */
+#define VAL_RING_MAX 8
+static SkeValues sVRing[VAL_RING_MAX];
+static uint32_t sVTs[VAL_RING_MAX];
+static int sVHead, sVCount;
+static SemaphoreHandle_t sVLock;
+
+void ske02_valring_init(void)
+{
+    sVLock = xSemaphoreCreateMutex();
+}
+
+void ske02_valring_push(uint32_t t_ms, const SkeValues *v)
+{
+    if (!sVLock)
+        return;
+    xSemaphoreTake(sVLock, portMAX_DELAY);
+    sVRing[sVHead] = *v;
+    sVTs[sVHead] = t_ms;
+    sVHead = (sVHead + 1) % VAL_RING_MAX;
+    if (sVCount < VAL_RING_MAX)
+        sVCount++;
+    xSemaphoreGive(sVLock);
+}
+
+int ske02_valring_since(uint32_t since_ms, uint32_t *ts, SkeValues *out, int max)
+{
+    int n = 0;
+    if (!sVLock)
+        return 0;
+    xSemaphoreTake(sVLock, portMAX_DELAY);
+    int first = (sVHead - sVCount + VAL_RING_MAX) % VAL_RING_MAX;
+    for (int k = 0; k < sVCount && n < max; k++)
+    {
+        int i = (first + k) % VAL_RING_MAX;
+        if (sVTs[i] > since_ms)
+        {
+            ts[n] = sVTs[i];
+            out[n] = sVRing[i];
+            n++;
+        }
+    }
+    xSemaphoreGive(sVLock);
+    return n;
+}
+
 static bool ske_query_values(void)
 {
     bool ok;
+    SkeValues snap = {0};
     xSemaphoreTake(sLock, portMAX_DELAY);
     proto_values_restart(&sCtx);
     xSemaphoreGive(sLock);
@@ -310,9 +419,21 @@ static bool ske_query_values(void)
         return false;
     xSemaphoreTake(sLock, portMAX_DELAY);
     ok = proto_values_ready(&sCtx);
+    if (ok)
+    {
+        vals_derive(&sCtx);
+        snap = sCtx.vals;
+    }
+    /* БАГ-ФИКС: лок отдавался только при ok — битый ответ прибора
+     * оставлял мьютекс взятым НАВСЕГДА, и все portMAX_DELAY-ловцы
+     * (httpd-обработчики) намертво вешали однопоточный сервер */
     xSemaphoreGive(sLock);
     if (ok)
+    {
+        ske02_valring_push(
+            (uint32_t)(xTaskGetTickCount() * portTICK_PERIOD_MS), &snap);
         sLastOk = xTaskGetTickCount();
+    }
     return ok;
 }
 
@@ -370,8 +491,19 @@ static void unlock_cb(char *line, void *user)
             const char *lk = strstr(line, "lockout");
             if (lk)
             {
+                /*
+                 * Формат: "(lockout ~48s)". lk+7 указывает на
+                 * " ~48s)" — atoi упирается в '~' и вернёт 0.
+                 * Ищем первую цифру после "lockout".
+                 */
+                const char *num = lk + 7;
+                while (*num && (*num < '0' || *num > '9'))
+                    num++;
                 rc_->status = BS_WAIT;
-                rc_->wait_s = (uint16_t)atoi(lk + 7);
+                rc_->wait_s = (*num) ? (uint16_t)atoi(num) : 0;
+                /* защита от мусора: прибор выдаёт максимум 240 с */
+                if (rc_->wait_s > 300)
+                    rc_->wait_s = 300;
             }
             /* none без lockout: пароль просто не подошёл ни одному
              * уровню - это ошибка доступа */
@@ -394,7 +526,7 @@ static const char *bs_message(int rc)
     case BS_BAD_TYPE:       return "неверное значение";
     case BS_READONLY:       return "только для чтения";
     case BS_ACCESS:         return "нет доступа: неверный пароль меню";
-    case BS_WAIT:           return "ввод пароля заблокирован, подождите";
+    case BS_WAIT:           return "ввод пароля заблокирован";
     default:                return "";
     }
 }
@@ -407,6 +539,7 @@ static void exec_request(ske_req_t *req)
 
     memset(&rc_, 0, sizeof(rc_));
     req->err[0] = 0;
+    req->wait_s = 0;   /* caller's stack garbage must not leak to JSON */
     req->result = BS_OK;
 
     switch (req->cmd)
@@ -464,6 +597,17 @@ static void exec_request(ske_req_t *req)
         req->result = rc_.seen_ok ? BS_OK
                                   : (rc_.status ? rc_.status : BS_ACCESS);
         req->wait_s = rc_.wait_s;
+        /*
+         * "ERR wait" не несёт секунд: после него доспрашиваем статус
+         * голым "p", прибор ответит "access: none (lockout ~Ns)".
+         */
+        if (req->result == BS_WAIT && req->wait_s == 0)
+        {
+            reply_ctx_t st = {0};
+            if (txt_command("p", unlock_cb, &st, SKE_CMD_TIMEOUT) &&
+                st.wait_s > 0)
+                req->wait_s = st.wait_s;
+        }
         if (req->result == BS_OK)
             sLastOk = xTaskGetTickCount();
         break;
@@ -626,6 +770,7 @@ void ske02_uart_setup(void)
 
 void ske02_start(void)
 {
+    ske02_valring_init();
     ske02_uart_setup();
     proto_init(&sCtx);
     sLock = xSemaphoreCreateMutex();
@@ -654,6 +799,7 @@ bool ske02_request(const ske_req_t *req, uint32_t timeout_ms)
             {
                 /* copy the results back to the caller */
                 memcpy((void *)&req->result, &sSlot.result, sizeof(int));
+                memcpy((void *)&req->wait_s, &sSlot.wait_s, sizeof(uint16_t));
                 memcpy((void *)req->err, sSlot.err, sizeof(req->err));
                 ok = (sSlot.result == BS_OK);
             }

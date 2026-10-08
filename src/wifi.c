@@ -43,9 +43,13 @@ static void on_event(void *arg, esp_event_base_t base, int32_t id,
                      void *data)
 {
     (void)arg;
-    (void)data;
     if (base == WIFI_EVENT)
     {
+        /* диагностика портала: кто подключился/отвалился */
+        if (id == WIFI_EVENT_AP_STACONNECTED)
+            DBG("wifi: station connected\n");
+        if (id == WIFI_EVENT_AP_STADISCONNECTED)
+            DBG("wifi: station disconnected\n");
         if (id == WIFI_EVENT_STA_START)
         {
             esp_wifi_connect();
@@ -53,6 +57,9 @@ static void on_event(void *arg, esp_event_base_t base, int32_t id,
         }
         if (id == WIFI_EVENT_STA_DISCONNECTED)
         {
+            if (data)
+                DBG("wifi: sta down, reason %d\n",
+                    (int)((const system_event_sta_disconnected_t *)data)->reason);
             if (sPortalMode)
                 return; /* mode switch noise, not a real disconnect */
             if (sStaEverConnected)
@@ -72,12 +79,30 @@ static void on_event(void *arg, esp_event_base_t base, int32_t id,
         }
         return;
     }
-    if (base == IP_EVENT && id == IP_EVENT_STA_GOT_IP)
+    if (base == IP_EVENT)
     {
-        sStaEverConnected = true;
-        sStaFails = 0;
-        xEventGroupSetBits(sEvents, EVT_GOT_IP);
-        DBG("wifi: got ip\n");
+        if (id == IP_EVENT_STA_GOT_IP)
+        {
+            sStaEverConnected = true;
+            sStaFails = 0;
+            xEventGroupSetBits(sEvents, EVT_GOT_IP);
+            if (data)
+                DBG("wifi: got ip %s\n",
+                    ip4addr_ntoa(&((const ip_event_got_ip_t *)data)->ip_info.ip));
+            else
+                DBG("wifi: got ip\n");
+            return;
+        }
+        /* DHCP выдал станции адрес — канал до неё работает.
+         * ВАЖНО: compat-слой этого SDK постит AP_STAIPASSIGNED
+         * с data=NULL (event_send_compat.inc, HANDLE_SYS_EVENT
+         * без ARG) — разыменование_NULL здесь роняло таск цикла
+         * событий в немую панику и hardware WDT (rst cause:4). */
+        if (id == IP_EVENT_AP_STAIPASSIGNED)
+        {
+            DBG("wifi: dhcp gave station an address\n");
+            return;
+        }
     }
 }
 
@@ -90,28 +115,33 @@ static void start_portal(void)
              mac[3], mac[4], mac[5]);
     strcpy((char *)ap.ap.ssid, sApSsid);
     ap.ap.ssid_len = strlen(sApSsid);
-    strcpy((char *)ap.ap.password, GW_AP_PASS);
     ap.ap.max_connection = 2;
-    ap.ap.authmode = WIFI_AUTH_WPA_WPA2_PSK;
+    /*
+     * ОТКРЫТАЯ сеть: шифрованный AP + быстрый реконнект телефона
+     * (переиспользование PTK, в логе AES PN replay) роняет закрытый
+     * wifi-драйвер в wdt. Портал настройки существует только пока
+     * потерян домашний WiFi — открытая точка здесь приемлема.
+     */
+    ap.ap.authmode = WIFI_AUTH_OPEN;
 
     tcpip_adapter_init();
-    /* AP+STA: the STA interface is what actually scans; a pure AP mode
-     * makes esp_wifi_scan_start fail with ESP_ERR_WIFI_MODE */
+    /*
+     * AP+STA: the STA interface is what actually scans; a pure AP mode
+     * makes esp_wifi_scan_start fail with ESP_ERR_WIFI_MODE.
+     * Адрес и DHCP — ДЕФОЛТ адаптера (192.168.4.1 + пул): ручная
+     * установка 10.0.0.1 гонилась с асинхронным AP-start событием,
+     * адаптер возвращал свой дефолт — клиенты получали адрес из
+     * чужой подсети, и 10.0.0.1 был недостижим.
+     */
     esp_wifi_set_mode(WIFI_MODE_APSTA);
     esp_wifi_set_config(ESP_IF_WIFI_AP, &ap);
+    /* B+G: проприетарный 11n ESP8266 — отдельный источник падений AP */
+    esp_wifi_set_protocol(WIFI_IF_AP,
+                          WIFI_PROTOCOL_11B | WIFI_PROTOCOL_11G);
     esp_wifi_start();
-    tcpip_adapter_dhcps_stop(TCPIP_ADAPTER_IF_AP);
-    {
-        tcpip_adapter_ip_info_t ip = {
-            .ip = { .addr = PP_HTONL(0x0A000001U) }, /* 10.0.0.1 */
-            .netmask = { .addr = PP_HTONL(0xFFFFFF00U) },
-            .gw = { .addr = PP_HTONL(0x0A000001U) },
-        };
-        tcpip_adapter_set_ip_info(TCPIP_ADAPTER_IF_AP, &ip);
-    }
-    tcpip_adapter_dhcps_start(TCPIP_ADAPTER_IF_AP);
+    esp_wifi_set_ps(WIFI_PS_NONE);   /* явно: PS + softAP = wdt */
     sPortalMode = true;
-    DBG("wifi: portal %s pass %s ip 10.0.0.1\n", sApSsid, GW_AP_PASS);
+    DBG("wifi: portal %s open ip 192.168.4.1\n", sApSsid);
 }
 
 static void wifi_manager_task(void *arg)
@@ -158,7 +188,8 @@ void wifi_start(void)
     esp_event_loop_create_default();
     esp_wifi_init(&wificfg);
     esp_event_handler_register(WIFI_EVENT, ESP_EVENT_ANY_ID, on_event, NULL);
-    esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP, on_event, NULL);
+    /* ANY_ID: нужны и STA_GOT_IP, и AP_STAIPASSIGNED (портал) */
+    esp_event_handler_register(IP_EVENT, ESP_EVENT_ANY_ID, on_event, NULL);
     xTaskCreate(wifi_manager_task, "wifi", 3072, NULL, 3, NULL);
 }
 

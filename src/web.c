@@ -6,6 +6,7 @@
 #include "web.h"
 
 #include <stdio.h>
+#include <stdlib.h>   /* malloc: h_scan буферы */
 #include <string.h>
 
 #include "esp_http_server.h"
@@ -17,6 +18,7 @@
 
 #include "debug.h"
 #include "pages.h"
+#define PAGE_APP_GZ_LEN ((int)sizeof(PAGE_APP_GZ))
 #include "protocol.h"
 #include "ske02.h"
 #include "storage.h"
@@ -104,10 +106,54 @@ static bool field(char *body, const char *name, char *out, size_t cap)
     return true;
 }
 
-static void send_page(httpd_req_t *req, const char *page)
+/*
+ * Страница уходит ЧАНКАМИ по 2 КБ с проверкой результата: если
+ * браузер оборвал загрузку (refresh посреди 80 КБ), первый же
+ * неудачный chunk прерывает отправку и handler вернёт ошибку —
+ * httpd сразу закрывает сессию. Отправка одним куском оставляла
+ * поток httpd толкать данные в мёртвый сокет (send : 0 / recv : 0
+ * в логе), однопоточный сервер замирал.
+ */
+static esp_err_t send_page(httpd_req_t *req, const char *page)
+{
+    /* no-store: после перепрошивки браузер не показывает старую
+     * закэшированную страницу (иначе её JS зовёт удалённые URI) */
+    httpd_resp_set_type(req, "text/html");
+    httpd_resp_set_hdr(req, "Cache-Control", "no-store");
+    size_t len = strlen(page), off = 0;
+    while (off < len)
+    {
+        size_t k = len - off;
+        if (k > 2048)
+            k = 2048;
+        if (httpd_resp_send_chunk(req, page + off, k) != ESP_OK)
+            return ESP_FAIL;
+        off += k;
+    }
+    return httpd_resp_send_chunk(req, NULL, 0);
+}
+
+/*
+ * Gzip-вариант страницы (~5x меньше): телефон с энергосбережением
+ * по B+G не успевает принять 80 КБ за send-таймаут — отправка
+ * рвалась на середине. Отдаём PAGE_APP_GZ с Content-Encoding.
+ */
+static esp_err_t send_page_gz(httpd_req_t *req)
 {
     httpd_resp_set_type(req, "text/html");
-    httpd_resp_send(req, page, strlen(page));
+    httpd_resp_set_hdr(req, "Cache-Control", "no-store");
+    httpd_resp_set_hdr(req, "Content-Encoding", "gzip");
+    size_t off = 0;
+    while (off < (size_t)PAGE_APP_GZ_LEN)
+    {
+        size_t k = (size_t)PAGE_APP_GZ_LEN - off;
+        if (k > 1024)
+            k = 1024;
+        if (httpd_resp_send_chunk(req, (const char *)(PAGE_APP_GZ + off), k) != ESP_OK)
+            return ESP_FAIL;
+        off += k;
+    }
+    return httpd_resp_send_chunk(req, NULL, 0);
 }
 
 /* ------------------------------------------------------------------ */
@@ -120,44 +166,101 @@ static void send_page(httpd_req_t *req, const char *page)
  */
 static esp_err_t h_app(httpd_req_t *req)
 {
-    send_page(req, PAGE_APP);
-    return ESP_OK;
+    esp_err_t r = send_page_gz(req);
+    /* полный ли ушёл ответ: при зашумлённом канале обрыв на
+     * середине виден только так (предупреждения httpd выключены) */
+    DBG("web: page request: send %s\n", r == ESP_OK ? "ok" : "FAILED");
+    return r;
+}
+
+/*
+ * POST /api/forgetwifi - "забыть все сети": стираем сохранённые
+ * креды и перезагружаемся. С пустым ssid wifi_manager_task сразу
+ * поднимает точку доступа (режим портала).
+ */
+static esp_err_t h_api_forgetwifi(httpd_req_t *req)
+{
+    storage_set_wifi("", "");
+    storage_save(storage_get());
+    DBG("web: wifi credentials erased, rebooting to portal\n");
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_send(req, "{\"ok\":true}", 9);
+    /* дать ответу уйти, потом перезагрузка */
+    vTaskDelay(pdMS_TO_TICKS(800));
+    esp_restart();
+    return ESP_OK; /* not reached */
 }
 
 static esp_err_t h_scan(httpd_req_t *req)
 {
-    char out[2048];
+    static uint8_t sScanBusy;
+    /* буферы в КУЧЕ на время скана: в покое не занимают ничего,
+     * на стеке httpd их держать нельзя (переполнение) */
+    char *out = malloc(2048);
+    wifi_ap_record_t *aps = malloc(16 * sizeof(wifi_ap_record_t));
     size_t off = 0;
-    wifi_ap_record_t aps[16];
+
+    if (!out || !aps)
+    {
+        free(out); free(aps);
+        httpd_resp_set_status(req, "503 Busy");
+        httpd_resp_send(req, NULL, 0);
+        return ESP_FAIL;
+    }
     uint16_t n = 16;
-    int i;
+    esp_err_t err = ESP_FAIL;
+    int i, attempt;
+
+    /* один скан за раз: параллельный второй уронит httpd на 4+ сек */
+    if (sScanBusy)
+    {
+        httpd_resp_set_status(req, "503 Busy");
+        httpd_resp_send(req, NULL, 0);
+        return ESP_FAIL;
+    }
+    sScanBusy = 1;
 
     /*
      * Blocking scan (~2 s full channel sweep): the old async scheme with
      * hand-rolled 2.5 s timers lost results and never worked in STA
      * mode. Blocking here ties one httpd worker, acceptable for a
-     * manual rescan.
+     * manual rescan. Retry: первый скан после старта портала может
+     * вернуть STATE, пока wifi-таск устраивается.
      */
+    for (attempt = 0; attempt < 2; attempt++)
     {
         wifi_scan_config_t cfg = {0};
-        if (esp_wifi_scan_start(&cfg, true) != ESP_OK)
-            n = 0;
-        else if (esp_wifi_scan_get_ap_records(&n, aps) != ESP_OK)
-            n = 0;
+        n = 16;
+        err = esp_wifi_scan_start(&cfg, true);
+        if (err == ESP_OK)
+        {
+            err = esp_wifi_scan_get_ap_records(&n, aps);
+            if (err == ESP_OK)
+                break;
+        }
+        DBG("web: scan attempt %d failed: %d\n", attempt, (int)err);
+        vTaskDelay(pdMS_TO_TICKS(500));
     }
-    off += snprintf(out + off, sizeof(out) - off, "{\"nets\":[");
-    for (i = 0; i < n && off < sizeof(out) - 128; i++)
+    if (err != ESP_OK)
+        n = 0;
+    sScanBusy = 0;
+    DBG("web: scan done: %u networks\n", (unsigned)n);
+
+    off += snprintf(out + off, 2048 - off, "{\"nets\":[");
+    for (i = 0; i < n && off < 2048 - 128; i++)
     {
         char esc[64];
         json_escape((const char *)aps[i].ssid, esc, sizeof(esc));
-        off += snprintf(out + off, sizeof(out) - off,
+        off += snprintf(out + off, 2048 - off,
                         "%s{\"s\":\"%s\",\"r\":%d,\"e\":%d}",
                         i ? "," : "", esc, aps[i].rssi,
                         aps[i].authmode != WIFI_AUTH_OPEN);
     }
-    off += snprintf(out + off, sizeof(out) - off, "]}");
+    off += snprintf(out + off, 2048 - off, "],\"err\":%d}", (int)err);
     httpd_resp_set_type(req, "application/json");
     httpd_resp_send(req, out, off);
+    free(out);
+    free(aps);
     return ESP_OK;
 }
 
@@ -236,7 +339,8 @@ static esp_err_t h_api_info(httpd_req_t *req)
                  "\"uptime\":%lu,\"heap\":%lu}",
                  esc, (unsigned)ske02_ctx()->count,
                  ske02_link_up() ? 1 : 0, ske02_ready() ? 1 : 0,
-                 portal ? 1 : 0, sta ? st->ssid : "",
+                 portal ? 1 : 0,
+                 portal ? wifi_ap_ssid() : st->ssid,
                  ip4addr_ntoa(&ip.ip), rssi,
                  (unsigned long)(xTaskGetTickCount() * portTICK_PERIOD_MS / 1000),
                  (unsigned long)esp_get_free_heap_size());
@@ -253,51 +357,117 @@ static esp_err_t h_api_values(httpd_req_t *req)
     size_t off = 0;
     const SkeValues *v;
     int link, ready;
+    static SkeValues cached;     /* last snapshot, served without waiting */
+    static TickType_t cachedAt;
+    const gw_settings_t *st = storage_get();
+    bool portal = wifi_ap_ssid() != NULL;
 
     /*
      * link/ready ride this 1 Hz endpoint so the UI badge refreshes with
      * the monitoring poll - no separate /api/info traffic.
+     * SHORT mutex timeout (50 ms): the browser polls at 5 Hz, and a
+     * blocking wait here exhausts all 7 httpd sockets when the meter
+     * task is busy. Serve the last cached snapshot instead.
      */
-    xSemaphoreTake(ske02_lock(), portMAX_DELAY);
-    link = ske02_link_up() ? 1 : 0;
-    ready = ske02_ready() ? 1 : 0;
-    v = ske02_values();
+    if (xSemaphoreTake(ske02_lock(), pdMS_TO_TICKS(50)) == pdTRUE)
+    {
+        link = ske02_link_up() ? 1 : 0;
+        ready = ske02_ready() ? 1 : 0;
+        v = ske02_values();
+        if (v)
+        {
+            cached = *v;
+            cachedAt = xTaskGetTickCount();
+        }
+        xSemaphoreGive(ske02_lock());
+    }
+    else
+    {
+        /* meter busy: serve the cached copy (link/ready from last time) */
+        v = &cached;
+        link = 1;
+        ready = 1;
+    }
+    if (!cached.updated)
+    {
+        v = NULL;                  /* no data ever received */
+        link = ske02_link_up() ? 1 : 0;
+        ready = ske02_ready() ? 1 : 0;
+    }
     if (!v)
     {
-        xSemaphoreGive(ske02_lock());
         snprintf(out, sizeof(out), "{\"ok\":0,\"link\":%d,\"ready\":%d}",
                  link, ready);
         httpd_resp_set_type(req, "application/json");
         httpd_resp_send(req, out, strlen(out));
         return ESP_OK;
     }
-    off += snprintf(out + off, sizeof(out) - off,
-                    "{\"ok\":1,\"age\":%lu,\"link\":%d,\"ready\":%d,"
-                    "\"frequency\":%.2f,\"rate_raw\":%f,\"rate_fast\":%f,"
-                    "\"rateMLPM\":%f,\"rate\":%f,"
-                    "\"total_plus\":%f,\"total_minus\":%f,"
-                    "\"total\":%f,\"total_sum\":%f,"
-                    "\"totalml_plus\":%f,\"totalml_minus\":%f,"
-                    "\"gtotal\":%f,\"gtotalml\":%f,"
-                    "\"kf_value\":%f,\"batch\":%f,"
-                    "\"pulses_packet\":%lu,\"pulses\":%lu,"
-                    "\"status\":%u,\"setpoint\":%u,\"isr\":%u}",
-                    (unsigned long)((xTaskGetTickCount() * portTICK_PERIOD_MS -
-                                     v->updated) / 1000),
-                    link, ready,
-                    (double)v->frequency, (double)v->rate_raw,
-                    (double)v->rate_fast, (double)v->rateMLPM,
-                    (double)v->rate, (double)v->total_plus,
-                    (double)v->total_minus, (double)v->total,
-                    (double)v->total_sum, (double)v->totalml_plus,
-                    (double)v->totalml_minus, (double)v->gtotal,
-                    (double)v->gtotalml, (double)v->kf_value,
-                    (double)v->batch, (unsigned long)v->pulses_packet,
-                    (unsigned long)v->pulses, v->status, v->setpoint, v->isr);
-    xSemaphoreGive(ske02_lock());
+    /*
+     * ПАЧКА снимков: прибор опрашивается 5 Гц, кольцо хранит
+     * последние ~1.6 с; ?since=N возвращает всё новее N, при
+     * since=0 (загрузка страницы) — только свежий снимок.
+     * Ответ собирается ЧАНКАМИ по одному снимку: ни кучи, ни
+     * больших буферов — каждый чанк ~550 Б ложится в стек.
+     */
+    {
+        uint32_t since = 0;
+        const char *q = strchr(req->uri, '?');
+        if (q && !strncmp(q, "?since=", 7))
+            since = (uint32_t)strtoul(q + 7, NULL, 10);
 
-    httpd_resp_set_type(req, "application/json");
-    httpd_resp_send(req, out, off);
+        uint32_t ts[8];
+        SkeValues vs[8];
+        int n = ske02_valring_since(since, ts, vs, 8);
+        if (n == 0)
+        {
+            ts[0] = v->updated;
+            vs[0] = *v;
+            n = 1;
+        }
+        if (since == 0 && n > 1)
+            n = 1;   /* первое обращение: только свежий снимок */
+
+        httpd_resp_set_type(req, "application/json");
+        off = snprintf(out, sizeof(out),
+                       "{\"ok\":1,\"age\":%lu,\"link\":%d,\"ready\":%d,"
+                       "\"now\":%lu,\"ap\":%d,\"ip\":\"%s\",\"ssid\":\"%s\",\"seq\":[",
+                       (unsigned long)((xTaskGetTickCount() * portTICK_PERIOD_MS -
+                                        v->updated) / 1000),
+                       link, ready,
+                       (unsigned long)(xTaskGetTickCount() * portTICK_PERIOD_MS),
+                       portal ? 1 : 0,
+                       portal ? "192.168.4.1" : "",
+                       portal ? wifi_ap_ssid() : st->ssid);
+        httpd_resp_send_chunk(req, out, off);
+        for (int i = 0; i < n; i++)
+        {
+            const SkeValues *sv = &vs[i];
+            off = snprintf(out, sizeof(out),
+                           "%s{\"t\":%lu,\"frequency\":%.2f,"
+                           "\"rateMLPM\":%f,\"rate\":%f,"
+                           "\"totalml_plus\":%f,\"totalml_minus\":%f,"
+                           "\"gtotalml\":%f,\"gtotal\":%f,"
+                           "\"total_plus\":%f,\"total_minus\":%f,"
+                           "\"total\":%f,\"total_sum\":%f,"
+                           "\"kf_value\":%f,\"batch\":%f,"
+                           "\"pulses\":%lu,\"status\":%u,"
+                           "\"setpoint\":%u,\"isr\":%u}",
+                           i ? "," : "", (unsigned long)ts[i],
+                           (double)sv->frequency,
+                           (double)sv->rateMLPM, (double)sv->rate,
+                           (double)sv->totalml_plus, (double)sv->totalml_minus,
+                           (double)sv->gtotalml, (double)sv->gtotal,
+                           (double)sv->total_plus, (double)sv->total_minus,
+                           (double)sv->total, (double)sv->total_sum,
+                           (double)sv->kf_value, (double)sv->batch,
+                           (unsigned long)sv->pulses, sv->status,
+                           sv->setpoint, sv->isr);
+            if (httpd_resp_send_chunk(req, out, off) != ESP_OK)
+                return ESP_FAIL;
+        }
+        httpd_resp_send_chunk(req, "]}", 2);
+        httpd_resp_send_chunk(req, NULL, 0);   /* конец chunked */
+    }
     return ESP_OK;
 }
 
@@ -407,17 +577,44 @@ static esp_err_t h_api_params(httpd_req_t *req)
 /* ------------------------------------------------------------------ */
 /* action endpoints (POST)                                             */
 
-static bool do_unlock(httpd_req_t *req, char *body)
+/*
+ * Unlock with the menu password. Returns true when OK to proceed with
+ * the actual command (no password given, or unlock succeeded). On
+ * failure fills *out with the error (incl. lockout wait_s) so the
+ * caller can report it to the browser instead of a confusing
+ * "ERR access" from the subsequent 's'/'x'.
+ */
+static bool do_unlock(httpd_req_t *req, char *body, ske_req_t *out)
 {
     char pw[10];
     ske_req_t r;
     (void)req;
+    memset(&r, 0, sizeof(r));
     if (!field(body, "pw", pw, sizeof(pw)) || !*pw)
-        return true;
+        return true;              /* no password: try the command bare */
     r.cmd = SKEQ_UNLOCK;
     strncpy(r.text, pw, sizeof(r.text) - 1);
     r.text[sizeof(r.text) - 1] = 0;
-    return ske02_request(&r, 15000);
+    /*
+     * ske02_request returns false for BOTH transport timeout and
+     * non-BS_OK results - the return value alone can't tell them
+     * apart. Use a sentinel: if r.result stays SKE_ERR_TRANSPORT
+     * after the call, nothing was copied back (timeout).
+     */
+    r.result = SKE_ERR_TRANSPORT;
+    ske02_request(&r, 15000);   /* return value not used here */
+    if (r.result == SKE_ERR_TRANSPORT)
+    {
+        if (out) { out->result = SKE_ERR_TRANSPORT; strcpy(out->err, "прибор не отвечает"); }
+        return false;
+    }
+    if (r.result != BS_OK)
+    {
+        if (out)
+            *out = r;             /* BS_ACCESS / BS_WAIT + wait_s */
+        return false;
+    }
+    return true;
 }
 
 static esp_err_t reply_ok_err(httpd_req_t *req, const ske_req_t *r,
@@ -479,10 +676,11 @@ static esp_err_t h_api_set(httpd_req_t *req)
     if (!field(body, "v", vtext, sizeof(vtext)))
         vtext[0] = 0;
 
-    if (!do_unlock(req, body))
     {
-        ske_req_t bad = {.result = BS_ACCESS, .err = "неверный пароль меню"};
-        return reply_ok_err(req, &bad, NULL);
+        ske_req_t unlock_result;
+        memset(&unlock_result, 0, sizeof(unlock_result));
+        if (!do_unlock(req, body, &unlock_result))
+            return reply_ok_err(req, &unlock_result, NULL);
     }
 
     /* UI text -> packed console value, then queue the 's' command */
@@ -536,10 +734,11 @@ static esp_err_t h_api_run(httpd_req_t *req)
         httpd_resp_send(req, "bad id", 6);
         return ESP_FAIL;
     }
-    if (!do_unlock(req, body))
     {
-        ske_req_t bad = {.result = BS_ACCESS, .err = "неверный пароль меню"};
-        return reply_ok_err(req, &bad, NULL);
+        ske_req_t unlock_result;
+        memset(&unlock_result, 0, sizeof(unlock_result));
+        if (!do_unlock(req, body, &unlock_result))
+            return reply_ok_err(req, &unlock_result, NULL);
     }
     r.cmd = SKEQ_RUN;
     r.id = (uint16_t)atoi(ids);
@@ -580,9 +779,6 @@ static esp_err_t h_api_reboot(httpd_req_t *req)
     return ESP_OK;
 }
 
-/* the widget layout: {"rev":N,"cfg":[...]} stored in NVS verbatim.
- * The 4 KB buffers are heap-only: keeping them static would eat 8 KB
- * of the ESP8266 DRAM for two rarely used endpoints. */
 static esp_err_t h_api_widgets_get(httpd_req_t *req)
 {
     char *buf = malloc(4200);
@@ -648,7 +844,7 @@ static esp_err_t h_captive(httpd_req_t *req)
         return ESP_OK;
     }
     httpd_resp_set_status(req, "302 Found");
-    httpd_resp_set_hdr(req, "Location", "http://10.0.0.1/");
+    httpd_resp_set_hdr(req, "Location", "http://192.168.4.1/");
     httpd_resp_send(req, NULL, 0);
     return ESP_OK;
 }
@@ -664,9 +860,26 @@ static const char *const sCaptiveProbes[] = {
 void web_start(void)
 {
     httpd_config_t cfg = HTTPD_DEFAULT_CONFIG();
-    cfg.max_uri_handlers = 24;
+    cfg.max_uri_handlers = 32;   /* 26 needed: 17 api/pages + 9 captive */
+    /* ВАЖНО: не меньше 8 КБ — h_scan держит на стеке ~2.7 КБ буферов
+     * + кадры; на 6 КБ стек переполнялся и затаптывал кучу (куча
+     * "уменьшалась", страница портала со сканом ломалась) */
     cfg.stack_size = 8192;
-
+    /*
+     * Socket exhaustion fix: the browser polls /api/values at 5 Hz and
+     * opens a new connection for POST /api/set on "Применить". Without
+     * LRU purge the 7-socket limit is hit (accept errno=23 EMFILE) and
+     * the request is dropped. Purge closes the oldest idle connection.
+     */
+    cfg.lru_purge_enable = true;
+    /*
+     * Таймауты сокета (в СЕКУНДАХ, поля ..._wait_timeout — не
+     * ..._wait_ms, как в IDF v4): зависший send/recv не должен
+     * замораживать ОДНОПОТОЧНЫЙ httpd. Дефолт 5с — заметная
+     * пауза всего сервера на каждого отвалившегося клиента.
+     */
+    cfg.recv_wait_timeout = 2;
+    cfg.send_wait_timeout = 4;
 
     if (httpd_start(&sServer, &cfg) != ESP_OK)
     {
@@ -713,6 +926,9 @@ void web_start(void)
     httpd_register_uri_handler(sServer, &u);
     u = (httpd_uri_t){.uri = "/api/reboot", .method = HTTP_POST,
                       .handler = h_api_reboot};
+    httpd_register_uri_handler(sServer, &u);
+    u = (httpd_uri_t){.uri = "/api/forgetwifi", .method = HTTP_POST,
+                      .handler = h_api_forgetwifi};
     httpd_register_uri_handler(sServer, &u);
     u = (httpd_uri_t){.uri = "/api/widgets", .method = HTTP_GET,
                       .handler = h_api_widgets_get};

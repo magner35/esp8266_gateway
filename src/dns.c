@@ -1,5 +1,5 @@
 /*
- * Captive-portal DNS (udp/53): every A query resolves to 10.0.0.1 so
+ * Captive-portal DNS (udp/53): every A query resolves to 192.168.4.1 so
  * that any http attempt of a freshly joined phone lands on the setup
  * page. Runs only while the AP portal is up.
  */
@@ -22,8 +22,19 @@ static void dns_task(void *arg)
     (void)arg;
 
     /* the wifi task may still be trying STA: serve only in the portal */
-    while (!wifi_ap_ssid())
-        vTaskDelay(pdMS_TO_TICKS(250));
+    /* ждём портал максимум 120 с: в домашней сети captive-DNS не
+     * нужен, таск самоудаляется и освобождает свой стек (2 КБ) */
+    {
+        int waits = 0;
+        while (!wifi_ap_ssid() && waits++ < 120 * 4)
+            vTaskDelay(pdMS_TO_TICKS(250));
+        if (!wifi_ap_ssid())
+        {
+            DBG("dns: sta mode, captive off\n");
+            vTaskDelete(NULL);
+            return;
+        }
+    }
 
     fd = socket(AF_INET, SOCK_DGRAM, IPPROTO_IP);
     if (fd < 0)
@@ -60,7 +71,7 @@ static void dns_task(void *arg)
             continue; /* a response, not a query */
 
         {
-            /* echo the question, append a 4-byte A record (10.0.0.1) */
+            /* echo the question, append a 4-byte A record (192.168.4.1) */
             uint8_t *w = buf + n;
             uint16_t qdcnt = (buf[4] << 8) | buf[5];
             uint16_t ancnt = 1;
@@ -77,7 +88,7 @@ static void dns_task(void *arg)
                 continue;
             /* assume the only question is a type A/class IN; append the
              * answer: pointer to the name (0xC0 0x0C), type A, class IN,
-             * ttl 60, rdlen 4, rdata 10.0.0.1 */
+             * ttl 60, rdlen 4, rdata 192.168.4.1 */
             if (n + 16 > (int)sizeof(buf) - 32)
                 continue;
             *w++ = 0xC0;
@@ -92,9 +103,9 @@ static void dns_task(void *arg)
             *w++ = 60; /* ttl */
             *w++ = 0;
             *w++ = 4; /* rdlen */
-            *w++ = 10;
-            *w++ = 0;
-            *w++ = 0;
+            *w++ = 192;
+            *w++ = 168;
+            *w++ = 4;
             *w++ = 1;
             sendto(fd, buf, w - buf, 0, (struct sockaddr *)&cli, clen);
         }

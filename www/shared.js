@@ -107,11 +107,9 @@ const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;'
     const PERSHORT = { 'Секунда': 'с', 'Минута': 'мин', 'Час': 'ч' };
     let UN = { rate: '', obj: '', ob: '', time: '' };
     /*
-     * ── MULTIPLIER WIDGET (t:'mul') ────────────────────────────────
-     * The meter's multiplier (Измеритель → Множитель): param 000 "Тип"
-     * picks K-фактор|Цена имп, param 002 "Значение" is the number in
-     * THAT type. "авто" = follow the device type; a manual mode shows
-     * the reciprocal (1/v) when it differs from the device type.
+     * Multiplier data (feeds the 'par' kf/price widget sources):
+     * Множитель: Тип (kf/price), Значение, Единицы (volume unit).
+     * Updated by paramsTick from the device settings tree.
      */
     const MULM = { kf: 'К-фактор', price: 'Цена имп' };
     let MULT = { type: 'price', value: NaN };   /* from the params tree */
@@ -298,67 +296,382 @@ const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;'
       { n: 'фиолетовый', c: '#9a5ae0' },
       { n: 'белый', c: '#e8e8e8' }
     ];
-    const chartHist = {};               /* widget k -> {arr, min, max, lastT} */
+    /*
+     * CHART WIDGET — отрисовка канвасом, без серверных буферов:
+     * точки приходят из /api/values и копятся на странице
+     * (chartLive), окно времени скользит, соединяются прямыми.
+     */
+    const chartLive = {};               /* src -> {vals[], ts[]} */
+    /* Графики ВКЛЮЧЕНЫ: данные копятся из 5-Гц пачек /api/values
+     * (chartAppend из replaySeq), серверных запросов нет вообще.
+     * История после перезагрузки страницы не восстанавливается
+     * (для этого нужен ринг на ESP, +2-4КБ). */
+    const CHARTS_ON = true;
+    const CHSCALE = {};                 /* w.k -> {lo, hi} стабильный автоскейл */
+    /* "красивый" шаг сетки: 1/2/5·10^n */
+    function niceStep(x) {
+      if (!(x > 0) || !isFinite(x)) return 1;
+      const p = Math.pow(10, Math.floor(Math.log10(x)));
+      const d = x / p;
+      return (d >= 5 ? 5 : d >= 2 ? 2 : 1) * p;
+    }
     function chartCol(w) {
       const e = CHCOL.find(x => x.c === w.col);
-      return e ? e.c : CHCOL[5].c;      /* default: синий */
+      return e ? e.c : CHCOL[5].c;
     }
-    function chartPush(k, v, per) {
-      /* decimation: no more than ~1200 points per window */
-      const iv = per <= 1200 ? 1 : Math.ceil(per / 1200);
-      const now = Date.now();
-      const h = chartHist[k] || (chartHist[k] = { arr: [], min: 0, max: 1, lastT: 0 });
-      if (now - h.lastT < iv * 1000) return;
-      h.lastT = now;
-      h.arr.push(v);
-      if (h.arr.length > 1200) h.arr.shift();
+    function srcName(w) { return w.src; }
+    /*
+     * Live-буфер с прогрессивной децимацией:
+     *   25 Гц, 3000 точек = 2 мин → декимация → 12.5 Гц, 4 мин
+     *   → 6.25 Гц, 8 мин → 3.1 Гц, 16 мин
+     * Буфер никогда не превышает 3000 точек, но время покрытия
+     * удваивается на каждой децимации. График для окон ≤16 мин
+     * целиком из live-данных — плавный, без серверных ступенек.
+     */
+    /*
+     * Backfill из серверного буфера ESP: после загрузки страницы и
+     * после дыр (обрыв связи) забираем недостающие точки с реальными
+     * таймштампами (/api/chart?since=N). Часы сервера — от старта,
+     * клиентские — эпоха: смещение берём из "now" в каждом ответе.
+     * Точки строже последней клиентской пропускаются (монотонность).
+     */
+    async function chartBackfill(src) {
+      try {
+        let buf = chartLive[src];
+        if (!buf) buf = chartLive[src] = { vals: [], ts: [], srv: 0 };
+        const d = await (await fetch('/api/chart?since=' + (buf.srv || 0))).json();
+        if (!d.t || !d.t.length) return;
+        const off = Date.now() - d.now;
+        for (let i = 0; i < d.t.length; i++) {
+          const t = d.t[i] + off;
+          if (buf.ts.length && t <= buf.ts[buf.ts.length - 1]) continue;
+          buf.vals.push(d.v[i]);
+          buf.ts.push(t);
+          buf.srv = d.t[i];
+        }
+      } catch (e) { }
     }
+    /*
+     * Кормление графиков из valuesTick: при пустом буфере или дыре —
+     * сначала backfill (дыра закроется реальными точками), затем
+     * текущая live-точка. Дыра >60с — сброс и полная история заново.
+     */
+    async function chartFeed(d) {
+      if (!CHARTS_ON) return;
+      if (!widgets) return;
+      const srcs = new Set();
+      for (const w of widgets)
+        if (w.t === 'chart' && w.on && CHSRC[w.src] &&
+            d[CHSRC[w.src].src] !== undefined)
+          srcs.add(w.src);
+      for (const src of srcs) {
+        const buf = chartLive[src];
+        const gap = buf && buf.ts.length ?
+            Date.now() - buf.ts[buf.ts.length - 1] : Infinity;
+        if (gap > CHART_HARD_RESET_MS)
+          chartLive[src] = { vals: [], ts: [], srv: 0 };
+        if (!isFinite(gap) || gap > CHART_GAP_MS)
+          await chartBackfill(src);
+        chartAppend(src, d[CHSRC[src].src]);
+      }
+    }
+    /* пороги устаревания данных */
+    const CHART_STALE_MS = 2000;    /* вкладка была скрыта дольше — чистим */
+    const CHART_HARD_RESET_MS = 60000; /* дыра в данных: свыше этого —
+                                        * сброс, меньше — рисуем разрыв */
+    const CHART_GAP_MS = 3000;      /* дыра больше этого = видимый разрыв */
+    const CHART_EDGE_MS = 1500;     /* окно сдвинуто назад: точки рождаются
+                                     * за правым краем и плавно въезжают;
+                                     * > возраста свежего сэмпла (~1.0-1.4с) */
+    /* диагностика накопления: счётчик и последняя причина отказа */
+    let sAtt = 0, sFail = 'вызовов не было';
+    let sLastResp = 'ответов не было';   /* пишет pollLoop */
+    function chartAppend(src, value, srvT) {
+      if (!CHARTS_ON) return;
+      sAtt++;
+      if (!isFinite(value)) { sFail = 'не число: ' + value; return; }
+      let buf = chartLive[src];
+      /* серверный ts сэмпла (если дали): ровный шаг 200мс без
+       * джиттера таймеров проигрывания пачки */
+      const t = srvT || Date.now();
+      /*
+       * Плохая связь: короткие/средние обрывы НЕ сбрасывают график —
+       * потерянные точки всё равно неоткуда взять, а накопленное
+       * честно. Дыра в данных рисуется видимым разрывом (chartDraw).
+       * Сброс только на дыру >60с — прибор пропал всерьёз.
+       * Свёрнутая вкладка чистится отдельно, по visibilitychange.
+       */
+      if (buf && buf.ts.length &&
+          t - buf.ts[buf.ts.length - 1] > CHART_HARD_RESET_MS)
+        buf = chartLive[src] = { vals: [], ts: [] };
+      if (!buf) buf = chartLive[src] = { vals: [], ts: [] };
+      /* строго монотонные timestamp: пропускаем дубль ( тот же мс) */
+      if (buf.ts.length && t <= buf.ts[buf.ts.length - 1]) {
+        sFail = 'не монотонно: ' + Math.round(t - buf.ts[buf.ts.length - 1]) + 'мс';
+        return;
+      }
+      sFail = 'принято';
+      buf.vals.push(value);
+      buf.ts.push(t);
+      if (buf.vals.length > 3000) {
+        /* децимация: оставляем каждую вторую точку */
+        const v2 = [], t2 = [];
+        for (let i = 0; i < buf.vals.length; i += 2) {
+          v2.push(buf.vals[i]);
+          t2.push(buf.ts[i]);
+        }
+        buf.vals = v2;
+        buf.ts = t2;
+      }
+    }
+    /*
+     * Разворачивание вкладки: если была скрыта дольше порога
+     * устаревания — чистим буферы СРАЗУ, не дожидаясь первого
+     * свежего ответа (иначе старая кривая висит ещё секунды).
+     * Короткие переключения (<2с) график не сбрасывают.
+     */
+    let chartHiddenAt = 0;
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden) { chartHiddenAt = Date.now(); return; }
+      if (chartHiddenAt && Date.now() - chartHiddenAt > CHART_STALE_MS)
+        for (const src in chartLive)
+          chartLive[src] = { vals: [], ts: [] };
+      chartHiddenAt = 0;
+    });
     function chartDrawAll() {
       for (const w of widgets || []) if (w.t === 'chart' && w.on) chartDraw(w);
     }
+    /* высота графика = 2 × высота карточки параметра */
+    function chartHeight() {
+      const par = document.querySelector('#values .vcard:not(.chart):not(.wbar):not(.wbit):not(.wbtn):not(.winp)');
+      return par ? par.offsetHeight * 2 : 144;
+    }
     function chartDraw(w) {
+      if (!CHARTS_ON) {
+        const cv0 = $('rc_' + w.k);
+        if (cv0) {
+          const g0 = cv0.getContext('2d');
+          g0.clearRect(0, 0, cv0.width, cv0.height);
+          g0.fillStyle = '#8b94a7'; g0.font = '12px system-ui';
+          g0.fillText('графики отключены', 8, cv0.height / 2);
+        }
+        return;
+      }
       const cv = $('rc_' + w.k); if (!cv) return;
-      const hist = chartHist[w.k]; if (!hist) return;
+      /* фаза накопления: ПОЛНЫЙ размер канваса (2x параметра),
+       * надпись по центру — виджет всегда своей нормальной высоты */
+      const chartEmpty = (msg) => {
+        const dpr0 = window.devicePixelRatio || 1;
+        const cw0 = cv.offsetWidth, ch0 = chartHeight();
+        if (cv.width !== cw0 * dpr0 || cv.height !== ch0 * dpr0) {
+          cv.width = cw0 * dpr0;
+          cv.height = ch0 * dpr0;
+        }
+        const g0 = cv.getContext('2d');
+        g0.setTransform(dpr0, 0, 0, dpr0, 0, 0);
+        g0.clearRect(0, 0, cw0, ch0);
+        g0.fillStyle = '#8b94a7'; g0.font = '12px system-ui';
+        g0.fillText(msg, 8, ch0 / 2);
+      };
+      const buf = chartLive[srcName(w)];
+      if (!buf || buf.vals.length < 2) {
+        /* диагностика прямо в надписи: сколько точек реально в буфере */
+        chartEmpty('накопление… (точек ' + (buf ? buf.vals.length : 0) +
+                   ', вызовов ' + sAtt + ', ' + sFail +
+                   ', ' + w.src + '→' +
+                   (CHSRC[w.src] ? CHSRC[w.src].src : 'НЕТ') +
+                   ' | ' + sLastResp + ')');
+        return;
+      }
+      /* окно времени: последние w.per секунд */
       const per = CHPER[w.per] ? w.per : 600;
+      const cutoff = Date.now() - CHART_EDGE_MS - per * 1000;
+      /* ТОЛЬКО live-данные: без серверного merge (нет ступенек) */
+      const pts = [];
+      for (let i = 0; i < buf.vals.length; i++)
+        if (buf.ts[i] >= cutoff)
+          pts.push({ v: buf.vals[i], t: buf.ts[i] });
+      if (pts.length < 2) {
+        /* точки есть, но вне окна — таймштампы/окно расходятся */
+        chartEmpty('нет точек в окне (буфер: ' + buf.vals.length +
+                   ', в окне: ' + pts.length + ')');
+        return;
+      }
+      /*
+       * Медианный фильтр на 3 точки: одиночные выбросы (шум прибора)
+       * срезает, монотонные участки не искажает (медиана монотонной
+       * тройки = сама точка), запаздывания нет. По копии значений.
+       */
+      if (pts.length >= 3) {
+        const srcv = [];
+        for (const p of pts) srcv.push(p.v);
+        for (let i = 1; i < pts.length - 1; i++) {
+          const a = srcv[i - 1], b = srcv[i], c = srcv[i + 1];
+          pts[i].v = a + b + c - Math.min(a, b, c) - Math.max(a, b, c);
+        }
+      }
       const col = chartCol(w);
       const dpr = window.devicePixelRatio || 1;
-      const cw = cv.offsetWidth, ch = 114;   /* карточка = 3x барграф (46px) */
+      const cw = cv.offsetWidth, ch = chartHeight();
       if (cv.width !== cw * dpr || cv.height !== ch * dpr) { cv.width = cw * dpr; cv.height = ch * dpr }
       const g = cv.getContext('2d');
       g.setTransform(dpr, 0, 0, dpr, 0, 0);
       g.clearRect(0, 0, cw, ch);
-      const arr = hist.arr, n = arr.length;
       g.strokeStyle = '#2a3140'; g.lineWidth = 1;
       for (let k = 1; k < 4; k++) { const y = ch * k / 4; g.beginPath(); g.moveTo(0, y); g.lineTo(cw, y); g.stroke() }
-      if (n < 2) { g.fillStyle = '#8b94a7'; g.font = '12px system-ui'; g.fillText('накопление данных…', 8, ch / 2); return }
-      let lo, hi;
+      let lo, hi, minV = Infinity, maxV = -Infinity;
+      for (const p of pts) { if (p.v < minV) minV = p.v; if (p.v > maxV) maxV = p.v }
       if (w.auto === false) {
-        /* fixed scale: 0 .. the setpoint matching the source */
         hi = SP[CHSRC[w.src].sp];
-        if (!(hi > 0)) hi = 1;           /* setpoint not resolved yet */
+        if (!(hi > 0)) hi = maxV || 1;
         lo = 0;
       } else {
-        lo = Infinity; hi = -Infinity;
-        for (const v of arr) { if (v < lo) lo = v; if (v > hi) hi = v }
-        if (hi - lo < 1e-9) { lo -= 0.5; hi += 0.5 }
-        const pad = (hi - lo) * 0.08; lo -= pad; hi += pad;
+        /*
+         * Стабилизация автоскейла: при 10 Гц пересчёт lo/hi из min/max
+         * окна каждый кадр дрожит — вся кривая и заливка прыгают по
+         * вертикали. Приводим границы к "красивой" сетке (шаг 1/2/5·10^n)
+         * и держим прежнюю сетку, пока данные в неё помещаются; смена
+         * масштаба — редкая и одним шагом (гистерезис на 30% диапазона).
+         */
+        let tlo = minV, thi = maxV;
+        if (thi - tlo < 1e-9) { tlo -= 0.5; thi += 0.5 }
+        const pad = (thi - tlo) * 0.08; tlo -= pad; thi += pad;
+        const step = niceStep((thi - tlo) / 4);
+        tlo = Math.floor(tlo / step) * step;
+        thi = Math.ceil(thi / step) * step;
+        const prev = CHSCALE[w.k];
+        if (prev && minV >= prev.lo && maxV <= prev.hi &&
+            (maxV - minV) > 0.3 * (prev.hi - prev.lo)) {
+          lo = prev.lo; hi = prev.hi;
+        } else {
+          lo = tlo; hi = thi;
+          CHSCALE[w.k] = { lo: lo, hi: hi };
+        }
       }
-      hist.min = lo; hist.max = hi;
-      const X = i => cw * i / (per - 1), Y = v => ch - 2 - (v - lo) / (hi - lo) * (ch - 4);
-      g.beginPath();
-      const off = per - n * (per <= 1200 ? 1 : Math.ceil(per / 1200)); /* anchor right */
-      for (let i = 0; i < n; i++) { const x = X(off + i * (per <= 1200 ? 1 : Math.ceil(per / 1200))), y = Y(arr[i]); i ? g.lineTo(x, y) : g.moveTo(x, y) }
-      g.strokeStyle = col; g.lineWidth = 1.5; g.stroke();
-      g.lineTo(X(per - 1), ch); g.lineTo(X(off), ch); g.closePath();
-      g.fillStyle = col + '26'; /* same hue, ~15% alpha */
-      g.fill();
+      /*
+       * X-ось — скользящее окно от "сейчас" назад: tMax = Date.now(),
+       * tMin = tMax - per*1000. Окно движется непрерывно с RAF (60 Гц),
+       * кривая плывёт плавно, без 200мс-скачков.
+       */
+      const tMax = Date.now() - CHART_EDGE_MS;
+      const tMin = tMax - per * 1000;
+      const tSpan = per * 1000;
+      const X = t => cw * (t - tMin) / tSpan;
+      const Y = v => ch - 2 - (v - lo) / (hi - lo) * (ch - 4);
+      /*
+       * Отрисовка без сплайнов: прямые отрезки между точками
+       * (попиксельно, как interpolationLinear в C-либе). За последней
+       * точкой — короткое продолжение по тренду (линейное, не дальше
+       * ~1.5 интервалов), чтобы растущий край не был плоским хвостом.
+       */
+      const n = pts.length;
+      /*
+       * Мин/макс-конверт по колонкам пикселей (как осциллограф).
+       * На окнах 5/10 мин при 10 Гц в пиксель попадает 3-7 сэмплов:
+       * попиксельная выборка ломаной "кипит" — окно едет субпиксельно
+       * каждый кадр, и в пиксель попадают разные сэмплы. Конверт
+       * (мин и макс сэмплов колонки) от этого стабилен: вертикальный
+       * размах колонки меняется только когда меняются сами данные.
+       * В разреженных местах (1 сэмпл на колонку) конверт вырождается
+       * в обычную линию. За последней точкой — трендовая экстраполяция.
+       */
+      const tPx = tSpan / cw;
+      const top = [], bot = [];
+      let idx = 0, lastDataT = 0;
+      for (let px = 0; px <= cw; px++) {
+        const tt0 = tMin + tPx * px, tt1 = tt0 + tPx;
+        while (idx < n && pts[idx].t < tt0) idx++;
+        let vmin = Infinity, vmax = -Infinity, has = false, qEnd = idx;
+        for (let q = idx; q < n && pts[q].t < tt1; q++) {
+          const v = pts[q].v;
+          if (v < vmin) vmin = v;
+          if (v > vmax) vmax = v;
+          has = true;
+          qEnd = q;
+        }
+        /* без сглаживаний: левее данных, внутри дыры и правее
+         * последней точки — не рисуем совсем */
+        if (!has) continue;
+        /* дыра в данных (обрыв связи): видимый разрыв линии,
+         * а не лживая прямая переброска */
+        if (has && lastDataT && qEnd >= 0 &&
+            pts[idx].t - lastDataT > CHART_GAP_MS) {
+          top.push(NaN, NaN);
+          bot.push(NaN, NaN);
+        }
+        if (qEnd >= 0)
+          lastDataT = pts[qEnd].t;
+        top.push(px, Y(vmax));
+        bot.push(px, Y(vmin));
+      }
+      /*
+       * Конверт — яркая линия реального размаха (как осциллограф),
+       * в разреженных местах вырождается в обычную кривую.
+       * NaN-маркер = разрыв: перо поднимается.
+       */
+      let firstX = null, lastX = null;
+      for (let i = 0; i < top.length; i += 2)
+        if (isFinite(top[i])) {
+          if (firstX === null) firstX = top[i];
+          lastX = top[i];
+        }
+      if (firstX !== null) {
+        g.beginPath();
+        let pen = false;
+        for (let i = 0; i < top.length; i += 2) {
+          if (!isFinite(top[i])) { pen = false; continue; }
+          if (pen) g.lineTo(top[i], top[i + 1]);
+          else { g.moveTo(top[i], top[i + 1]); pen = true; }
+        }
+        pen = false;
+        for (let i = bot.length - 2; i >= 0; i -= 2) {
+          if (!isFinite(bot[i])) { pen = false; continue; }
+          if (pen) g.lineTo(bot[i], bot[i + 1]);
+          else { g.moveTo(bot[i], bot[i + 1]); pen = true; }
+        }
+        g.strokeStyle = col; g.lineWidth = 1; g.stroke();
+      }
+      if (firstX !== null && lastX !== null) {
+        /* заливка — ОТДЕЛЬНЫЙ путь под верхней границей конверта.
+         * Разрывы (NaN) НЕ поднимают перо: заливка мостиком через
+         * дыру — иначе полигон разваливается на куски */
+        g.beginPath();
+        let pen = false;
+        for (let i = 0; i < top.length; i += 2) {
+          if (!isFinite(top[i])) continue;
+          if (pen) g.lineTo(top[i], top[i + 1]);
+          else { g.moveTo(top[i], top[i + 1]); pen = true; }
+        }
+        g.lineTo(lastX, ch);
+        g.lineTo(firstX, ch);
+        g.closePath();
+        g.fillStyle = col + '26';
+        g.fill();
+      }
       g.fillStyle = '#d8dee9'; g.font = '12px ui-monospace,Consolas,monospace';
-      g.fillText(arr[n - 1].toFixed(3), 8, 12);
+      g.fillText(pts[n - 1].v.toFixed(3), 8, 12);
       g.fillStyle = '#8b94a7';
-      g.fillText('max ' + hist.max.toFixed(3), cw - 86, 12);
-      g.fillText('min ' + hist.min.toFixed(3), cw - 86, ch - 4);
+      g.fillText('max ' + maxV.toFixed(3), cw - 86, 12);
+      g.fillText('min ' + minV.toFixed(3), cw - 86, ch - 4);
     }
     window.addEventListener('resize', chartDrawAll);
+    /*
+     * RAF-цикл (частота экрана, ~60 Гц): X-окно движется непрерывно,
+     * кривая плывёт плавно. Данные добавляются из valuesTick (200мс),
+     * отрисовка — на каждом кадре. Стоимость < 1мс на кадр.
+     * setTimeout(0) — чтобы let-переменные ниже успели инициализироваться.
+     */
+    /*
+     * RAF-цикл: schedule следующего кадра ПЕРВЫМ (до отрисовки),
+     * чтобы даже исключение в chartDrawAll не убило цикл.
+     * Плюс setInterval-страховка на случай, если RAF не работает.
+     */
+    setTimeout(function chartRAF() {
+      requestAnimationFrame(chartRAF);
+      try { chartDrawAll() } catch (e) { }
+    }, 0);
+    if (CHARTS_ON)
+      setInterval(() => { try { chartDrawAll() } catch (e) { } }, 200);
     let vBuilt = false;
     /*
      * Widgets: the main screen is a list of widget configs kept in
@@ -520,8 +833,14 @@ const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;'
       return LBL[w.src] || w.src;
     }
     function widgetHtml(w) {
-      if (w.t === 'chart')
+      if (w.t === 'chart') {
+        /* СКОБКИ ОБЯЗАТЕЛЬНЫ: без них второй return становился
+         * безусловным и ломал widgetHtml для всех типов виджетов */
+        if (!CHARTS_ON)
+          /* выключенный график — компактная строка, не огромный canvas */
+          return '<div class="vcard chart off" data-k="' + w.k + '"><div class="vname">' + CHSRC[w.src].n + '</div><div class="chartsoff">графики отключены</div></div>';
         return '<div class="vcard chart" data-k="' + w.k + '"><div class="vname">' + CHSRC[w.src].n + (chUnit(w.src) ? ', ' + chUnit(w.src) : '') + ', последние ' + (CHPER[w.per] || '10 мин') + '</div><canvas id="rc_' + w.k + '"></canvas></div>';
+      }
       if (w.t === 'val')
         return '<div class="vcard" data-k="' + w.k + '"><div class="vname">' + (LBL[w.src] || w.src) + '</div><div class="vval" id="vf_' + w.src + '">—</div></div>';
       if (w.t === 'cval') /* custom: src × factor, label from CUSTOM */
@@ -544,7 +863,7 @@ const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;'
           '" value="' + (INP[w.src] ? INP[w.src].v : '') +
           '" onchange="wInpSet(\'' + w.k + '\')" onfocus="this.select()" onkeydown="if(event.key===\'Enter\')this.blur()"></div></div>';
       /* bar: torn-stripe progress bar clamped to min..max, no value text */
-      /* прогрессбар: имя слева, уставка-100% с единицами справа,
+      /* барграф: имя слева, уставка-100% с единицами справа,
        * процент - внутри полоски по центру */
       return '<div class="vcard wbar" data-k="' + w.k + '"><div class="vname">' + BARM[w.mode].n +
         '<span class="bsub" id="su_' + w.k + '"></span></div>' +
@@ -552,13 +871,12 @@ const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;'
         '<span class="bpct" id="bp_' + w.k + '"></span></div></div>';
     }
 
-    /* панель имеет два экрана: список виджетов и добавление ("отдельная
-     * страница" с кнопкой "<" назад) */
+    /* меню виджетов: два вида (список / добавление), переключаются wView */
     let wView = 'list';
     function renderPanel() {
       const p = $('wlist'); if (!p) return;
       if (wView === 'add') { renderAddView(p); return }
-      /* ── экран 1: список виджетов ── */
+      /* список виджетов: имя + "авто" + ✕, настройки во второй строке */
       let h = '<div class="wrow"><div class="r1"><button id="btnWsave" onclick="wSave()">Сохранить</button>' +
         '<span id="wmsg" class="flash">' + (wDirty ? 'не сохранено' : 'сохранено (rev ' + wRev + ')') + '</span>' +
         '<button onclick="wView=\'add\';renderPanel()" style="margin-left:auto">Добавить</button></div></div>';
@@ -620,7 +938,7 @@ const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;'
       return ' <label class="autolbl"><input type="checkbox"' + (on !== false ? ' checked' : '') +
         ' onchange="' + fn + '(' + i + ',' + q + 'auto' + q + ',this.checked ? ' + q + '1' + q + ' : ' + q + '0' + q + ')"> авто</label>';
     }
-    /* ── экран 2: "страница" добавления виджетов, "<" назад к списку ── */
+    /* экран добавления: строки по типу, "<" назад к списку */
     function renderAddView(p) {
       let h = '<div class="wrow"><div class="r1"><button onclick="wView=\'list\';renderPanel()">&lt;</button>' +
         '<span>Добавление виджетов</span></div></div>';
@@ -709,13 +1027,18 @@ const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;'
     /* настройка поля графика (источник/окно/цвет/автомасштаб); смена
      * окна сбрасывает историю - у окон разная частота выборки */
     function wChart(i, which, v) {
-      if (which === 'per') { widgets[i].per = parseInt(v); delete chartHist[widgets[i].k] }
+      if (which === 'per') widgets[i].per = parseInt(v)
       else if (which === 'auto') widgets[i].auto = v === '1';
       else widgets[i][which] = v;
       saveWidgets(); pageRender();
     }
     /* создатели новых виджетов, по одному на тип */
-    function wAddChart() {         /* 'chart' — график */
+    const CHART_LIMIT = 3;         /* сервер имеет 3 ring-буфера */
+    function wAddChart() {         /* 'chart' — график (макс. 3) */
+      if (widgets.filter(w => w.t === 'chart').length >= CHART_LIMIT) {
+        alert('Максимум ' + CHART_LIMIT + ' графиков');
+        return;
+      }
       widgets.push({
         k: 'chart' + Date.now(), t: 'chart', src: $('ncSrc').value,
         per: parseInt($('ncPer').value), col: $('ncCol').value,

@@ -12,15 +12,15 @@ function toggleEdit() {
   $('btnEdit').classList.toggle('act', editing);
   const g = $('gear');
   if (g) {
-    /* обычный режим - шестерёнка; режим правки - якорь (закрепить) */
+    /* обычный режим - якорь; режим правки - кнопка "Закрепить" */
     g.textContent = editing ? '\u2693' : '\u2699';
     g.classList.toggle('ok', editing);
     g.title = editing ? 'Закрепить раскладку' : 'Панель';
   }
   setDrag();
 }
-/* шестерёнка: в обычном режиме - на панель; в режиме правки -
- * зелёная галочка: сохранить компоновку и выйти из правки */
+/* якорь: обычный режим - на панель; в правке - "Закрепить":
+ * сохранить компоновку виджетов и выйти из режима правки */
 function gearClick() {
   if (editing) { wSave(); toggleEdit() }
   else routeTo('panel');
@@ -216,26 +216,111 @@ function vApply(d) {
     }
   }
 }
-async function valuesTick() {
+/*
+ * ЕДИНСТВЕННЫЙ периодический запрос главной страницы: /api/values
+ * везёт и значения, и link/ready, и ap/ip/ssid (баннер портала).
+ * Отдельного /api/info-опроса здесь больше нет — экономим сокеты
+ * ESP8266 (их всего 7, httpd однопоточный).
+ *
+ * Темп адаптивный (медленный/зашумлённый канал):
+ *   - следующий запрос строго ПОСЛЕ завершения предыдущего;
+ *   - интервал >= max(1с, 3 x RTT) — на медленном канале темп
+ *     сам растягивается, очередь запросов не образуется;
+ *   - таймаут 5с (AbortController) — зависший запрос не блокирует
+ *     цикл навсегда;
+ *   - при ошибках экспоненциальный откат x2 до 10с, после двух
+ *     успехов — возврат к базовому темпу.
+ */
+let portalMode = false;
+let pollRtt = 0, pollFails = 0;
+/* КОНТРОЛЬНАЯ ТОЧКА "адаптивный одиночный опрос" (ESP8266, мало
+ * сокетов, медленный/зашумлённый канал): единственный периодический
+ * запрос /api/values — везёт значения, link/ready и ap/ip/ssid для
+ * баннера портала. Следующий запрос строго ПОСЛЕ предыдущего;
+ * таймаут 5с (AbortController); интервал >= max(1с, 3 x RTT) — на
+ * медленном канале темп сам растягивается; при ошибках откат x2
+ * до 10с. */
+const POLL_BASE = 1000, POLL_MAX = 10000;
+
+function portalBanner(ap, ssid, ip) {
+  let b = document.getElementById('apbanner');
+  if (ap) {
+    if (!b) {
+      b = document.createElement('a');
+      b.id = 'apbanner';
+      b.href = '/wifi';
+      document.querySelector('header').after(b);
+    }
+    b.textContent = 'WiFi не подключён — шлюз в режиме точки доступа ' +
+      (ssid || '') + ' (открытая), адрес http://' +
+      (ip || '192.168.4.1') + '. Нажмите, чтобы выбрать сеть →';
+  } else if (b) b.remove();
+}
+
+let lastSeqT = 0;      /* серверный ts последнего проигранного снимка */
+let replayTimers = [];
+
+/* пачка снимков за секунду опроса СК-Э -> проиграть равномерно
+ * по 200 мс: транспорт 1 запрос/с, отображение 5 Гц */
+function replaySeq(seq, off) {
+  for (const t of replayTimers) clearTimeout(t);
+  replayTimers = [];
+  if (!seq || !seq.length) return;
+  const step = 1000 / seq.length;
+  seq.forEach((sv, i) => {
+    replayTimers.push(setTimeout(() => {
+      if (!vBuilt) vBuild();
+      vApply(sv);
+      lastSeqT = sv.t;
+      /* график питается теми же снимками: 5 точек/с без запросов */
+      if (CHARTS_ON && widgets)
+        for (const w of widgets)
+          if (w.t === 'chart' && w.on && CHSRC[w.src] &&
+              sv[CHSRC[w.src].src] !== undefined)
+            chartAppend(w.src, sv[CHSRC[w.src].src],
+                        sv.t ? sv.t + off : undefined);
+    }, i * step));
+  });
+}
+
+async function pollLoop() {
+  const t0 = Date.now();
+  let ok = false;
   try {
-    const d = await (await fetch('/api/values')).json();
+    const ctl = new AbortController();
+    const to = setTimeout(() => ctl.abort(), 5000);
+    const d = await (await fetch('/api/values?since=' + lastSeqT,
+                                  { signal: ctl.signal })).json();
+    clearTimeout(to);
+    ok = !!d.ok;
+    sLastResp = 'ok:' + (d.ok ? 1 : 0) +
+      ' seq:' + (d.seq ? d.seq.length : 'нет') +
+      (d.seq && d.seq.length
+        ? ' rate:' + (d.seq[d.seq.length - 1].rate !== undefined
+            ? d.seq[d.seq.length - 1].rate : 'НЕТ')
+        : '');
     if (d.link !== undefined) {
       $('link').textContent = d.link ? 'ONLINE' : 'OFFLINE';
       $('link').className = 'tag ' + (d.link ? 'ok' : 'bad');
     }
-    if (!d.ok) { return }
-    if (!vBuilt) vBuild();
-    vApply(d);
-    /* every enabled chart widget appends its own source value */
-    for (const w of widgets || [])
-      if (w.t === 'chart' && w.on && CHSRC[w.src]) {
-        const v = d[CHSRC[w.src].src];
-        if (v !== undefined) { chartPush(w.k, v, CHPER[w.per] ? w.per : 600); chartDraw(w) }
-      }
+    portalMode = !!d.ap;
+    portalBanner(d.ap, d.ssid, d.ip);
+    if (d.ok) replaySeq(d.seq, Date.now() - (d.now || Date.now()));
   } catch (e) { }
+  pollRtt = Date.now() - t0;
+  pollFails = ok ? 0 : pollFails + 1;
+  let dly = Math.max(POLL_BASE, pollRtt * 3);
+  if (pollFails > 0)
+    dly = Math.min(POLL_MAX, POLL_BASE * Math.pow(2, pollFails));
+  setTimeout(pollLoop, dly);
 }
-setInterval(valuesTick, 200); valuesTick();
+pollLoop();
 /* отладочная информация (fw/ip/rssi/uptime/heap) переехала на /panel */
-paramsTick(); setInterval(paramsTick, 30000);
+/* тяжёлый /api/params (~12КБ) НЕ грузим вместе со страницей (15КБ
+ * gzip): два больших ответа одновременно съедали кучу ESP до ~8КБ и
+ * страница грузилась нестабильно. Разносим: сначала страница, через
+ * 3с параметры; дальше — раз в минуту (меняются редко, плюс они
+ * обновляются по действиям set/run) */
+setTimeout(paramsTick, 3000); setInterval(paramsTick, 60000);
 wSync();
 

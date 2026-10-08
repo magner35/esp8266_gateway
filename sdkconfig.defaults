@@ -6,3 +6,11 @@ CONFIG_ESPTOOLPY_FLASHFREQ_40M=y
 
 # %f in snprintf for the values JSON (nano format has no floats)
 # CONFIG_NEWLIB_NANO_FORMAT is not set
+
+# UART0 — консоль измерителя: логи SDK выключены на компиляции
+# (esp_log_level_set — no-op без CONFIG_LOG_SET_LEVEL). Свои DBG — на UART1.
+CONFIG_LOG_DEFAULT_LEVEL_NONE=y
+
+# окно отправки TCP = 1 сегмент: пиковая память pbuf на соединение
+# вдвое меньше (куча ESP мала), скорости в локальной сети хватает
+CONFIG_LWIP_TCP_SND_BUF_DEFAULT=1440

@@ -6,6 +6,18 @@
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>SKE-02 Gateway</title>
   <style>
+    /* баннер режима точки доступа (index.js infoTick) */
+    #apbanner {
+      display: block;
+      margin: 8px 14px 0;
+      padding: 10px 12px;
+      background: #3a3020;
+      color: #e8c46a;
+      border: 1px solid #6b5b2a;
+      border-radius: 8px;
+      text-decoration: none;
+      font-size: 14px;
+    }
     /* ==================================================================
      * STYLE MAP (index.html - главная страница мониторинга)
      *   1. общие: body, header, h1, .tag/.ok/.bad, button, #debug
@@ -215,7 +227,7 @@
 
     /* подпись (имя параметра) внутри карточки */
     .vname {
-      color: #ffffff;
+      color: #a8bfc5;
       /* серый цвет подписи */
       font-size: 12px
         /* размер шрифта подписи */
@@ -250,9 +262,21 @@
 
     .vcard.chart canvas {
       width: 100%;
-      height: 114px;
-      /* карточка графика = 3 высоты карточки барграфа (46*3=138) */
+      /* высота задаётся из JS: 3 × высота карточки параметра */
       display: block
+    }
+
+    /* выключенный график: маленькая строка вместо высокого canvas */
+    .vcard.chart.off {
+      display: flex;
+      align-items: baseline;
+      gap: 10px;
+      padding: 8px 12px
+    }
+    .vcard.chart.off .vname { margin: 0 }
+    .chartsoff {
+      color: #8b94a7;
+      font-size: 12px
     }
 
     /* --- 3. режим правки раскладки ("✎ Раскладка" включает body.edit) - */
@@ -359,7 +383,7 @@
     /* уставка-100% прогрессбара: прижата вправо в строке имени */
     .bsub {
       float: right;
-      color: #8b94a7;
+      color: #a8bfc5;
       font-size: 11px;
       white-space: nowrap
     }
@@ -368,7 +392,7 @@
      * карточки, в строке имени */
     .utop {
       float: right;
-      color: #8b94a7;
+      color: #a8bfc5;
       font-size: 11px;
       white-space: nowrap
     }
@@ -393,7 +417,7 @@
       white-space: normal;
       font-size: 12px;
       line-height: 1.15;
-      color: #ffffff;
+      color: #a8bfc5;
       overflow: hidden
     }
 
@@ -433,7 +457,7 @@
       user-select: none;
       font-weight: 650;
       font-size: 18px;
-      color: #BBB;
+      color: #E0E0E0;
     }
 
     .vcard.wbtn:active {
@@ -459,7 +483,7 @@
       color: #d8dee9;
       border: 1px solid #39414f;
       border-radius: 4px;
-      padding: 4px 3px;
+      padding: 0px 3px;
       font: 17px ui-monospace, Consolas, monospace;
       text-align: right;
       width: 100%;

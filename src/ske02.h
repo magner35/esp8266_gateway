@@ -44,6 +44,17 @@ SemaphoreHandle_t ske02_lock(void);
 ProtoCtx *ske02_ctx(void);         /* valid ONLY while holding the lock */
 const SkeValues *ske02_values(void); /* NULL until the first 'm' frame */
 
+/* кольцо последних снимков значений (пачками для /api/values) */
+#define VAL_RING_MAX 8
+void ske02_valring_init(void);
+void ske02_valring_push(uint32_t t_ms, const SkeValues *v);
+int  ske02_valring_since(uint32_t since_ms, uint32_t *ts, SkeValues *out, int max);
+
+/* кольцо последних снимков (пачками по 5/с для /api/values) */
+void ske02_valring_init(void);
+void ske02_valring_push(uint32_t t_ms, const SkeValues *v);
+int  ske02_valring_since(uint32_t since_ms, uint32_t *ts, SkeValues *out, int max);
+
 bool ske02_link_up(void);
 bool ske02_ready(void);
 

@@ -12,7 +12,17 @@ button,input,select,textarea{font:inherit;color:inherit}
 .sec{display:none!important}
 .sec.on{display:block!important}
 /* --- index.html --- */
-#sec-main {
+#sec-main #apbanner {
+      display: block;
+      margin: 8px 14px 0;
+      padding: 10px 12px;
+      background: #3a3020;
+      color: #e8c46a;
+      border: 1px solid #6b5b2a;
+      border-radius: 8px;
+      text-decoration: none;
+      font-size: 14px;
+    }#sec-main {
       font: 13px/1.45 system-ui, sans-serif;
       background: #000000;
       color: #ffffff;
@@ -106,7 +116,7 @@ button,input,select,textarea{font:inherit;color:inherit}
       box-sizing: border-box;
       overflow: hidden
     }#sec-main .vname {
-      color: #ffffff;
+      color: #a8bfc5;
       font-size: 12px
     }#sec-main .vval {
       font-family: ui-monospace, Consolas, monospace;
@@ -122,8 +132,15 @@ button,input,select,textarea{font:inherit;color:inherit}
       grid-column: 1/-1
     }#sec-main .vcard.chart canvas {
       width: 100%;
-      height: 114px;
       display: block
+    }#sec-main .vcard.chart.off {
+      display: flex;
+      align-items: baseline;
+      gap: 10px;
+      padding: 8px 12px
+    }#sec-main .vcard.chart.off .vname { margin: 0 }#sec-main .chartsoff {
+      color: #8b94a7;
+      font-size: 12px
     }#sec-main #btnEdit.act {
       background: #1d5c2f
     }#sec-main.edit .vcard {
@@ -178,12 +195,12 @@ button,input,select,textarea{font:inherit;color:inherit}
       white-space: nowrap
     }#sec-main .bsub {
       float: right;
-      color: #8b94a7;
+      color: #a8bfc5;
       font-size: 11px;
       white-space: nowrap
     }#sec-main .utop {
       float: right;
-      color: #8b94a7;
+      color: #a8bfc5;
       font-size: 11px;
       white-space: nowrap
     }#sec-main .vcard.wbit {
@@ -197,7 +214,7 @@ button,input,select,textarea{font:inherit;color:inherit}
       white-space: normal;
       font-size: 12px;
       line-height: 1.15;
-      color: #ffffff;
+      color: #a8bfc5;
       overflow: hidden
     }#sec-main .bitlamp {
       height: 20px;
@@ -222,7 +239,7 @@ button,input,select,textarea{font:inherit;color:inherit}
       user-select: none;
       font-weight: 650;
       font-size: 18px;
-      color: #BBB;
+      color: #E0E0E0;
     }#sec-main .vcard.wbtn:active {
       filter: brightness(1.3)
     }#sec-main .vcard.winp {
@@ -239,7 +256,7 @@ button,input,select,textarea{font:inherit;color:inherit}
       color: #d8dee9;
       border: 1px solid #39414f;
       border-radius: 4px;
-      padding: 4px 3px;
+      padding: 0px 3px;
       font: 17px ui-monospace, Consolas, monospace;
       text-align: right;
       width: 100%;
@@ -635,7 +652,8 @@ button,input,select,textarea{font:inherit;color:inherit}
             cursor: pointer
         }#sec-wifi .dbm {
             color: #8b94a7
-        }
+        }#sec-wifi .scanmsg { color: #8b94a7; padding: 8px 0 }#sec-wifi .forget { margin-top: 14px; display: flex; gap: 8px; align-items: baseline;
+              color: #8b94a7; font-size: 13px }#sec-wifi .forget button { background: #4a2a2a; border-color: #6b3a3a }
 </style>
 </head>
 <body>
@@ -716,8 +734,13 @@ button,input,select,textarea{font:inherit;color:inherit}
             autocapitalize="off" autocorrect="off">
         <button type="submit">Подключиться</button>
     </form>
+    <div class="forget">
+        <button type="button" onclick="forgetWifi()">Забыть все сети</button>
+        <span>— стереть сохранённые подключения и перезапустить шлюз
+        в режиме точки доступа</span>
+    </div>
     <h3>Найденные сети</h3>
-    <div id="nets">сканирование…</div>
+    <div id="nets" class="nets">сканирование…</div>
 </section>
 <script>
 /* --- shared.js --- */
@@ -920,65 +943,267 @@ const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;'
       { n: 'фиолетовый', c: '#9a5ae0' },
       { n: 'белый', c: '#e8e8e8' }
     ];
-    const chartHist = {};               
+    const chartLive = {};               
+    const CHARTS_ON = true;
+    const CHSCALE = {};                 
+    function niceStep(x) {
+      if (!(x > 0) || !isFinite(x)) return 1;
+      const p = Math.pow(10, Math.floor(Math.log10(x)));
+      const d = x / p;
+      return (d >= 5 ? 5 : d >= 2 ? 2 : 1) * p;
+    }
     function chartCol(w) {
       const e = CHCOL.find(x => x.c === w.col);
-      return e ? e.c : CHCOL[5].c;      
+      return e ? e.c : CHCOL[5].c;
     }
-    function chartPush(k, v, per) {
-      const iv = per <= 1200 ? 1 : Math.ceil(per / 1200);
-      const now = Date.now();
-      const h = chartHist[k] || (chartHist[k] = { arr: [], min: 0, max: 1, lastT: 0 });
-      if (now - h.lastT < iv * 1000) return;
-      h.lastT = now;
-      h.arr.push(v);
-      if (h.arr.length > 1200) h.arr.shift();
+    function srcName(w) { return w.src; }
+    async function chartBackfill(src) {
+      try {
+        let buf = chartLive[src];
+        if (!buf) buf = chartLive[src] = { vals: [], ts: [], srv: 0 };
+        const d = await (await fetch('/api/chart?since=' + (buf.srv || 0))).json();
+        if (!d.t || !d.t.length) return;
+        const off = Date.now() - d.now;
+        for (let i = 0; i < d.t.length; i++) {
+          const t = d.t[i] + off;
+          if (buf.ts.length && t <= buf.ts[buf.ts.length - 1]) continue;
+          buf.vals.push(d.v[i]);
+          buf.ts.push(t);
+          buf.srv = d.t[i];
+        }
+      } catch (e) { }
     }
+    async function chartFeed(d) {
+      if (!CHARTS_ON) return;
+      if (!widgets) return;
+      const srcs = new Set();
+      for (const w of widgets)
+        if (w.t === 'chart' && w.on && CHSRC[w.src] &&
+            d[CHSRC[w.src].src] !== undefined)
+          srcs.add(w.src);
+      for (const src of srcs) {
+        const buf = chartLive[src];
+        const gap = buf && buf.ts.length ?
+            Date.now() - buf.ts[buf.ts.length - 1] : Infinity;
+        if (gap > CHART_HARD_RESET_MS)
+          chartLive[src] = { vals: [], ts: [], srv: 0 };
+        if (!isFinite(gap) || gap > CHART_GAP_MS)
+          await chartBackfill(src);
+        chartAppend(src, d[CHSRC[src].src]);
+      }
+    }
+    const CHART_STALE_MS = 2000;    
+    const CHART_HARD_RESET_MS = 60000; 
+    const CHART_GAP_MS = 3000;      
+    const CHART_EDGE_MS = 1500;     
+    let sAtt = 0, sFail = 'вызовов не было';
+    let sLastResp = 'ответов не было';   
+    function chartAppend(src, value, srvT) {
+      if (!CHARTS_ON) return;
+      sAtt++;
+      if (!isFinite(value)) { sFail = 'не число: ' + value; return; }
+      let buf = chartLive[src];
+      const t = srvT || Date.now();
+      if (buf && buf.ts.length &&
+          t - buf.ts[buf.ts.length - 1] > CHART_HARD_RESET_MS)
+        buf = chartLive[src] = { vals: [], ts: [] };
+      if (!buf) buf = chartLive[src] = { vals: [], ts: [] };
+      if (buf.ts.length && t <= buf.ts[buf.ts.length - 1]) {
+        sFail = 'не монотонно: ' + Math.round(t - buf.ts[buf.ts.length - 1]) + 'мс';
+        return;
+      }
+      sFail = 'принято';
+      buf.vals.push(value);
+      buf.ts.push(t);
+      if (buf.vals.length > 3000) {
+        const v2 = [], t2 = [];
+        for (let i = 0; i < buf.vals.length; i += 2) {
+          v2.push(buf.vals[i]);
+          t2.push(buf.ts[i]);
+        }
+        buf.vals = v2;
+        buf.ts = t2;
+      }
+    }
+    let chartHiddenAt = 0;
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden) { chartHiddenAt = Date.now(); return; }
+      if (chartHiddenAt && Date.now() - chartHiddenAt > CHART_STALE_MS)
+        for (const src in chartLive)
+          chartLive[src] = { vals: [], ts: [] };
+      chartHiddenAt = 0;
+    });
     function chartDrawAll() {
       for (const w of widgets || []) if (w.t === 'chart' && w.on) chartDraw(w);
     }
+    function chartHeight() {
+      const par = document.querySelector('#values .vcard:not(.chart):not(.wbar):not(.wbit):not(.wbtn):not(.winp)');
+      return par ? par.offsetHeight * 2 : 144;
+    }
     function chartDraw(w) {
+      if (!CHARTS_ON) {
+        const cv0 = $('rc_' + w.k);
+        if (cv0) {
+          const g0 = cv0.getContext('2d');
+          g0.clearRect(0, 0, cv0.width, cv0.height);
+          g0.fillStyle = '#8b94a7'; g0.font = '12px system-ui';
+          g0.fillText('графики отключены', 8, cv0.height / 2);
+        }
+        return;
+      }
       const cv = $('rc_' + w.k); if (!cv) return;
-      const hist = chartHist[w.k]; if (!hist) return;
+      const chartEmpty = (msg) => {
+        const dpr0 = window.devicePixelRatio || 1;
+        const cw0 = cv.offsetWidth, ch0 = chartHeight();
+        if (cv.width !== cw0 * dpr0 || cv.height !== ch0 * dpr0) {
+          cv.width = cw0 * dpr0;
+          cv.height = ch0 * dpr0;
+        }
+        const g0 = cv.getContext('2d');
+        g0.setTransform(dpr0, 0, 0, dpr0, 0, 0);
+        g0.clearRect(0, 0, cw0, ch0);
+        g0.fillStyle = '#8b94a7'; g0.font = '12px system-ui';
+        g0.fillText(msg, 8, ch0 / 2);
+      };
+      const buf = chartLive[srcName(w)];
+      if (!buf || buf.vals.length < 2) {
+        chartEmpty('накопление… (точек ' + (buf ? buf.vals.length : 0) +
+                   ', вызовов ' + sAtt + ', ' + sFail +
+                   ', ' + w.src + '→' +
+                   (CHSRC[w.src] ? CHSRC[w.src].src : 'НЕТ') +
+                   ' | ' + sLastResp + ')');
+        return;
+      }
       const per = CHPER[w.per] ? w.per : 600;
+      const cutoff = Date.now() - CHART_EDGE_MS - per * 1000;
+      const pts = [];
+      for (let i = 0; i < buf.vals.length; i++)
+        if (buf.ts[i] >= cutoff)
+          pts.push({ v: buf.vals[i], t: buf.ts[i] });
+      if (pts.length < 2) {
+        chartEmpty('нет точек в окне (буфер: ' + buf.vals.length +
+                   ', в окне: ' + pts.length + ')');
+        return;
+      }
+      if (pts.length >= 3) {
+        const srcv = [];
+        for (const p of pts) srcv.push(p.v);
+        for (let i = 1; i < pts.length - 1; i++) {
+          const a = srcv[i - 1], b = srcv[i], c = srcv[i + 1];
+          pts[i].v = a + b + c - Math.min(a, b, c) - Math.max(a, b, c);
+        }
+      }
       const col = chartCol(w);
       const dpr = window.devicePixelRatio || 1;
-      const cw = cv.offsetWidth, ch = 114;   
+      const cw = cv.offsetWidth, ch = chartHeight();
       if (cv.width !== cw * dpr || cv.height !== ch * dpr) { cv.width = cw * dpr; cv.height = ch * dpr }
       const g = cv.getContext('2d');
       g.setTransform(dpr, 0, 0, dpr, 0, 0);
       g.clearRect(0, 0, cw, ch);
-      const arr = hist.arr, n = arr.length;
       g.strokeStyle = '#2a3140'; g.lineWidth = 1;
       for (let k = 1; k < 4; k++) { const y = ch * k / 4; g.beginPath(); g.moveTo(0, y); g.lineTo(cw, y); g.stroke() }
-      if (n < 2) { g.fillStyle = '#8b94a7'; g.font = '12px system-ui'; g.fillText('накопление данных…', 8, ch / 2); return }
-      let lo, hi;
+      let lo, hi, minV = Infinity, maxV = -Infinity;
+      for (const p of pts) { if (p.v < minV) minV = p.v; if (p.v > maxV) maxV = p.v }
       if (w.auto === false) {
         hi = SP[CHSRC[w.src].sp];
-        if (!(hi > 0)) hi = 1;           
+        if (!(hi > 0)) hi = maxV || 1;
         lo = 0;
       } else {
-        lo = Infinity; hi = -Infinity;
-        for (const v of arr) { if (v < lo) lo = v; if (v > hi) hi = v }
-        if (hi - lo < 1e-9) { lo -= 0.5; hi += 0.5 }
-        const pad = (hi - lo) * 0.08; lo -= pad; hi += pad;
+        let tlo = minV, thi = maxV;
+        if (thi - tlo < 1e-9) { tlo -= 0.5; thi += 0.5 }
+        const pad = (thi - tlo) * 0.08; tlo -= pad; thi += pad;
+        const step = niceStep((thi - tlo) / 4);
+        tlo = Math.floor(tlo / step) * step;
+        thi = Math.ceil(thi / step) * step;
+        const prev = CHSCALE[w.k];
+        if (prev && minV >= prev.lo && maxV <= prev.hi &&
+            (maxV - minV) > 0.3 * (prev.hi - prev.lo)) {
+          lo = prev.lo; hi = prev.hi;
+        } else {
+          lo = tlo; hi = thi;
+          CHSCALE[w.k] = { lo: lo, hi: hi };
+        }
       }
-      hist.min = lo; hist.max = hi;
-      const X = i => cw * i / (per - 1), Y = v => ch - 2 - (v - lo) / (hi - lo) * (ch - 4);
-      g.beginPath();
-      const off = per - n * (per <= 1200 ? 1 : Math.ceil(per / 1200)); 
-      for (let i = 0; i < n; i++) { const x = X(off + i * (per <= 1200 ? 1 : Math.ceil(per / 1200))), y = Y(arr[i]); i ? g.lineTo(x, y) : g.moveTo(x, y) }
-      g.strokeStyle = col; g.lineWidth = 1.5; g.stroke();
-      g.lineTo(X(per - 1), ch); g.lineTo(X(off), ch); g.closePath();
-      g.fillStyle = col + '26'; 
-      g.fill();
+      const tMax = Date.now() - CHART_EDGE_MS;
+      const tMin = tMax - per * 1000;
+      const tSpan = per * 1000;
+      const X = t => cw * (t - tMin) / tSpan;
+      const Y = v => ch - 2 - (v - lo) / (hi - lo) * (ch - 4);
+      const n = pts.length;
+      const tPx = tSpan / cw;
+      const top = [], bot = [];
+      let idx = 0, lastDataT = 0;
+      for (let px = 0; px <= cw; px++) {
+        const tt0 = tMin + tPx * px, tt1 = tt0 + tPx;
+        while (idx < n && pts[idx].t < tt0) idx++;
+        let vmin = Infinity, vmax = -Infinity, has = false, qEnd = idx;
+        for (let q = idx; q < n && pts[q].t < tt1; q++) {
+          const v = pts[q].v;
+          if (v < vmin) vmin = v;
+          if (v > vmax) vmax = v;
+          has = true;
+          qEnd = q;
+        }
+        if (!has) continue;
+        if (has && lastDataT && qEnd >= 0 &&
+            pts[idx].t - lastDataT > CHART_GAP_MS) {
+          top.push(NaN, NaN);
+          bot.push(NaN, NaN);
+        }
+        if (qEnd >= 0)
+          lastDataT = pts[qEnd].t;
+        top.push(px, Y(vmax));
+        bot.push(px, Y(vmin));
+      }
+      let firstX = null, lastX = null;
+      for (let i = 0; i < top.length; i += 2)
+        if (isFinite(top[i])) {
+          if (firstX === null) firstX = top[i];
+          lastX = top[i];
+        }
+      if (firstX !== null) {
+        g.beginPath();
+        let pen = false;
+        for (let i = 0; i < top.length; i += 2) {
+          if (!isFinite(top[i])) { pen = false; continue; }
+          if (pen) g.lineTo(top[i], top[i + 1]);
+          else { g.moveTo(top[i], top[i + 1]); pen = true; }
+        }
+        pen = false;
+        for (let i = bot.length - 2; i >= 0; i -= 2) {
+          if (!isFinite(bot[i])) { pen = false; continue; }
+          if (pen) g.lineTo(bot[i], bot[i + 1]);
+          else { g.moveTo(bot[i], bot[i + 1]); pen = true; }
+        }
+        g.strokeStyle = col; g.lineWidth = 1; g.stroke();
+      }
+      if (firstX !== null && lastX !== null) {
+        g.beginPath();
+        let pen = false;
+        for (let i = 0; i < top.length; i += 2) {
+          if (!isFinite(top[i])) continue;
+          if (pen) g.lineTo(top[i], top[i + 1]);
+          else { g.moveTo(top[i], top[i + 1]); pen = true; }
+        }
+        g.lineTo(lastX, ch);
+        g.lineTo(firstX, ch);
+        g.closePath();
+        g.fillStyle = col + '26';
+        g.fill();
+      }
       g.fillStyle = '#d8dee9'; g.font = '12px ui-monospace,Consolas,monospace';
-      g.fillText(arr[n - 1].toFixed(3), 8, 12);
+      g.fillText(pts[n - 1].v.toFixed(3), 8, 12);
       g.fillStyle = '#8b94a7';
-      g.fillText('max ' + hist.max.toFixed(3), cw - 86, 12);
-      g.fillText('min ' + hist.min.toFixed(3), cw - 86, ch - 4);
+      g.fillText('max ' + maxV.toFixed(3), cw - 86, 12);
+      g.fillText('min ' + minV.toFixed(3), cw - 86, ch - 4);
     }
     window.addEventListener('resize', chartDrawAll);
+    setTimeout(function chartRAF() {
+      requestAnimationFrame(chartRAF);
+      try { chartDrawAll() } catch (e) { }
+    }, 0);
+    if (CHARTS_ON)
+      setInterval(() => { try { chartDrawAll() } catch (e) { } }, 200);
     let vBuilt = false;
     function baseWidgets() {
       const w = [];
@@ -1104,8 +1329,11 @@ const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;'
       return LBL[w.src] || w.src;
     }
     function widgetHtml(w) {
-      if (w.t === 'chart')
+      if (w.t === 'chart') {
+        if (!CHARTS_ON)
+          return '<div class="vcard chart off" data-k="' + w.k + '"><div class="vname">' + CHSRC[w.src].n + '</div><div class="chartsoff">графики отключены</div></div>';
         return '<div class="vcard chart" data-k="' + w.k + '"><div class="vname">' + CHSRC[w.src].n + (chUnit(w.src) ? ', ' + chUnit(w.src) : '') + ', последние ' + (CHPER[w.per] || '10 мин') + '</div><canvas id="rc_' + w.k + '"></canvas></div>';
+      }
       if (w.t === 'val')
         return '<div class="vcard" data-k="' + w.k + '"><div class="vname">' + (LBL[w.src] || w.src) + '</div><div class="vval" id="vf_' + w.src + '">—</div></div>';
       if (w.t === 'cval') 
@@ -1259,12 +1487,17 @@ const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;'
       widgets.splice(i, 1); saveWidgets(); pageRender();
     }
     function wChart(i, which, v) {
-      if (which === 'per') { widgets[i].per = parseInt(v); delete chartHist[widgets[i].k] }
+      if (which === 'per') widgets[i].per = parseInt(v)
       else if (which === 'auto') widgets[i].auto = v === '1';
       else widgets[i][which] = v;
       saveWidgets(); pageRender();
     }
+    const CHART_LIMIT = 3;         
     function wAddChart() {         
+      if (widgets.filter(w => w.t === 'chart').length >= CHART_LIMIT) {
+        alert('Максимум ' + CHART_LIMIT + ' графиков');
+        return;
+      }
       widgets.push({
         k: 'chart' + Date.now(), t: 'chart', src: $('ncSrc').value,
         per: parseInt($('ncPer').value), col: $('ncCol').value,
@@ -1556,25 +1789,77 @@ function vApply(d) {
     }
   }
 }
-async function valuesTick() {
+let portalMode = false;
+let pollRtt = 0, pollFails = 0;
+const POLL_BASE = 1000, POLL_MAX = 10000;
+function portalBanner(ap, ssid, ip) {
+  let b = document.getElementById('apbanner');
+  if (ap) {
+    if (!b) {
+      b = document.createElement('a');
+      b.id = 'apbanner';
+      b.href = '/wifi';
+      document.querySelector('header').after(b);
+    }
+    b.textContent = 'WiFi не подключён — шлюз в режиме точки доступа ' +
+      (ssid || '') + ' (открытая), адрес http://' +
+      (ip || '192.168.4.1') + '. Нажмите, чтобы выбрать сеть →';
+  } else if (b) b.remove();
+}
+let lastSeqT = 0;      
+let replayTimers = [];
+function replaySeq(seq, off) {
+  for (const t of replayTimers) clearTimeout(t);
+  replayTimers = [];
+  if (!seq || !seq.length) return;
+  const step = 1000 / seq.length;
+  seq.forEach((sv, i) => {
+    replayTimers.push(setTimeout(() => {
+      if (!vBuilt) vBuild();
+      vApply(sv);
+      lastSeqT = sv.t;
+      if (CHARTS_ON && widgets)
+        for (const w of widgets)
+          if (w.t === 'chart' && w.on && CHSRC[w.src] &&
+              sv[CHSRC[w.src].src] !== undefined)
+            chartAppend(w.src, sv[CHSRC[w.src].src],
+                        sv.t ? sv.t + off : undefined);
+    }, i * step));
+  });
+}
+async function pollLoop() {
+  const t0 = Date.now();
+  let ok = false;
   try {
-    const d = await (await fetch('/api/values')).json();
+    const ctl = new AbortController();
+    const to = setTimeout(() => ctl.abort(), 5000);
+    const d = await (await fetch('/api/values?since=' + lastSeqT,
+                                  { signal: ctl.signal })).json();
+    clearTimeout(to);
+    ok = !!d.ok;
+    sLastResp = 'ok:' + (d.ok ? 1 : 0) +
+      ' seq:' + (d.seq ? d.seq.length : 'нет') +
+      (d.seq && d.seq.length
+        ? ' rate:' + (d.seq[d.seq.length - 1].rate !== undefined
+            ? d.seq[d.seq.length - 1].rate : 'НЕТ')
+        : '');
     if (d.link !== undefined) {
       $('link').textContent = d.link ? 'ONLINE' : 'OFFLINE';
       $('link').className = 'tag ' + (d.link ? 'ok' : 'bad');
     }
-    if (!d.ok) { return }
-    if (!vBuilt) vBuild();
-    vApply(d);
-    for (const w of widgets || [])
-      if (w.t === 'chart' && w.on && CHSRC[w.src]) {
-        const v = d[CHSRC[w.src].src];
-        if (v !== undefined) { chartPush(w.k, v, CHPER[w.per] ? w.per : 600); chartDraw(w) }
-      }
+    portalMode = !!d.ap;
+    portalBanner(d.ap, d.ssid, d.ip);
+    if (d.ok) replaySeq(d.seq, Date.now() - (d.now || Date.now()));
   } catch (e) { }
+  pollRtt = Date.now() - t0;
+  pollFails = ok ? 0 : pollFails + 1;
+  let dly = Math.max(POLL_BASE, pollRtt * 3);
+  if (pollFails > 0)
+    dly = Math.min(POLL_MAX, POLL_BASE * Math.pow(2, pollFails));
+  setTimeout(pollLoop, dly);
 }
-setInterval(valuesTick, 200); valuesTick();
-paramsTick(); setInterval(paramsTick, 30000);
+pollLoop();
+setTimeout(paramsTick, 3000); setInterval(paramsTick, 60000);
 wSync();
 ;
 /* --- widgets.js --- */
@@ -1834,17 +2119,38 @@ wSync();
 /* --- wifi.js --- */
         let NETS = [];
         async function wifiLoad() {
-            const r = await (await fetch('/scan')).json();
-            NETS = r.nets || [];
+            const box = document.getElementById('nets');
+            box.innerHTML = '<p class="scanmsg">сканирование…</p>';
+            try {
+                const r = await (await fetch('/scan')).json();
+                NETS = r.nets || [];
+            } catch (e) {
+                NETS = [];
+            }
+            if (!NETS.length) {
+                box.innerHTML = '<p class="scanmsg">сети не найдены' +
+                    (r.err ? ' (ошибка скана ' + r.err + ')' : '') +
+                    ' — <button class="pick" onclick="wifiLoad()">повторить скан</button>' +
+                    '<br>Сеть можно ввести вручную в поле ниже</p>';
+                return;
+            }
             let h = '<table>';
             NETS.forEach((n, i) => {
                 h += '<tr><td>' + esc(n.s) + '</td><td class="dbm">' + n.r + ' dBm</td><td>' +
                     (n.e ? '🔒' : '') + '</td><td><button class="pick" onclick="pick(' + i + ')">выбрать</button></td></tr>';
             });
-            document.getElementById('nets').innerHTML = h + '</table>';
+            box.innerHTML = h + '</table>';
         }
         function pick(i) { document.getElementById('ssid').value = NETS[i].s }
         wifiLoad();
+        async function forgetWifi() {
+            if (!confirm('Стереть сохранённые сети и перезапустить шлюз ' +
+                         'в режиме точки доступа?')) return;
+            try { await fetch('/api/forgetwifi', { method: 'POST' }); } catch (e) { }
+            document.body.innerHTML = '<p class="scanmsg">Сети стёрты, шлюз ' +
+                'перезагружается в режим точки доступа. Подключитесь к ' +
+                'SKE02-GW-XXXX (открытая) и откройте 192.168.4.1</p>';
+        }
 ;/* --- router --- */
 /* SPA-роутер: один html, переходы между секциями без подгрузок.
  * Секция = hash (#main/#widgets/#panel/#settings/#wifi); путь

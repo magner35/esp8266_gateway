@@ -26,7 +26,12 @@ void dbg_init(void)
     uart_driver_install(UART_NUM_1, 0, 256, 0, NULL, 0);
     uart_param_config(UART_NUM_1, &cfg);
 
-    esp_log_level_set("*", ESP_LOG_NONE);
+    /*
+     * Логи SDK выключены на КОМПИЛЯЦИИ (sdkconfig:
+     * CONFIG_LOG_DEFAULT_LEVEL_NONE) — esp_log_level_set здесь был
+     * no-op, потому что CONFIG_LOG_SET_LEVEL не включён. UART0 чист
+     * для консоли измерителя, наши DBG идут на UART1.
+     */
 }
 
 void dbg_printf(const char *fmt, ...)
