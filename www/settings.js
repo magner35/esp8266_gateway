@@ -104,25 +104,10 @@
         subs.forEach((n, k) => h += '<button class="' + (n === s ? 'act' : '') + '" onclick="go3(' + k + ')">' + esc(n || 'Общие') + '</button>');
       $('subtabs').innerHTML = h ? '<div class="subtabs">' + h + '</div>' : '';
       const vis = tr.filter(r => r.l3 === s);
-      /*
-       * Linearization directions ("Прямое/Реверс направление") hold the F/V
-       * calibration pairs: render them as an F|V grid, one pair per row
-       * (F01|V01, F02|V02, ...), instead of a long two-column list.
-       */
-      const linRe = /^[FV]\d\d/;
-      if (vis.length >= 4 && vis.every(r => linRe.test(r.q.n))) {
-        const F = {}, V = {};
-        for (const r of vis) (r.q.n[0] === 'F' ? F : V)[r.q.n.slice(1, 3)] = r.q;
-        const keys = [...new Set([...Object.keys(F), ...Object.keys(V)])].sort();
-        const cell = q => q ? '<label>' + esc(q.n) + '</label>' + widget(q) : '<label></label><span></span>';
-        h = '<div class="lingrid">';
-        for (const k of keys) h += cell(F[k]) + cell(V[k]);
-        h += '</div>';
-      } else {
-        h = '<table>' + THEAD;
-        for (const r of vis) h += row(r.q);
-        h += '</table>';
-      }
+      /* точки линеаризации - обычная таблица, без особых правил */
+      h = '<table>' + THEAD;
+      for (const r of vis) h += row(r.q);
+      h += '</table>';
       $('sections').innerHTML = h; built = fp;
     }
     /* search view: filter matches anywhere, across all sections and tabs */

@@ -13,6 +13,16 @@
  * line: silence them or every wifi/lwip info line lands in the meter.
  */
 
+/* esp_log выводит посимвольно через putchar (UART0 = линия прибора);
+ * переносим ВЕСЬ вывод SDK (включая бинарный WiFi-драйвер, который
+ * зовёт esp_log_write напрямую, мимо CONFIG_LOG) на UART1 */
+static int dbg_log_putchar(int c)
+{
+    char ch = (char)c;
+    uart_write_bytes(UART_NUM_1, &ch, 1);
+    return (unsigned char)c;
+}
+
 void dbg_init(void)
 {
     uart_config_t cfg = {
@@ -25,13 +35,7 @@ void dbg_init(void)
     };
     uart_driver_install(UART_NUM_1, 0, 256, 0, NULL, 0);
     uart_param_config(UART_NUM_1, &cfg);
-
-    /*
-     * Логи SDK выключены на КОМПИЛЯЦИИ (sdkconfig:
-     * CONFIG_LOG_DEFAULT_LEVEL_NONE) — esp_log_level_set здесь был
-     * no-op, потому что CONFIG_LOG_SET_LEVEL не включён. UART0 чист
-     * для консоли измерителя, наши DBG идут на UART1.
-     */
+    esp_log_set_putchar(dbg_log_putchar);
 }
 
 void dbg_printf(const char *fmt, ...)

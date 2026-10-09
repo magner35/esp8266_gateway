@@ -25,10 +25,26 @@ static void boot_task(void *arg)
     (void)arg;
     DBG("gateway rtos: boot\n");
     storage_init();
+    /*
+     * ПРИБОР ПЕРВЫМ: листинг дерева читается ДО старта беспроводных
+     * задач - куча девственная (14К буфер гарантирован), flash-паузы
+     * NVS никому не мешают. Ждём готовности до 25с; если прибора нет -
+     * WiFi поднимется всё равно, листинг догонит в фоне.
+     */
+    ske02_start();
+    {
+        int waited = 0;
+        while (!ske02_ready() && waited < 25000)
+        {
+            vTaskDelay(pdMS_TO_TICKS(100));
+            waited += 100;
+        }
+        DBG("gateway: tree %s at boot (%d ms)\n",
+            ske02_ready() ? "ready" : "pending", waited);
+    }
     wifi_start();
     /* the wifi task needs a moment to bring an interface up */
     vTaskDelay(pdMS_TO_TICKS(2000));
-    ske02_start();
     web_start();
     dns_start();
     modbus_start();

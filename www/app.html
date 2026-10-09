@@ -436,19 +436,7 @@ button,input,select,textarea{font:inherit;color:inherit}
       padding: 1px 6px
     }
 /* --- settings.html --- */
-#sec-settings {
-      font: 13px/1.45 system-ui, sans-serif;
-      background: #000000;
-      color: #d8dee9;
-      margin: 0;
-      padding: 4px
-    }#sec-settings header {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 8px;
-      align-items: center;
-      margin-bottom: 10px
-    }#sec-settings h1 {
+#sec-settings h1 {
       font-size: 18px;
       margin: 0 8px 0 0
     }#sec-settings .tag {
@@ -580,30 +568,6 @@ button,input,select,textarea{font:inherit;color:inherit}
       background: #2a2517
     }#sec-settings .flash {
       color: #7aa2f7
-    }#sec-settings .lingrid {
-      display: grid;
-      grid-template-columns: auto minmax(70px, 1fr) auto minmax(70px, 1fr);
-      gap: 6px 6px;               
-      align-items: center;
-      background: #1b202a;
-      border: 1px solid #2a3140;
-      border-radius: 8px;
-      padding: 8px;
-      margin-bottom: 8px
-    }#sec-settings .lingrid > :nth-child(4n + 3) {
-      margin-left: 16px
-    }#sec-settings .lingrid label {
-      color: #8b94a7;
-      font-size: 12px;
-      white-space: nowrap
-    }#sec-settings .lingrid .set {
-      justify-content: flex-start;
-      gap: 2px
-    }#sec-settings .lingrid .set input {
-      width: 76px;
-      padding: 2px 4px
-    }#sec-settings .lingrid input.dirty {
-      border-color: #e3b341
     }
 /* --- wifi.html --- */
 #sec-wifi {
@@ -2055,20 +2019,9 @@ wSync();
         subs.forEach((n, k) => h += '<button class="' + (n === s ? 'act' : '') + '" onclick="go3(' + k + ')">' + esc(n || 'Общие') + '</button>');
       $('subtabs').innerHTML = h ? '<div class="subtabs">' + h + '</div>' : '';
       const vis = tr.filter(r => r.l3 === s);
-      const linRe = /^[FV]\d\d/;
-      if (vis.length >= 4 && vis.every(r => linRe.test(r.q.n))) {
-        const F = {}, V = {};
-        for (const r of vis) (r.q.n[0] === 'F' ? F : V)[r.q.n.slice(1, 3)] = r.q;
-        const keys = [...new Set([...Object.keys(F), ...Object.keys(V)])].sort();
-        const cell = q => q ? '<label>' + esc(q.n) + '</label>' + widget(q) : '<label></label><span></span>';
-        h = '<div class="lingrid">';
-        for (const k of keys) h += cell(F[k]) + cell(V[k]);
-        h += '</div>';
-      } else {
-        h = '<table>' + THEAD;
-        for (const r of vis) h += row(r.q);
-        h += '</table>';
-      }
+      h = '<table>' + THEAD;
+      for (const r of vis) h += row(r.q);
+      h += '</table>';
       $('sections').innerHTML = h; built = fp;
     }
     function renderSearch(f) {

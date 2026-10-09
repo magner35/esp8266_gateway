@@ -190,7 +190,7 @@ static bool ske_echo_off(void)
         /* the leading empty line drops any half-typed text line the
          * console may be holding after boot noise */
         txt_command("", NULL, NULL, SKE_CMD_TIMEOUT);
-        if (txt_command("e", echo_cb, last, SKE_CMD_TIMEOUT) &&
+        if (txt_command("ECHO", echo_cb, last, SKE_CMD_TIMEOUT) &&
             !strncmp(last, "echo off", 8))
             return true;
         DBG("ske02: wake reply: '%s'\n",
@@ -248,27 +248,9 @@ static void info_cb(char *line, void *user)
 
 static bool ske_info(void)
 {
-    return txt_command("i", info_cb, NULL, SKE_CMD_TIMEOUT);
+    return txt_command("INFO", info_cb, NULL, SKE_CMD_TIMEOUT);
 }
 
-static void text_start(void)
-{
-    uart_flush_rx();
-    /*
-     * erase_all дерева ЗДЕСЬ, до отправки 'l': стирание flash
-     * подвешивает CPU на десятки мс, но UART ещё молчит - безопасно.
-     * Во время листинга страницы уже стёрты, записи идут без GC-пауз,
-     * 4К UART-буфер легко поглощает микросекундные паузы записи.
-     */
-    tree_begin();
-    uart_send_line("l");
-    xSemaphoreTake(sLock, portMAX_DELAY);
-    sCtx.inListing = true;
-    sCtx.curSection = 0;
-    sCtx.curGroup = 0;
-    memset(sCtx.hdrName, 0, sizeof(sCtx.hdrName));
-    xSemaphoreGive(sLock);
-}
 
 /*
  * Приём листинга ДВУМЯ ФАЗАМИ:
@@ -281,51 +263,130 @@ static void text_start(void)
  * во время чтения) и с "коммитом только полного листинга"
  * навсегда застревала в ретраях без повторной команды 'l'.
  */
+/*
+ * Листинг ПО РАЗДЕЛАМ: прибор отдаёт меню командами L/1/2/3 (l удалена).
+ * Каждая секция ~3-5КБ - буфер кучи всего 6К, выделяется даже при
+ * поднятом WiFi (прежние 14К для полного 'l' фрагментировались).
+ * Схема на секцию: приём целиком в буфер -> парсинг + NVS (UART в
+ * это время молчит: следующая команда ещё не отправлена).
+ */
 static bool capture_listing(TickType_t timeout)
 {
+    /* 'l'/'L' (Настройки) не нужны: это меню не используется,
+     * параметров в 1+2+3 достаточно (нумерация едина со старым 'l') */
+    static const char *const cmds[] = {"LIST 1", "LIST 2", "LIST 3"};
     char line[512];
-    bool ok = false;
-    /*
-     * Однопроходная: читать строку -> сразу парсить -> сразу NVS.
-     * Без буфера кучи (14К malloc падал на фрагментации - хвост
-     * листинга терялся). Безопасно: tree_begin с erase_all уже
-     * отработал в text_start ДО передачи, страницы стёрты, пауз GC
-     * во время записи нет.
-     */
-    proto_prompt_reset(&sCtx);
-    proto_listing_begin(&sCtx);
-    for (;;)
+    bool ok = true;
+    char *buf;
+    size_t bufSz = 8 * 1024;   /* Основные ~5.7КБ в старом дампе: 6К
+                                 * впритык - любая подвижка меню прибора
+                                 * выбивала секцию за край (цикл 1-2-1-2) */
+
+    buf = malloc(bufSz);
+    while (!buf && bufSz > 4096)
     {
-        int rc = read_line_until_prompt(line, sizeof(line), timeout);
-        if (rc == 0)
-            break;             /* таймаут */
-        if (rc == 2)
-            line_to_parser(line);
-        if (rc == 1)
-        {
-            ok = true;         /* промпт: листинг принят целиком */
-            break;
-        }
+        bufSz -= 1024;
+        buf = malloc(bufSz);
     }
+    if (!buf)
+        return false;      /* куча: повтор позже */
+
+    proto_listing_begin(&sCtx);
+    /*
+     * inListing обязан быть взведён ДО парсинга: раньше это делал
+     * text_start, после его удаления парсер считал строки листинга
+     * ответами 's' - on_param не звался, дерево оставалось пустым.
+     */
+    xSemaphoreTake(sLock, portMAX_DELAY);
+    sCtx.inListing = true;
+    sCtx.curSection = 0;
+    sCtx.curGroup = 0;
+    memset(sCtx.hdrName, 0, sizeof(sCtx.hdrName));
+    xSemaphoreGive(sLock);
+    tree_begin();
+
+    for (int c = 0; c < 3 && ok; c++)
+    {
+        size_t len = 0;
+        bool secOk = false;
+        bool overflow = false;   /* строка не влезла - секция неполна */
+
+        uart_flush_rx();
+        uart_send_line(cmds[c]);
+        proto_prompt_reset(&sCtx);
+
+        /* фаза 1: секция целиком в буфер, БЕЗ парсинга/NVS */
+        for (;;)
+        {
+            int rc = read_line_until_prompt(line, sizeof(line), timeout);
+            if (rc == 0)
+                break;         /* таймаут */
+            if (rc == 2)
+            {
+                size_t n = strlen(line);
+                if (len + n + 2 <= bufSz)
+                {
+                    memcpy(buf + len, line, n);
+                    len += n;
+                    buf[len++] = '\n';
+                }
+                else
+                    overflow = true;
+            }
+            if (rc == 1)
+            {
+                /* промпт есть, но буфер мал - секция неполна: провал */
+                secOk = !overflow;
+                break;
+            }
+        }
+
+        /* фаза 2: парсинг секции + NVS - UART молчит */
+        if (secOk)
+        {
+            char *pp = buf;
+            char *pe = buf + len;
+            while (pp < pe)
+            {
+                char *nl = memchr(pp, '\n', (size_t)(pe - pp));
+                size_t n = nl ? (size_t)(nl - pp) : (size_t)(pe - pp);
+                if (n >= sizeof(line))
+                    n = sizeof(line) - 1;
+                memcpy(line, pp, n);
+                line[n] = 0;
+                line_to_parser(line);
+                pp = nl ? nl + 1 : pe;
+            }
+        }
+        else
+        {
+            DBG("ske02: sec '%s' failed (%s, len %u, buf %u)\n",
+                cmds[c],
+                overflow ? "buffer small" : "timeout",
+                (unsigned)len, (unsigned)bufSz);
+            ok = false;
+        }
+        /* диагностика: уникальных id после этой секции */
+        DBG("ske02: sec '%s' -> liveCount %u\n",
+            cmds[c], (unsigned)sCtx.liveCount);
+    }
+
+    free(buf);
     xSemaphoreTake(sLock, portMAX_DELAY);
     sCtx.inListing = false;
     xSemaphoreGive(sLock);
     /*
-     * Коммитим ТОЛЬКО ПОЛНЫЙ листинг (liveCount >= count из 'i'):
-     * потерянные строки = неполное меню, такое дерево не публикуем.
+     * Полнота гарантируется ПРОМПТОМ: каждая секция заканчивается
+     * "SKE02> "; все три дошли = набор полный, счётчик 'i' не нужен.
+     * Меняется число параметров в приборе - ничего не правим.
      */
-    if (ok && sCtx.liveCount &&
-        sCtx.liveCount >= (sCtx.count ? sCtx.count
-                                      : sCtx.liveCount))
+    if (ok)
     {
         tree_commit(&sCtx, sCtx.liveCount);
         sLastOk = xTaskGetTickCount();
     }
     else
-    {
         tree_abort();
-        ok = false;
-    }
     return ok;
 }
 
@@ -450,7 +511,7 @@ static bool ske_query_values(void)
     xSemaphoreTake(sLock, portMAX_DELAY);
     proto_values_restart(&sCtx);
     xSemaphoreGive(sLock);
-    if (!txt_command("m", values_cb, NULL, SKE_CMD_TIMEOUT))
+    if (!txt_command("DATA", values_cb, NULL, SKE_CMD_TIMEOUT))
         return false;
     xSemaphoreTake(sLock, portMAX_DELAY);
     ok = proto_values_ready(&sCtx);
@@ -588,7 +649,7 @@ static void exec_request(ske_req_t *req)
             }
         }
         /* the text is the packed console value already (proto_raw_to_cmd) */
-        snprintf(cmd, sizeof(cmd), "s %u %s", (unsigned)req->id, req->text);
+        snprintf(cmd, sizeof(cmd), "SET %u %s", (unsigned)req->id, req->text);
         if (!txt_command(cmd, reply_cb, &rc_, SKE_CMD_TIMEOUT))
         {
             req->result = SKE_ERR_TRANSPORT;
@@ -603,7 +664,7 @@ static void exec_request(ske_req_t *req)
         break;
 
     case SKEQ_RUN:
-        snprintf(cmd, sizeof(cmd), "x %u", (unsigned)req->id);
+        snprintf(cmd, sizeof(cmd), "RUN %u", (unsigned)req->id);
         if (!txt_command(cmd, reply_cb, &rc_, SKE_CMD_TIMEOUT))
         {
             req->result = SKE_ERR_TRANSPORT;
@@ -622,7 +683,7 @@ static void exec_request(ske_req_t *req)
             snprintf(req->err, sizeof(req->err), "пустой пароль");
             break;
         }
-        snprintf(cmd, sizeof(cmd), "p %s", req->text);
+        snprintf(cmd, sizeof(cmd), "PASS %s", req->text);
         if (!txt_command(cmd, unlock_cb, &rc_, SKE_CMD_TIMEOUT))
         {
             req->result = SKE_ERR_TRANSPORT;
@@ -638,7 +699,7 @@ static void exec_request(ske_req_t *req)
         if (req->result == BS_WAIT && req->wait_s == 0)
         {
             reply_ctx_t st = {0};
-            if (txt_command("p", unlock_cb, &st, SKE_CMD_TIMEOUT) &&
+            if (txt_command("PASS", unlock_cb, &st, SKE_CMD_TIMEOUT) &&
                 st.wait_s > 0)
                 req->wait_s = st.wait_s;
         }
@@ -647,7 +708,6 @@ static void exec_request(ske_req_t *req)
         break;
 
     case SKEQ_REFRESH:
-        text_start();
         req->result = capture_listing(SKE_LIST_TIMEOUT) ? BS_OK
                                                         : SKE_ERR_TRANSPORT;
         break;
@@ -661,7 +721,6 @@ static void exec_request(ske_req_t *req)
          * count stays 0 and every param looks gone */
         if (ske_echo_off() && ske_info())
         {
-            text_start();
             req->result = capture_listing(SKE_LIST_TIMEOUT) ? BS_OK
                                                             : SKE_ERR_TRANSPORT;
         }
@@ -720,8 +779,7 @@ static void meter_task(void *arg)
                     DBG("ske02: %s, %u params\n", sCtx.version,
                         (unsigned)sCtx.count);
                     xSemaphoreGive(sLock);
-                    text_start();
-                    sState = ST_LIST;
+                    sState = ST_LIST;   /* capture шлёт L/1/2/3 сам */
                     sMisses = 0;
                 }
                 else if (++wakeFails >= 30)
@@ -743,7 +801,10 @@ static void meter_task(void *arg)
                 sState = ST_IDLE;
                 sT = xTaskGetTickCount();
                 xSemaphoreTake(sLock, portMAX_DELAY);
-                DBG("ske02: listing done (%u params)\n", (unsigned)sCtx.count);
+                /* liveCount = реально разобрано из секций 1/2/3;
+                 * count из 'i' считает ВСЕ меню (вкл. Настройки) и
+                 * только путает в логе */
+                DBG("ske02: listing done (%u params)\n", (unsigned)sCtx.liveCount);
                 xSemaphoreGive(sLock);
             }
             else if (++sMisses >= SKE_WAKE_MISS)
@@ -773,6 +834,14 @@ static void meter_task(void *arg)
                     if (sCtx.vals.cfg_rev &&
                         sCtx.vals.cfg_rev != sCfgRev)
                     {
+                        if (sCfgRev == 0)
+                        {
+                            /* первое наблюдение после загрузки: просто
+                             * принимаем версию, БЕЗ перечитывания -
+                             * дерево только что прочитано при старте */
+                            sCfgRev = sCtx.vals.cfg_rev;
+                            break;
+                        }
                         TickType_t nowT = xTaskGetTickCount();
                         sCfgRev = sCtx.vals.cfg_rev;
                         if (sLastRelist == 0 ||
@@ -781,7 +850,6 @@ static void meter_task(void *arg)
                             sLastRelist = nowT;
                             DBG("ske02: cfg rev %u -> relisting\n",
                                 (unsigned)sCtx.vals.cfg_rev);
-                            text_start();
                             sState = ST_LIST;
                             break;
                         }

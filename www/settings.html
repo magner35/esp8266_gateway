@@ -16,26 +16,7 @@
      *      .dv (разделитель : . .)
      *   5. панель действий: #actions (пароль/Применить/Обновить),
      *      #filter (фильтр поиска), #secPw, tr.dirty, button.run
-     *   6. F|V-грид линеаризации: .lingrid
-     * ================================================================== */
-
-    /* --- 1. общие ---------------------------------------------------- */
-    body {
-      font: 13px/1.45 system-ui, sans-serif;
-      background: #000000;
-      color: #d8dee9;
-      margin: 0;
-      padding: 4px
-    }
-
-    /* шапка: заголовок, метки связи, кнопки навигации */
-    header {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 8px;
-      align-items: center;
-      margin-bottom: 10px
-    }
+     *   6. F|V-грид линеаризации:
 
     /* заголовок "SKE-02 Настройки" */
     h1 {
@@ -271,49 +252,6 @@
       color: #7aa2f7
     }
 
-    /* --- 6. F|V-грид линеаризации ----------------------------------- */
-
-    /* сетка пар калибровки: поле ПРИЖАТО к своей метке (F01[поле] V01[поле]),
-     * зазор между парами - побольше */
-    .lingrid {
-      display: grid;
-      grid-template-columns: auto minmax(70px, 1fr) auto minmax(70px, 1fr);
-      gap: 6px 6px;               /* поле прижато к метке */
-      align-items: center;
-      background: #1b202a;
-      border: 1px solid #2a3140;
-      border-radius: 8px;
-      padding: 8px;
-      margin-bottom: 8px
-    }
-
-    /* зазор МЕЖДУ парами: отступ меток V-колонки (каждый 3-й элемент) */
-    .lingrid > :nth-child(4n + 3) {
-      margin-left: 16px
-    }
-
-    /* подписи F01/V01 в сетке линеаризации */
-    .lingrid label {
-      color: #8b94a7;
-      font-size: 12px;
-      white-space: nowrap
-    }
-
-    /* поля грида - вплотную к метке, узкие */
-    .lingrid .set {
-      justify-content: flex-start;
-      gap: 2px
-    }
-
-    .lingrid .set input {
-      width: 76px;
-      padding: 2px 4px
-    }
-
-    /* изменённое поле линеаризации - жёлтая рамка */
-    .lingrid input.dirty {
-      border-color: #e3b341
-    }
   </style>
 </head>
 
