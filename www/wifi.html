@@ -69,31 +69,46 @@
         .dbm {
             color: #8b94a7
         }
-        .scanmsg { color: #8b94a7; padding: 8px 0 }
-        .forget { margin-top: 14px; display: flex; gap: 8px; align-items: baseline;
-              color: #8b94a7; font-size: 13px }
-    .forget button { background: #4a2a2a; border-color: #6b3a3a }
+
+        .scanmsg {
+            color: #8b94a7;
+            padding: 8px 0
+        }
+
+        /* строка кнопок: «Подключиться» слева, «Забыть сети» справа */
+        .btnrow {
+            margin-top: 12px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center
+        }
+
+        .forgetbtn {
+            background: #4a2a2a;
+            border-color: #6b3a3a
+        }
     </style>
 </head>
 
 <body>
     <div style="display:flex;align-items:center;gap:8px">
-      <h1>SKE-02 Wi-Fi шлюз</h1>
-      <!-- «Назад» вверху справа, на панель -->
-      <a href="#panel" style="margin-left:auto"><button type="button">&#8592; Назад</button></a>
+        <h1>SKE-02 Wi-Fi шлюз</h1>
+        <!-- «Назад» вверху справа, на панель -->
+        <a href="#panel" style="margin-left:auto"><button type="button">&#8592; Назад</button></a>
     </div>
     <form method="POST" action="/save">
         <label>SSID сети</label><input name="ssid" id="ssid" maxlength="32" autocapitalize="off" autocorrect="off"
             spellcheck="false" required>
         <label>Пароль (для открытой сети оставьте пустым)</label><input name="pass" type="password" maxlength="64"
             autocapitalize="off" autocorrect="off">
-        <button type="submit">Подключиться</button>
+        <!-- «Подключиться» и «Забыть сети» на одной строке:
+         * слева действие, справа — разрушительное -->
+        <div class="btnrow">
+            <button type="submit">Подключиться</button>
+            <button type="button" class="forgetbtn" onclick="forgetWifi()"
+                title="Стереть сохранённые подключения и перезапустить шлюз в режиме точки доступа">Забыть сети</button>
+        </div>
     </form>
-    <div class="forget">
-        <button type="button" onclick="forgetWifi()">Забыть все сети</button>
-        <span>— стереть сохранённые подключения и перезапустить шлюз
-        в режиме точки доступа</span>
-    </div>
     <h3>Найденные сети</h3>
     <div id="nets" class="nets">сканирование…</div>
     <script src="/wifi.js"></script>

@@ -52,25 +52,28 @@
       margin-bottom: 5px
     }
 
-    /* шестерёнка без надписи, прижата вправо; открывает /panel */
+    /* кнопка панели, прижата вправо; в режиме правки -
+     * текстовая "Закрепить" вместо значка-якоря */
     .gear {
       margin-left: auto;
-      font-size: 22px;
+      font-size: 14px;
       line-height: 1;
       color: #d8dee9;
       text-decoration: none;
-      padding: 2px 3px;
-      border-radius: 4px
+      background: #2a3140;
+      border: 1px solid #3b4252;
+      border-radius: 4px;
+      padding: 6px 12px
     }
 
     .gear:hover {
-      background: #2a3140
+      background: #3b4252
     }
 
-    /* режим закрепления: зелёный якорь */
+    /* режим закрепления: выделенная кнопка "Закрепить" */
     .gear.ok {
-      color: #d8dee9;
-      font-size: 18px
+      background: #21366c;
+      border-color: #5a7de0
     }
 
     h1 {
@@ -497,9 +500,10 @@
   <header>
     <h1>SKE-02 Gateway</h1>
     <span id="link" class="tag">…</span>
-    <!-- шестерёнка справа вверху: страница панели (раскладка/виджеты/
-         Wi-Fi/перезагрузка/прибор/профили); отладочная панель теперь там -->
-    <a href="#" class="gear" id="gear" onclick="gearClick();return false" title="Панель">&#9881;</a>
+    <!-- кнопка справа вверху: страница панели (раскладка/виджеты/
+         Wi-Fi/перезагрузка/прибор/профили); в режиме правки
+         превращается в "Закрепить" (сохранить и выйти из правки) -->
+    <a href="#" class="gear" id="gear" onclick="gearClick();return false" title="Меню">Меню</a>
   </header>
   <div id="values"></div>
   <!-- панели редактирования всё ещё живут здесь (режим правки и

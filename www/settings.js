@@ -7,7 +7,12 @@
       try {
         const d = await (await fetch('/api/params')).json();
         P = d.params; SECT = d.sections; dirty = new Set();
-        setRender(d.count + '|' + d.params.length + '|' + d.sections.length + '|' + d.rc);
+        /* отпечаток ВКЛЮЧАЕТ значения: правка одного параметра в меню
+         * прибора не меняет count/length - без значений таблица не
+         * перестраивалась и показывала старое */
+        let vhash = 0;
+        for (const q of d.params) for (const ch of String(q.v)) vhash = (vhash * 31 + ch.charCodeAt(0)) | 0;
+        setRender(d.count + '|' + d.params.length + '|' + d.sections.length + '|' + d.rc + '|' + vhash);
         applyFilter();
         /* the tree is empty while a rescan/listing is in flight on the
          * gateway - poll instead of demanding a wiring check */
@@ -197,4 +202,8 @@
       b.disabled = false; b.textContent = 'Обновить';
     }
     tick();
+    /* периодическое обновление (30с): после правки параметра в меню
+     * САМОГО прибора шлюз перечитывает дерево по cfg_rev - подтянем
+     * новые значения и в браузер. Грязные правки не затираем. */
+    setInterval(() => { if (!dirty.size && !document.hidden) tick() }, 30000);
   

@@ -12,10 +12,10 @@ function toggleEdit() {
   $('btnEdit').classList.toggle('act', editing);
   const g = $('gear');
   if (g) {
-    /* обычный режим - якорь; режим правки - кнопка "Закрепить" */
-    g.textContent = editing ? '\u2693' : '\u2699';
+    /* обычный режим - "Панель"; режим правки - кнопка "Закрепить" */
+    g.textContent = editing ? 'Закрепить' : 'Меню';
     g.classList.toggle('ok', editing);
-    g.title = editing ? 'Закрепить раскладку' : 'Панель';
+    g.title = editing ? 'Сохранить раскладку и выйти из правки' : 'Открыть меню';
   }
   setDrag();
 }

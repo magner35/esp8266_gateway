@@ -36,17 +36,19 @@ button,input,select,textarea{font:inherit;color:inherit}
       margin-bottom: 5px
     }#sec-main .gear {
       margin-left: auto;
-      font-size: 22px;
+      font-size: 14px;
       line-height: 1;
       color: #d8dee9;
       text-decoration: none;
-      padding: 2px 3px;
-      border-radius: 4px
+      background: #2a3140;
+      border: 1px solid #3b4252;
+      border-radius: 4px;
+      padding: 6px 12px
     }#sec-main .gear:hover {
-      background: #2a3140
+      background: #3b4252
     }#sec-main .gear.ok {
-      color: #d8dee9;
-      font-size: 18px
+      background: #21366c;
+      border-color: #5a7de0
     }#sec-main h1 {
       font-size: 18px;
       margin: 0 4px 0 0
@@ -439,6 +441,10 @@ button,input,select,textarea{font:inherit;color:inherit}
 #sec-settings h1 {
       font-size: 18px;
       margin: 0 8px 0 0
+    }#sec-settings header {
+      display: flex;
+      align-items: center;
+      gap: 8px
     }#sec-settings .tag {
       background: #2a3140;
       border-radius: 4px;
@@ -616,8 +622,18 @@ button,input,select,textarea{font:inherit;color:inherit}
             cursor: pointer
         }#sec-wifi .dbm {
             color: #8b94a7
-        }#sec-wifi .scanmsg { color: #8b94a7; padding: 8px 0 }#sec-wifi .forget { margin-top: 14px; display: flex; gap: 8px; align-items: baseline;
-              color: #8b94a7; font-size: 13px }#sec-wifi .forget button { background: #4a2a2a; border-color: #6b3a3a }
+        }#sec-wifi .scanmsg {
+            color: #8b94a7;
+            padding: 8px 0
+        }#sec-wifi .btnrow {
+            margin-top: 12px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center
+        }#sec-wifi .forgetbtn {
+            background: #4a2a2a;
+            border-color: #6b3a3a
+        }
 </style>
 </head>
 <body>
@@ -625,7 +641,7 @@ button,input,select,textarea{font:inherit;color:inherit}
 <header>
     <h1>SKE-02 Gateway</h1>
     <span id="link" class="tag">…</span>
-    <a href="#" class="gear" id="gear" onclick="gearClick();return false" title="Панель">&#9881;</a>
+    <a href="#" class="gear" id="gear" onclick="gearClick();return false" title="Меню">Меню</a>
   </header>
   <div id="values"></div>
   <button id="btnEdit" onclick="toggleEdit()" hidden>&#9998; Раскладка</button>
@@ -688,21 +704,20 @@ button,input,select,textarea{font:inherit;color:inherit}
 </section>
 <section class="sec" id="sec-wifi">
 <div style="display:flex;align-items:center;gap:8px">
-      <h1>SKE-02 Wi-Fi шлюз</h1>
-      <a href="#panel" style="margin-left:auto"><button type="button">&#8592; Назад</button></a>
+        <h1>SKE-02 Wi-Fi шлюз</h1>
+        <a href="#panel" style="margin-left:auto"><button type="button">&#8592; Назад</button></a>
     </div>
     <form method="POST" action="/save">
         <label>SSID сети</label><input name="ssid" id="ssid" maxlength="32" autocapitalize="off" autocorrect="off"
             spellcheck="false" required>
         <label>Пароль (для открытой сети оставьте пустым)</label><input name="pass" type="password" maxlength="64"
             autocapitalize="off" autocorrect="off">
-        <button type="submit">Подключиться</button>
+        <div class="btnrow">
+            <button type="submit">Подключиться</button>
+            <button type="button" class="forgetbtn" onclick="forgetWifi()"
+                title="Стереть сохранённые подключения и перезапустить шлюз в режиме точки доступа">Забыть сети</button>
+        </div>
     </form>
-    <div class="forget">
-        <button type="button" onclick="forgetWifi()">Забыть все сети</button>
-        <span>— стереть сохранённые подключения и перезапустить шлюз
-        в режиме точки доступа</span>
-    </div>
     <h3>Найденные сети</h3>
     <div id="nets" class="nets">сканирование…</div>
 </section>
@@ -1613,9 +1628,9 @@ function toggleEdit() {
   $('btnEdit').classList.toggle('act', editing);
   const g = $('gear');
   if (g) {
-    g.textContent = editing ? '\u2693' : '\u2699';
+    g.textContent = editing ? 'Закрепить' : 'Меню';
     g.classList.toggle('ok', editing);
-    g.title = editing ? 'Закрепить раскладку' : 'Панель';
+    g.title = editing ? 'Сохранить раскладку и выйти из правки' : 'Открыть меню';
   }
   setDrag();
 }
@@ -1937,7 +1952,9 @@ wSync();
       try {
         const d = await (await fetch('/api/params')).json();
         P = d.params; SECT = d.sections; dirty = new Set();
-        setRender(d.count + '|' + d.params.length + '|' + d.sections.length + '|' + d.rc);
+        let vhash = 0;
+        for (const q of d.params) for (const ch of String(q.v)) vhash = (vhash * 31 + ch.charCodeAt(0)) | 0;
+        setRender(d.count + '|' + d.params.length + '|' + d.sections.length + '|' + d.rc + '|' + vhash);
         applyFilter();
         if (!P.length && !retryT)
           retryT = setTimeout(() => { retryT = 0; tick() }, 3000);
@@ -2103,6 +2120,7 @@ wSync();
       b.disabled = false; b.textContent = 'Обновить';
     }
     tick();
+    setInterval(() => { if (!dirty.size && !document.hidden) tick() }, 30000);
 ;
 /* --- wifi.js --- */
         let NETS = [];
