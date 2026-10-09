@@ -123,11 +123,6 @@ const char *proto_group_name(const ProtoCtx *ctx, uint8_t idx)
     return (idx >= 1 && idx <= ctx->menuCount) ? ctx->menus[idx - 1] : "";
 }
 
-SkeParam *proto_param(ProtoCtx *ctx, uint16_t id)
-{
-    return (id < ctx->count && id < SKE_MAX_PARAMS) ? &ctx->params[id] : NULL;
-}
-
 /* ------------------------------------------------------------------ */
 /* Cyrillic homoglyph restore                                          */
 /*
@@ -253,7 +248,7 @@ static uint32_t text_to_raw(SkeParam *p, const char *text)
 }
 
 /* raw -> display text for the parameter type */
-static void raw_to_display(uint8_t type, uint32_t raw, char *buf, size_t cap)
+void proto_raw_to_display(uint8_t type, uint32_t raw, char *buf, size_t cap)
 {
     if (type == SKT_FLOAT)
     {
@@ -302,60 +297,13 @@ static void raw_to_display(uint8_t type, uint32_t raw, char *buf, size_t cap)
     snprintf(buf, cap, "%lu", (unsigned long)raw);
 }
 
-void proto_value_text(const ProtoCtx *ctx, uint16_t id, char *buf, size_t cap)
-{
-    const SkeParam *p = (const SkeParam *)proto_param((ProtoCtx *)ctx, id);
-    if (cap)
-        buf[0] = 0;
-    if (!p)
-        return;
-    if (p->type == SKT_CMD)
-        return;
-    if (!p->present)
-    {
-        snprintf(buf, cap, "-");
-        return;
-    }
-    if (p->masked)
-    {
-        snprintf(buf, cap, "******");
-        return;
-    }
-    /* string values are kept as text in the option pool */
-    if (p->type == SKT_STRING && p->optPool)
-    {
-        snprintf(buf, cap, "%s", ctx->optPool + p->optPool - 1);
-        return;
-    }
-    /* enum/bool values are shown as their option label, like on the LCD */
-    if ((p->type == SKT_ENUM || p->type == SKT_BOOL) && p->optCnt)
-    {
-        uint32_t v = p->value;
-        const char *s = proto_opt_text(ctx, p, v < p->optCnt ? (uint8_t)v : 0);
-        snprintf(buf, cap, "%s", s ? s : "-");
-        return;
-    }
-    raw_to_display(p->type, p->value, buf, cap);
-}
-
 void proto_bound_text(const SkeParam *p, bool max, char *buf, size_t cap)
 {
     if (cap)
         buf[0] = 0;
     if (!p || (p->minv == 0 && p->maxv == 0))
         return;
-    raw_to_display(p->type, max ? p->maxv : p->minv, buf, cap);
-}
-
-const char *proto_opt_text(const ProtoCtx *ctx, const SkeParam *p, uint8_t idx)
-{
-    const char *s;
-    if (!p || !p->optCnt || idx >= p->optCnt || !p->optPool)
-        return NULL;
-    s = ctx->optPool + p->optPool - 1;
-    while (idx--)
-        s += strlen(s) + 1;
-    return s;
+    proto_raw_to_display(p->type, max ? p->maxv : p->minv, buf, cap);
 }
 
 /* console 's' value: packed numbers (TIME=HHMM, DATE=DDMMYY, the device
@@ -416,10 +364,10 @@ void proto_raw_to_cmd(uint8_t type, uint32_t raw, char *buf, size_t cap)
 
 /* UI input text -> raw; TIME is "hh:mm", DATE is "dd.mm.yy": like the
  * device menu, only the edited part of the unix value changes */
-bool proto_input_to_raw(ProtoCtx *ctx, uint16_t id, const char *text,
-                        uint32_t *raw, char *err, size_t errcap)
+bool proto_input_to_raw_rec(const SkeParam *p, const char *const *opts,
+                            const char *text, uint32_t *raw,
+                            char *err, size_t errcap)
 {
-    SkeParam *p = proto_param(ctx, id);
     double d;
     if (!p)
     {
@@ -439,6 +387,20 @@ bool proto_input_to_raw(ProtoCtx *ctx, uint16_t id, const char *text,
     if (!text || !*text)
     {
         snprintf(err, errcap, "pustoe znachenie");
+        return false;
+    }
+
+    /* enum/bool: клиент присылает ТЕКСТ опции - ищем индекс по меткам */
+    if ((p->type == SKT_ENUM || p->type == SKT_BOOL) && opts && p->optCnt)
+    {
+        uint8_t k;
+        for (k = 0; k < p->optCnt; k++)
+            if (opts[k] && !strcmp(opts[k], text))
+            {
+                *raw = k;
+                return true;
+            }
+        snprintf(err, errcap, "net takoj opcii");
         return false;
     }
 
@@ -520,55 +482,37 @@ bool proto_input_to_raw(ProtoCtx *ctx, uint16_t id, const char *text,
  *         010 CMD  Run something       command item, no value
  */
 
-static void store_options(ProtoCtx *ctx, SkeParam *p, char *range);
-
 /*
- * String params ("S": LCD-charset texts like the serial number) have no
- * numeric payload - their value text lives in the option pool instead.
- * Strings are always read only, short and few; a refresh rewrites the
- * copy in place when it fits, otherwise appends a fresh one.
+ * Опции/строки БОЛЬШЕ не копятся в пуле: скрэтч текущего параметра
+ * (ctx->optScratch + ctx->optLabel[]) живёт ровно одну строку листинга
+ * - дерево пишет tree_store сразу из парсера.
  */
-static void store_string(ProtoCtx *ctx, SkeParam *p, const char *text)
+static void store_string(ProtoCtx *ctx, const char *text)
 {
-    size_t len = strlen(text) + 1;
-    if (p->optPool)
-    {
-        char *old = ctx->optPool + p->optPool - 1;
-        size_t oldLen = strlen(old) + 1;
-        if (len <= oldLen)
-        {
-            memset(old, 0, oldLen);
-            memcpy(old, text, len - 1);
-            return;
-        }
-    }
-    if ((size_t)ctx->optPoolUsed + len > SKE_OPT_POOL)
-        return;
-    memcpy(ctx->optPool + ctx->optPoolUsed, text, len);
-    p->optPool = ctx->optPoolUsed + 1;
-    ctx->optPoolUsed = (uint16_t)(ctx->optPoolUsed + len);
+    strncpy(ctx->strVal, text, SKE_NAME_LEN - 1);
+    ctx->strVal[SKE_NAME_LEN - 1] = 0;
 }
 
-static void store_options(ProtoCtx *ctx, SkeParam *p, char *range)
+static uint8_t store_options(ProtoCtx *ctx, char *range)
 {
     uint8_t cnt = 1;
-    uint16_t off;
     uint8_t stored = 0;
     char *q = range;
     char *nq;
     char *ws;
     char tmp[48];
     size_t l;
+    char *w = ctx->optScratch;
+    char *end = ctx->optScratch + SKE_OPT_SCRATCH;
 
     for (; *q; q++)
         if (*q == '|')
             cnt++;
     if (cnt > SKE_OPT_MAX)
-        return;
+        return 0;
 
-    off = ctx->optPoolUsed;
     q = range;
-    while (q && *q)
+    while (q && *q && stored < cnt)
     {
         nq = strchr(q, '|');
         if (nq)
@@ -584,22 +528,26 @@ static void store_options(ProtoCtx *ctx, SkeParam *p, char *range)
         memcpy(tmp, q, l);
         tmp[l] = 0;
         proto_rusify(tmp);
-        if (ctx->optPoolUsed + strlen(tmp) + 1 > SKE_OPT_POOL)
+        /* rusify РАСШИРЯЕТ строку in-place (гомоглифы 1->2 байта):
+         * длина и запас считаются ПОСЛЕ него, иначе последний байт
+         * метки и NUL терялись - опции склеивались в кашу */
+        l = strlen(tmp);
+        if (w + l + 1 > end)
             break;
-        strcpy(ctx->optPool + ctx->optPoolUsed, tmp);
-        ctx->optPoolUsed += strlen(tmp) + 1;
-        stored++;
+        memcpy(w, tmp, l + 1);
+        ctx->optLabel[stored++] = w;
+        w += l + 1;
         q = nq ? nq + 1 : NULL;
     }
-    if (stored == cnt)
-    {
-        p->optPool = (uint16_t)(off + 1); /* 0 stays "no options" */
-        p->optCnt = cnt;
-    }
-    else
-    {
-        ctx->optPoolUsed = off; /* roll the partial list back */
-    }
+    return (stored == cnt) ? cnt : 0;
+}
+
+/* сброс потока перед новым листингом */
+void proto_listing_begin(ProtoCtx *ctx)
+{
+    memset(ctx->seenMap, 0, sizeof(ctx->seenMap));
+    ctx->liveCount = 0;
+    ctx->maxId = 0;
 }
 
 void proto_parse_line(ProtoCtx *ctx, char *s)
@@ -625,8 +573,13 @@ void proto_parse_line(ProtoCtx *ctx, char *s)
     char *vend;
     char *t;
     char valBuf[48];
-    SkeParam *p;
+    SkeParam cur;   /* транзит: строка -> on_param, в контексте не живёт */
     uint8_t k;
+
+    memset(&cur, 0, sizeof(cur));
+    ctx->optLabel[0] = NULL;
+    ctx->optScratch[0] = 0;
+    ctx->strVal[0] = 0;
 
     while (len && (s[len - 1] == '\r' || s[len - 1] == '\n'))
         s[--len] = 0;
@@ -663,12 +616,12 @@ void proto_parse_line(ProtoCtx *ctx, char *s)
         sec = strchr(path, '/');
         if (sec && sec < last)
         {
-            char *end;
+            char *end2;
             uint8_t sid;
             sec++;
-            end = strchr(sec, '/');
-            if (end)
-                *end = 0;
+            end2 = strchr(sec, '/');
+            if (end2)
+                *end2 = 0;
             sid = add_named(ctx, sec);
             ctx->curSection = sid;
             if (sid && proto_section_index_of(ctx, sid) < 0 &&
@@ -711,21 +664,20 @@ void proto_parse_line(ProtoCtx *ctx, char *s)
                               eol[-1] == '~'))
             *--eol = 0;
         proto_rusify(name);
-        p = &ctx->params[id];
+        cur.type = SKT_CMD;
+        cur.present = true;
+        cur.updated = ctx->nowMs;
         if (ctx->inListing)
         {
-            strncpy(p->name, name, SKE_NAME_LEN - 1);
-            p->name[SKE_NAME_LEN - 1] = 0;
-            p->section = ctx->curSection;
-            p->groupLvl = owner;
-            p->group = (owner < sizeof(ctx->hdrName)) ? ctx->hdrName[owner]
-                                                      : ctx->curGroup;
-            p->tab2 = (owner >= 2) ? ctx->hdrName[2] : 0;
+            strncpy(cur.name, name, SKE_NAME_LEN - 1);
+            cur.name[SKE_NAME_LEN - 1] = 0;
+            cur.section = ctx->curSection;
+            cur.groupLvl = owner;
+            cur.group = (owner < sizeof(ctx->hdrName))
+                            ? ctx->hdrName[owner] : ctx->curGroup;
+            cur.tab2 = (owner >= 2) ? ctx->hdrName[2] : 0;
         }
-        p->type = SKT_CMD;
-        p->present = true;
-        p->updated = ctx->nowMs;
-        return;
+        goto emit;
     }
 
     if (!eq || type == 0xFF)
@@ -765,20 +717,13 @@ void proto_parse_line(ProtoCtx *ctx, char *s)
     strncpy(valBuf, tail, sizeof(valBuf) - 1);
     valBuf[sizeof(valBuf) - 1] = 0;
 
-    p = &ctx->params[id];
-    p->type = type;
+    cur.type = type;
 
-    /* options live in the meter's flash: store them on the FIRST listing
-     * that brings them; re-listings only refresh values - re-storing
-     * would append pool duplicates until overflow */
-    if (ctx->inListing && !p->optCnt && range &&
-        (type == SKT_BOOL || type == SKT_ENUM))
-    {
-        p->optCnt = 0;
-        p->optPool = 0;
-        store_options(ctx, p, range);
-    }
-    else if (ctx->inListing && range && strstr(range, ".."))
+    /* опции/границы заново на каждом листинге: строка самодостаточна,
+     * копить в пуле больше нечего (дерево пишет tree_store) */
+    if (range && (type == SKT_BOOL || type == SKT_ENUM))
+        cur.optCnt = store_options(ctx, range);
+    else if (range && strstr(range, ".."))
     {
         char *dot = strstr(range, "..");
         char *loS, *hiS;
@@ -793,13 +738,13 @@ void proto_parse_line(ProtoCtx *ctx, char *s)
         {
             float lo = (float)strtod(loS, NULL);
             float hi = (float)strtod(hiS, NULL);
-            memcpy(&p->minv, &lo, 4);
-            memcpy(&p->maxv, &hi, 4);
+            memcpy(&cur.minv, &lo, 4);
+            memcpy(&cur.maxv, &hi, 4);
         }
         else
         {
-            p->minv = (uint32_t)strtol(loS, NULL, 10);
-            p->maxv = (uint32_t)strtol(hiS, NULL, 10);
+            cur.minv = (uint32_t)strtol(loS, NULL, 10);
+            cur.maxv = (uint32_t)strtol(hiS, NULL, 10);
         }
     }
 
@@ -808,48 +753,50 @@ void proto_parse_line(ProtoCtx *ctx, char *s)
 
     if (ctx->inListing)
     {
-        strncpy(p->name, name, SKE_NAME_LEN - 1);
-        p->name[SKE_NAME_LEN - 1] = 0;
-        p->readOnly = ro;
-        p->section = ctx->curSection;
-        p->groupLvl = owner;
-        p->group = (owner < sizeof(ctx->hdrName)) ? ctx->hdrName[owner]
-                                                  : ctx->curGroup;
+        strncpy(cur.name, name, SKE_NAME_LEN - 1);
+        cur.name[SKE_NAME_LEN - 1] = 0;
+        cur.readOnly = ro;
+        cur.section = ctx->curSection;
+        cur.groupLvl = owner;
+        cur.group = (owner < sizeof(ctx->hdrName)) ? ctx->hdrName[owner]
+                                                   : ctx->curGroup;
         /* the owning L2 menu comes from the header walk (parents precede
          * children there); parameter order alone cannot recover it */
-        p->tab2 = (owner >= 2) ? ctx->hdrName[2] : 0;
+        cur.tab2 = (owner >= 2) ? ctx->hdrName[2] : 0;
     }
     else
-        p->readOnly = ro;
+        cur.readOnly = ro;
 
-    p->present = (proto_type_size(type) > 0 || type == SKT_STRING);
+    cur.present = (proto_type_size(type) > 0 || type == SKT_STRING);
     if (type == SKT_STRING)
-        p->readOnly = true; /* LCD strings are never settable */
+        cur.readOnly = true; /* LCD strings are never settable */
     if (!strncmp(valBuf, "******", 6))
-        p->masked = true; /* password U32s are always shown masked */
+        cur.masked = true; /* password U32s are always shown masked */
     else
     {
-        p->masked = false;
+        cur.masked = false;
         if (type == SKT_STRING)
-            store_string(ctx, p, valBuf);
+        {
+            store_string(ctx, valBuf);
+            /* строковое значение едет как "опция 0": optLabel[0] обязан
+             * указывать на strVal, иначе tree_write ловит strlen(NULL) */
+            ctx->optLabel[0] = ctx->strVal;
+            cur.optCnt = 1;
+        }
         else if (type == SKT_BOOL || type == SKT_ENUM)
         {
             /* the display value is the option label: match it back to
-             * the index through the (rusified) pool */
-            uint32_t v = p->value;
-            char tmp[44];
+             * the index through the scratch labels */
+            uint32_t v = cur.value;
             bool matched = false;
-            if (p->optCnt)
+            if (cur.optCnt)
             {
-                for (k = 0; k < p->optCnt; k++)
+                for (k = 0; k < cur.optCnt; k++)
                 {
-                    const char *o = proto_opt_text(ctx, p, k);
+                    const char *o = ctx->optLabel[k];
                     if (!o)
                         break;
-                    strncpy(tmp, o, sizeof(tmp) - 1);
-                    tmp[sizeof(tmp) - 1] = 0;
-                    proto_rusify(tmp); /* pool entries are pre-rusified; idempotent */
-                    if (!strcmp(tmp, valBuf))
+                    if (!strcmp(o, valBuf))
                     {
                         v = k;
                         matched = true;
@@ -857,13 +804,34 @@ void proto_parse_line(ProtoCtx *ctx, char *s)
                     }
                 }
             }
-            if (matched || !p->optCnt)
-                p->value = p->optCnt ? v : (uint32_t)strtoul(valBuf, NULL, 10);
+            if (matched || !cur.optCnt)
+                cur.value = cur.optCnt ? v
+                                       : (uint32_t)strtoul(valBuf, NULL, 10);
         }
         else
-            p->value = text_to_raw(p, valBuf);
+            cur.value = text_to_raw(&cur, valBuf);
     }
-    p->updated = ctx->nowMs;
+    cur.updated = ctx->nowMs;
+
+emit:
+    if (ctx->inListing)
+    {
+        if (ctx->on_param)
+            ctx->on_param(ctx, (uint16_t)id, &cur);
+        {
+            uint16_t byte = (uint16_t)(id >> 3);
+            uint16_t bit = (uint16_t)(1u << (id & 7));
+            if (!(ctx->seenMap[byte] & bit))
+            {
+                ctx->seenMap[byte] |= bit;
+                ctx->liveCount++;
+                if ((uint16_t)id > ctx->maxId)
+                    ctx->maxId = (uint16_t)id;
+            }
+        }
+    }
+    else if (ctx->on_value)
+        ctx->on_value(ctx, (uint16_t)id, cur.value);
 }
 
 /* ------------------------------------------------------------------ */
@@ -933,6 +901,7 @@ void proto_values_line(ProtoCtx *ctx, char *line)
         v->status = (uint8_t)vals_ulong(&p, f, sizeof(f), 16);
         v->setpoint = (uint8_t)vals_ulong(&p, f, sizeof(f), 16);
         v->isr = (uint8_t)vals_ulong(&p, f, sizeof(f), 16);
+        v->cfg_rev = (uint16_t)vals_ulong(&p, f, sizeof(f), 10);
         ctx->valsLine = 2; /* frame complete */
         v->updated = ctx->nowMs;
         break;

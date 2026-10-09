@@ -10,6 +10,8 @@
  */
 #include "modbus_tcp.h"
 
+#include "tree_store.h"
+
 #include <lwip/sockets.h>
 #include <string.h>
 
@@ -112,14 +114,11 @@ static uint16_t hold_read(uint16_t addr)
         uint16_t id = (addr - MB_HOLD_PARAM_BASE) >> 1;
         bool high = (addr - MB_HOLD_PARAM_BASE) & 1;
         uint16_t v = 0;
-        xSemaphoreTake(ske02_lock(), portMAX_DELAY);
-        {
-            SkeParam *p = proto_param(ske02_ctx(), id);
-            if (p && p->present && proto_type_size(p->type) > 0)
-                v = high ? (uint16_t)(p->value >> 16)
-                         : (uint16_t)(p->value & 0xFFFF);
-        }
-        xSemaphoreGive(ske02_lock());
+        TreeRec rec;
+        if (tree_get(id, &rec) && rec.p.present &&
+            proto_type_size(rec.p.type) > 0)
+            v = high ? (uint16_t)(rec.p.value >> 16)
+                     : (uint16_t)(rec.p.value & 0xFFFF);
         return v;
     }
 }
@@ -133,17 +132,15 @@ static int hold_validate(uint16_t addr)
     {
         uint16_t id = (addr - MB_HOLD_PARAM_BASE) >> 1;
         bool high = (addr - MB_HOLD_PARAM_BASE) & 1;
-        SkeParam *p;
         int rc = MB_EX_ILLEGAL_ADDRESS;
-        xSemaphoreTake(ske02_lock(), portMAX_DELAY);
-        p = proto_param(ske02_ctx(), id);
-        if (p && p->present && proto_type_size(p->type) > 0)
+        TreeRec rec;
+        if (tree_get(id, &rec) && rec.p.present &&
+            proto_type_size(rec.p.type) > 0)
         {
             rc = 0;
-            if (high && proto_type_size(p->type) < 4)
+            if (high && proto_type_size(rec.p.type) < 4)
                 rc = MB_EX_ILLEGAL_VALUE;
         }
-        xSemaphoreGive(ske02_lock());
         return rc;
     }
 }
@@ -186,14 +183,13 @@ static int hold_write(uint16_t addr, uint16_t val)
             static uint16_t pendLo[SKE_MAX_PARAMS];
             static uint16_t pendHi[SKE_MAX_PARAMS];
             static uint8_t pendWord[SKE_MAX_PARAMS];
-            SkeParam *p;
             uint8_t need;
             ske_req_t r;
             char packed[24];
             uint32_t raw;
+            TreeRec rec;
+            bool have = tree_get(id, &rec);
 
-            xSemaphoreTake(ske02_lock(), portMAX_DELAY);
-            p = proto_param(ske02_ctx(), id);
             if (!high)
             {
                 pendLo[id] = val;
@@ -204,17 +200,15 @@ static int hold_write(uint16_t addr, uint16_t val)
                 pendHi[id] = val;
                 pendWord[id] |= 2;
             }
-            need = (p && proto_type_size(p->type) == 4) ? 3 : 1;
+            need = (have && proto_type_size(rec.p.type) == 4) ? 3 : 1;
             if ((pendWord[id] & need) != need)
-            {
-                xSemaphoreGive(ske02_lock());
                 return 0; /* buffered until the pair completes */
-            }
             raw = (need == 3)
                       ? ((uint32_t)pendLo[id] | ((uint32_t)pendHi[id] << 16))
                       : pendLo[id];
-            proto_raw_to_cmd(p->type, raw, packed, sizeof(packed));
-            xSemaphoreGive(ske02_lock());
+            if (!have)
+                return MB_EX_ILLEGAL_ADDRESS;
+            proto_raw_to_cmd(rec.p.type, raw, packed, sizeof(packed));
             pendWord[id] = 0;
 
             r.cmd = SKEQ_SET;

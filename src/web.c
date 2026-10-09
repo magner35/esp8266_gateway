@@ -21,6 +21,7 @@
 #define PAGE_APP_GZ_LEN ((int)sizeof(PAGE_APP_GZ))
 #include "protocol.h"
 #include "ske02.h"
+#include "tree_store.h"
 #include "storage.h"
 #include "wifi.h"
 
@@ -288,9 +289,31 @@ static esp_err_t h_save(httpd_req_t *req)
         pass[0] = 0;
 
     storage_set_wifi(ssid, pass);
-    storage_save(storage_get());
-    DBG("web: creds for \"%s\" saved (pass %u chars)\n", ssid,
-        (unsigned)strlen(pass));
+    {
+        bool okSave = storage_save(storage_get());
+        if (!okSave)
+        {
+            /* NVS full: стираем дерево (пересоберётся листингом
+             * при загрузке) и пробуем сохранить креды ещё раз */
+            tree_wipe();
+            okSave = storage_save(storage_get());
+        }
+        DBG("web: creds for \"%s\" (pass %u chars) save %s\n", ssid,
+            (unsigned)strlen(pass), okSave ? "OK" : "FAILED");
+        if (!okSave)
+        {
+            /* без сохранённых кредов перезагрузка = снова портал;
+             * честно сообщаем об ошибке, НЕ перезагружаем */
+            httpd_resp_set_status(req, "500 Storage Error");
+            httpd_resp_set_type(req, "text/html");
+            httpd_resp_send(req,
+                "<!doctype html><html lang=\"ru\"><meta charset=\"utf-8\">"
+                "<body><h2>&#1054;&#1096;&#1080;&#1073;&#1082;&#1072; &#1089;&#1086;&#1093;&#1088;&#1072;&#1085;&#1077;&#1085;&#1080;&#1103;</h2>"
+                "<p>NVS &#1085;&#1077; &#1089;&#1084;&#1086;&#1075; &#1079;&#1072;&#1087;&#1080;&#1089;&#1072;&#1090;&#1100; &#1085;&#1072;&#1089;&#1090;&#1088;&#1086;&#1081;&#1082;&#1080;.</p>"
+                "</body></html>", 0);
+            return ESP_FAIL;
+        }
+    }
 
     /* answer first, restart after the response drains */
     snprintf(head, sizeof(head),
@@ -430,11 +453,12 @@ static esp_err_t h_api_values(httpd_req_t *req)
         httpd_resp_set_type(req, "application/json");
         off = snprintf(out, sizeof(out),
                        "{\"ok\":1,\"age\":%lu,\"link\":%d,\"ready\":%d,"
-                       "\"now\":%lu,\"ap\":%d,\"ip\":\"%s\",\"ssid\":\"%s\",\"seq\":[",
+                       "\"now\":%lu,\"cfg\":%u,\"ap\":%d,\"ip\":\"%s\",\"ssid\":\"%s\",\"seq\":[",
                        (unsigned long)((xTaskGetTickCount() * portTICK_PERIOD_MS -
                                         v->updated) / 1000),
                        link, ready,
                        (unsigned long)(xTaskGetTickCount() * portTICK_PERIOD_MS),
+                       (unsigned)v->cfg_rev,
                        portal ? 1 : 0,
                        portal ? "192.168.4.1" : "",
                        portal ? wifi_ap_ssid() : st->ssid);
@@ -471,100 +495,143 @@ static esp_err_t h_api_values(httpd_req_t *req)
     return ESP_OK;
 }
 
+/* значение параметра из записи дерева - как proto_value_text прежде */
+static void rec_value_text(const TreeRec *r, char *buf, size_t cap)
+{
+    if (cap)
+        buf[0] = 0;
+    if (r->p.type == SKT_CMD)
+        return;
+    if (!r->p.present)
+    {
+        snprintf(buf, cap, "-");
+        return;
+    }
+    if (r->p.masked)
+    {
+        snprintf(buf, cap, "******");
+        return;
+    }
+    if (r->p.type == SKT_STRING)
+    {
+        snprintf(buf, cap, "%s", r->opts[0] ? r->opts[0] : "");
+        return;
+    }
+    if ((r->p.type == SKT_ENUM || r->p.type == SKT_BOOL) && r->p.optCnt)
+    {
+        uint32_t v = r->p.value;
+        snprintf(buf, cap, "%s", r->opts[v < r->p.optCnt ? v : 0]);
+        return;
+    }
+    proto_raw_to_display(r->p.type, r->p.value, buf, cap);
+}
+
 static esp_err_t h_api_params(httpd_req_t *req)
 {
-    char chunk[1024];
-    char esc[128];
-    char val[64];
+    /*
+     * Тяжёлые буферы - В СТАТИКУ: локально ~2.7КБ + vsnprintf(%f)
+     * ~1.5КБ впритык на 8К стека httpd - ответ рвался посередине и
+     * сервер зависал. httpd однопоточен - статика безопасна.
+     */
+    static char chunk[1024];
+    static char esc[192];
+    static char val[64];
+    static TreeRec rec;
+    static char secs[SKE_MAX_SECTIONS][SKE_NAME_LEN];
     size_t off;
     uint16_t id;
     bool first;
+    uint8_t secNum = 0;
+    uint16_t count;
 
     httpd_resp_set_type(req, "application/json");
 
-    /*
-     * Lock discipline: the meter mutex is held ONLY around plain memory
-     * access - an httpd send under the lock can block on TCP backpressure
-     * forever, stalling the meter task and killing the console polling.
-     */
+    /* секции: имена записей дерева, в порядке первого появления */
+    count = tree_count();
+    static char menus[2048];
+    tree_menus_load(menus, sizeof(menus));
     {
-        size_t off = 0;
-        xSemaphoreTake(ske02_lock(), portMAX_DELAY);
+        for (id = 0; id < count && secNum < SKE_MAX_SECTIONS; id++)
         {
-            ProtoCtx *ctx = ske02_ctx();
-            uint8_t s;
-            off += snprintf(chunk + off, sizeof(chunk) - off,
-                            "{\"count\":%u,\"sections\":[",
-                            (unsigned)ctx->count);
-            for (s = 0; s < ctx->sectionNum; s++)
+            uint8_t f;
+            if (!tree_get(id, &rec) || !rec.section)
+                continue;
+            const char *sn = tree_menu_name(menus, rec.section);
+            for (f = 0; f < secNum; f++)
+                if (!strcmp(secs[f], sn))
+                    break;
+            if (f == secNum && sn[0])
             {
-                json_escape(proto_section_name(ctx, s), esc, sizeof(esc));
-                off += snprintf(chunk + off, sizeof(chunk) - off,
-                                "%s\"%s\"", s ? "," : "", esc);
+                strncpy(secs[secNum], sn, SKE_NAME_LEN - 1);
+                secs[secNum][SKE_NAME_LEN - 1] = 0;
+                secNum++;
             }
-            off += snprintf(chunk + off, sizeof(chunk) - off,
-                            "],\"params\":[");
         }
-        xSemaphoreGive(ske02_lock());
-        httpd_resp_send_chunk(req, chunk, off);
     }
 
-    first = true;
-    for (id = 0; id < ske02_ctx()->count; id++)
+    off = snprintf(chunk, sizeof(chunk), "{\"count\":%u,\"sections\":[",
+                   (unsigned)count);
+    for (uint8_t f = 0; f < secNum; f++)
     {
-        SkeParam *p;
+        json_escape(secs[f], esc, sizeof(esc));
+        off += snprintf(chunk + off, sizeof(chunk) - off, "%s\"%s\"",
+                        f ? "," : "", esc);
+    }
+    off += snprintf(chunk + off, sizeof(chunk) - off, "],\"params\":[");
+    httpd_resp_send_chunk(req, chunk, off);
+
+    first = true;
+    for (id = 0; id < count; id++)
+    {
         uint8_t sz;
-        uint32_t age;
-        xSemaphoreTake(ske02_lock(), portMAX_DELAY);
-        p = proto_param(ske02_ctx(), id);
-        if (!p || (!p->present && !p->name[0]))
-        {
-            xSemaphoreGive(ske02_lock());
+        uint8_t f;
+        int8_t sidx = -1;
+        if (!tree_get(id, &rec))
             continue;
-        }
-        sz = proto_type_size(p->type);
-        age = p->updated
-                  ? (xTaskGetTickCount() * portTICK_PERIOD_MS - p->updated) /
-                        1000
-                  : 0xFFFF;
+        if (!rec.p.present && !rec.p.name[0])
+            continue;
+        sz = proto_type_size(rec.p.type);
+
         off = snprintf(chunk, sizeof(chunk), "%s{\"i\":%u,\"t\":%u,\"r\":%lu",
-                       first ? "" : ",", (unsigned)id, p->type,
-                       (unsigned long)p->value);
-        json_escape(p->name, esc, sizeof(esc));
+                       first ? "" : ",", (unsigned)id, rec.p.type,
+                       (unsigned long)rec.p.value);
+        json_escape(rec.p.name, esc, sizeof(esc));
         off += snprintf(chunk + off, sizeof(chunk) - off, ",\"n\":\"%s\"", esc);
-        off += snprintf(chunk + off, sizeof(chunk) - off, ",\"s\":%d",
-                        (int)proto_section_index_of(ske02_ctx(), p->section));
-        json_escape(proto_group_name(ske02_ctx(), p->group), esc, sizeof(esc));
+        const char *sn = tree_menu_name(menus, rec.section);
+        for (f = 0; f < secNum; f++)
+            if (!strcmp(secs[f], sn))
+            {
+                sidx = (int8_t)f;
+                break;
+            }
+        off += snprintf(chunk + off, sizeof(chunk) - off, ",\"s\":%d", sidx);
+        json_escape(tree_menu_name(menus, rec.group), esc, sizeof(esc));
         off += snprintf(chunk + off, sizeof(chunk) - off, ",\"g\":\"%s\"", esc);
         off += snprintf(chunk + off, sizeof(chunk) - off, ",\"gl\":%u",
-                        p->groupLvl);
-        json_escape(p->tab2 ? proto_group_name(ske02_ctx(), p->tab2) : "", esc,
-                    sizeof(esc));
+                        rec.p.groupLvl);
+        json_escape(tree_menu_name(menus, rec.tab2), esc, sizeof(esc));
         off += snprintf(chunk + off, sizeof(chunk) - off, ",\"tb\":\"%s\"", esc);
-        proto_value_text(ske02_ctx(), id, val, sizeof(val));
+        rec_value_text(&rec, val, sizeof(val));
         json_escape(val, esc, sizeof(esc));
         off += snprintf(chunk + off, sizeof(chunk) - off, ",\"v\":\"%s\"", esc);
         off += snprintf(chunk + off, sizeof(chunk) - off,
                         ",\"w\":%d,\"cx\":%d,\"m\":%d",
-                        (p->present && !p->readOnly && sz > 0) ? 1 : 0,
-                        p->type == SKT_CMD ? 1 : 0, p->masked ? 1 : 0);
-        proto_bound_text(p, false, val, sizeof(val));
+                        (rec.p.present && !rec.p.readOnly && sz > 0) ? 1 : 0,
+                        rec.p.type == SKT_CMD ? 1 : 0, rec.p.masked ? 1 : 0);
+        proto_bound_text(&rec.p, false, val, sizeof(val));
         json_escape(val, esc, sizeof(esc));
         off += snprintf(chunk + off, sizeof(chunk) - off, ",\"lo\":\"%s\"", esc);
-        proto_bound_text(p, true, val, sizeof(val));
+        proto_bound_text(&rec.p, true, val, sizeof(val));
         json_escape(val, esc, sizeof(esc));
         off += snprintf(chunk + off, sizeof(chunk) - off, ",\"hi\":\"%s\"", esc);
         off += snprintf(chunk + off, sizeof(chunk) - off, ",\"o\":[");
-        for (uint8_t k = 0; k < p->optCnt; k++)
+        for (uint8_t k = 0; k < rec.p.optCnt; k++)
         {
-            const char *o = proto_opt_text(ske02_ctx(), p, k);
-            json_escape(o ? o : "", esc, sizeof(esc));
+            json_escape(rec.opts[k] ? rec.opts[k] : "", esc, sizeof(esc));
             off += snprintf(chunk + off, sizeof(chunk) - off, "%s\"%s\"",
                             k ? "," : "", esc);
         }
-        off += snprintf(chunk + off, sizeof(chunk) - off, "],\"a\":%lu}",
-                        (unsigned long)age);
-        xSemaphoreGive(ske02_lock());
+        off += snprintf(chunk + off, sizeof(chunk) - off, "],\"a\":0}");
         first = false;
         httpd_resp_send_chunk(req, chunk, off);
     }
@@ -684,17 +751,16 @@ static esp_err_t h_api_set(httpd_req_t *req)
     }
 
     /* UI text -> packed console value, then queue the 's' command */
-    xSemaphoreTake(ske02_lock(), portMAX_DELAY);
     {
-        bool ok = proto_input_to_raw(ske02_ctx(), (uint16_t)atoi(ids), vtext,
-                                     &raw, err, sizeof(err));
-        SkeParam *p = proto_param(ske02_ctx(), (uint16_t)atoi(ids));
-        if (ok && p)
-            proto_raw_to_cmd(p->type, raw, packed, sizeof(packed));
+        static TreeRec rec;
+        bool ok = tree_get((uint16_t)atoi(ids), &rec) &&
+                  proto_input_to_raw_rec(&rec.p, rec.opts, vtext,
+                                         &raw, err, sizeof(err));
+        if (ok)
+            proto_raw_to_cmd(rec.p.type, raw, packed, sizeof(packed));
         else
             packed[0] = 0;
     }
-    xSemaphoreGive(ske02_lock());
     if (!packed[0])
     {
         ske_req_t bad;
@@ -709,9 +775,12 @@ static esp_err_t h_api_set(httpd_req_t *req)
     r.text[sizeof(r.text) - 1] = 0;
     ske02_request(&r, 15000);
 
-    xSemaphoreTake(ske02_lock(), portMAX_DELAY);
-    proto_value_text(ske02_ctx(), r.id, val, sizeof(val));
-    xSemaphoreGive(ske02_lock());
+    {
+        static TreeRec rec;
+        val[0] = 0;
+        if (tree_get(r.id, &rec))
+            rec_value_text(&rec, val, sizeof(val));
+    }
     return reply_ok_err(req, &r, val);
 }
 
@@ -819,10 +888,15 @@ static esp_err_t h_api_widgets_set(httpd_req_t *req)
     buf[len] = 0;
     if (!widgets_store(buf, (size_t)len))
     {
-        free(buf);
-        httpd_resp_set_status(req, "500 Internal Server Error");
-        httpd_resp_send(req, "{\"ok\":false}", 12);
-        return ESP_FAIL;
+        /* NVS full: освобождаем место деревом (пересоберётся) */
+        tree_wipe();
+        if (!widgets_store(buf, (size_t)len))
+        {
+            free(buf);
+            httpd_resp_set_status(req, "500 Internal Server Error");
+            httpd_resp_send(req, "{\"ok\":false}", 12);
+            return ESP_FAIL;
+        }
     }
     free(buf);
     httpd_resp_send(req, "{\"ok\":true}", 11);

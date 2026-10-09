@@ -23,10 +23,11 @@
 
 #include "debug.h"
 #include "protocol.h"
+#include "tree_store.h"
 
 #define SKE_UART_NUM      UART_NUM_0
 #define SKE_UART_BAUD     115200
-#define SKE_UART_RX_BUF   1024
+#define SKE_UART_RX_BUF   4096  /* стирание flash подвешивает CPU при NVS-записях листинга */
 #define SKE_CMD_TIMEOUT   pdMS_TO_TICKS(1200)
 #define SKE_LIST_TIMEOUT  pdMS_TO_TICKS(15000)
 #define SKE_WAKE_PERIOD   pdMS_TO_TICKS(200)
@@ -262,30 +263,100 @@ static void text_start(void)
     xSemaphoreGive(sLock);
 }
 
+/*
+ * Приём листинга ДВУМЯ ФАЗАМИ:
+ *   фаза 1 - весь листинг (13КБ) читается в буфер КУЧИ: никакого
+ *             парсинга и NVS во время приёма, UART не теряет
+ *             строки на flash-подвисаниях;
+ *   фаза 2 - парсинг из буфера + потоковая запись в NVS: тут
+ *             подвисания flash уже ничему не мешают.
+ * Прежняя однопроходная схема теряла строки (запись в NVС прямо
+ * во время чтения) и с "коммитом только полного листинга"
+ * навсегда застревала в ретраях без повторной команды 'l'.
+ */
 static bool capture_listing(TickType_t timeout)
 {
     char line[512];
-    bool ok;
+    bool ok = false;
+    size_t len = 0;
+    /*
+     * Буфер в КУЧЕ, НО с деградацией: если целый 14К не выделился,
+     * пробуем меньше (10К/6К) - листинг 13К влезет не весь, но
+     * capture честно провалится и повторится, НО приём идёт и
+     * UART не теряет данные. Кучу НЕ держим: free сразу после фазы 2.
+     * Статику не используем: 14К навсегда - RAM нет.
+     */
+    char *buf = malloc(14 * 1024);
+    size_t bufSz = 14 * 1024;
+    while (!buf && bufSz > 4096)
+    {
+        bufSz -= 2048;
+        buf = malloc(bufSz);
+    }
+    if (!buf)
+        return false;
+
     proto_prompt_reset(&sCtx);
+
+    /* фаза 1: чистый приём в буфер */
     for (;;)
     {
         int rc = read_line_until_prompt(line, sizeof(line), timeout);
         if (rc == 0)
-        {
-            ok = false;
-            break;
-        }
+            break;         /* таймаут */
         if (rc == 2)
-            line_to_parser(line);
+        {
+            size_t n = strlen(line);
+            if (len + n + 2 <= bufSz)
+            {
+                memcpy(buf + len, line, n);
+                len += n;
+                buf[len++] = '\n';
+            }
+        }
         if (rc == 1)
         {
-            ok = true;
+            ok = true;     /* промпт = листинг принят целиком */
             break;
         }
     }
-    xSemaphoreTake(sLock, portMAX_DELAY);
-    sCtx.inListing = false;
-    xSemaphoreGive(sLock);
+
+    if (ok)
+    {
+        /* фаза 2: парсинг + NVS уже без давления на UART */
+        proto_listing_begin(&sCtx);
+        tree_begin();
+        {
+            char *p = buf;
+            char *end = buf + len;
+            while (p < end)
+            {
+                char *nl = memchr(p, '\n', (size_t)(end - p));
+                size_t n = nl ? (size_t)(nl - p) : (size_t)(end - p);
+                if (n >= sizeof(line))
+                    n = sizeof(line) - 1;
+                memcpy(line, p, n);
+                line[n] = 0;
+                line_to_parser(line);
+                p = nl ? nl + 1 : end;
+            }
+        }
+        xSemaphoreTake(sLock, portMAX_DELAY);
+        sCtx.inListing = false;
+        xSemaphoreGive(sLock);
+        /* полный ли листинг? (count из 'i'; иначе - провал/ретрай) */
+        if (sCtx.liveCount &&
+            sCtx.liveCount >= (sCtx.count ? sCtx.count * 9 / 10
+                                          : sCtx.liveCount))
+            tree_commit(&sCtx, sCtx.liveCount);
+        else
+        {
+            tree_abort();
+            ok = false;
+        }
+    }
+
+    free(buf);
     if (ok)
         sLastOk = xTaskGetTickCount();
     return ok;
@@ -301,61 +372,66 @@ static void values_cb(char *line, void *user)
 }
 
 /*
+ * Кэш единиц "Единицы измерения" (Расход/Период/Объём/Общий):
+ * enum-индексы собираются ПОТОКОМ во время листинга (on_param) -
+ * сканировать дерево на каждом кадре 'm' больше не нужно (его в ОЗУ
+ * и нет - оно в NVS). Индекс = множитель (settings.c прибора).
+ */
+static float sU_mlPerRate = 1000.0f;
+static float sU_tb = 60.0f;
+static float sU_totDiv = 1000.0f;
+static float sU_gtotDiv = 1000.0f;
+
+static void units_note(const SkeParam *p)
+{
+    static const float P3[4] = {1.0f, 1000.0f, 1000000.0f, 1000000.0f};
+    static const float TB[4] = {1.0f, 60.0f, 3600.0f, 3600.0f};
+    uint32_t idx = p->value;
+    if (p->type != SKT_ENUM)
+        return;
+    if (!strcmp(p->name, "Расход"))
+        sU_mlPerRate = P3[idx < 4 ? idx : 1];
+    else if (!strcmp(p->name, "Период"))
+        sU_tb = TB[idx < 4 ? idx : 1];
+    else if (!strcmp(p->name, "Объём"))
+        sU_totDiv = P3[idx < 4 ? idx : 1];
+    else if (!strcmp(p->name, "Общий"))
+        sU_gtotDiv = P3[idx < 4 ? idx : 1];
+}
+
+/*
  * Новый кадр 'm' прибора несёт только ml-базис (rateMLPM мл/мин,
  * totalml_*, gtotalml). Производные в единицах прибора считаем тут
  * по тем же формулам, что раньше считал сам прибор (settings.c):
  *   rate = rateMLPM x [сек/периода] / (60 x [мл на ед. расхода])
  *   total_* = totalml_* / 1000^ед, gtotal = gtotalml / 1000^ед
- * Единицы берём из дерева параметров: enum-индексы "Единицы
- * измерения" (Расход/Объём/Общий/Период) — индекс есть множитель.
  * Множитель K-фактора и коррекция уже встроены в rateMLPM.
  */
 static void vals_derive(ProtoCtx *ctx)
 {
     SkeValues *v = &ctx->vals;
-    float ml_per_rate = 1000.0f;   /* л по умолчанию */
-    float tb = 60.0f;              /* за минуту */
-    float tot_div = 1000.0f;
-    float gtot_div = 1000.0f;
-    static const float P3[4] = {1.0f, 1000.0f, 1000000.0f, 1000000.0f};
-    static const float TB[4] = {1.0f, 60.0f, 3600.0f, 3600.0f};
-    int i;
 
-    for (i = 0; i < ctx->count && i < SKE_MAX_PARAMS; i++)
-    {
-        SkeParam *p = &ctx->params[i];
-        uint32_t idx = p->value;
-        if (p->type != SKT_ENUM)
-            continue;
-        if (!strcmp(p->name, "Расход"))
-            ml_per_rate = P3[idx < 4 ? idx : 1];
-        else if (!strcmp(p->name, "Период"))
-            tb = TB[idx < 4 ? idx : 1];
-        else if (!strcmp(p->name, "Объём"))
-            tot_div = P3[idx < 4 ? idx : 1];
-        else if (!strcmp(p->name, "Общий"))
-            gtot_div = P3[idx < 4 ? idx : 1];
-    }
-
-    {
-        static bool sLogged;
-        if (!sLogged)
-        {
-            sLogged = true;
-            DBG("ske02: units rate 1/%.0f ml, per %.0fs, vol 1/%.0f, gvol 1/%.0f\n",
-                (double)ml_per_rate, (double)tb,
-                (double)tot_div, (double)gtot_div);
-        }
-    }
-
-    v->rate = v->rateMLPM * tb / (60.0f * ml_per_rate);
+    v->rate = v->rateMLPM * sU_tb / (60.0f * sU_mlPerRate);
     v->rate_raw = v->rate;
     v->rate_fast = v->rate;
-    v->total_plus = v->totalml_plus / tot_div;
-    v->total_minus = v->totalml_minus / tot_div;
+    v->total_plus = v->totalml_plus / sU_totDiv;
+    v->total_minus = v->totalml_minus / sU_totDiv;
     v->total = v->total_plus - v->total_minus;
     v->total_sum = v->total_plus + v->total_minus;
-    v->gtotal = v->gtotalml / gtot_div;
+    v->gtotal = v->gtotalml / sU_gtotDiv;
+}
+
+/* потоковые хуки парсера: параметр листинга -> NVS (+кэш единиц) */
+static void on_tree_param(ProtoCtx *ctx, uint16_t id, const SkeParam *p)
+{
+    units_note(p);
+    tree_write(id, ctx, p);
+}
+
+static void on_tree_value(ProtoCtx *ctx, uint16_t id, uint32_t raw)
+{
+    (void)ctx;
+    tree_set_value(id, raw);
 }
 
 /*
@@ -535,7 +611,6 @@ static void exec_request(ske_req_t *req)
 {
     char cmd[64];
     reply_ctx_t rc_;
-    SkeParam *p;
 
     memset(&rc_, 0, sizeof(rc_));
     req->err[0] = 0;
@@ -545,13 +620,13 @@ static void exec_request(ske_req_t *req)
     switch (req->cmd)
     {
     case SKEQ_SET:
-        xSemaphoreTake(sLock, portMAX_DELAY);
-        p = proto_param(&sCtx, req->id);
-        xSemaphoreGive(sLock);
-        if (!p)
         {
-            req->result = BS_BAD_ID;
-            break;
+            TreeRec rec;
+            if (!tree_get(req->id, &rec) || !rec.p.present)
+            {
+                req->result = BS_BAD_ID;
+                break;
+            }
         }
         /* the text is the packed console value already (proto_raw_to_cmd) */
         snprintf(cmd, sizeof(cmd), "s %u %s", (unsigned)req->id, req->text);
@@ -727,7 +802,33 @@ static void meter_task(void *arg)
                 if (ske_query_values())
                 {
                     static TickType_t lastBeat;
+                    static uint16_t sCfgRev;
+                    static TickType_t sLastRelist;
                     sMisses = 0;
+                    /* смена версии настроек в кадре 'm' => параметры
+                     * меняли (консоль 'S' или меню панели) - перечиты-
+                     * ваем листинг. ДЕБАУНС 10с: перечитывание на 1-2с
+                     * замораживает опрос значений и грузит CPU - при
+                     * частых правках это тормозило шлюз; пропущенные
+                     * версии догоняются следующим изменением */
+                    if (sCtx.vals.cfg_rev &&
+                        sCtx.vals.cfg_rev != sCfgRev)
+                    {
+                        TickType_t nowT = xTaskGetTickCount();
+                        sCfgRev = sCtx.vals.cfg_rev;
+                        if (sLastRelist == 0 ||
+                            nowT - sLastRelist >= pdMS_TO_TICKS(10000))
+                        {
+                            sLastRelist = nowT;
+                            DBG("ske02: cfg rev %u -> relisting\n",
+                                (unsigned)sCtx.vals.cfg_rev);
+                            text_start();
+                            sState = ST_LIST;
+                            break;
+                        }
+                        DBG("ske02: cfg rev %u (debounced)\n",
+                            (unsigned)sCtx.vals.cfg_rev);
+                    }
                     if (sLastOk - lastBeat >= pdMS_TO_TICKS(10000))
                     {
                         lastBeat = sLastOk;
@@ -770,9 +871,15 @@ void ske02_uart_setup(void)
 
 void ske02_start(void)
 {
+    tree_init();
     ske02_valring_init();
     ske02_uart_setup();
     proto_init(&sCtx);
+    /* хуки СТРОГО ПОСЛЕ proto_init: он делает memset всего контекста
+     * и затирал on_param/on_value - парсер.emitтил в NULL, дерево
+     * не писалось (wrote 0, err 0) при живом коммите */
+    sCtx.on_param = on_tree_param;
+    sCtx.on_value = on_tree_value;
     sLock = xSemaphoreCreateMutex();
     sReqMutex = xSemaphoreCreateMutex();
     sReqDone = xSemaphoreCreateBinary();

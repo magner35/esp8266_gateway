@@ -258,6 +258,7 @@ function portalBanner(ap, ssid, ip) {
 }
 
 let lastSeqT = 0;      /* серверный ts последнего проигранного снимка */
+let lastCfg = null;    /* версия настроек прибора из кадра 'm' */
 let replayTimers = [];
 
 /* пачка снимков за секунду опроса СК-Э -> проиграть равномерно
@@ -310,6 +311,12 @@ async function pollLoop() {
     }
     portalMode = !!d.ap;
     portalBanner(d.ap, d.ssid, d.ip);
+    /* смена версии настроек прибора (меняли через меню/консоль СК-Э):
+     * шлюз сам перечитывает дерево, мы - сразу подтягиваем параметры */
+    if (d.cfg !== undefined && d.cfg !== lastCfg) {
+      if (lastCfg !== null) paramsTick();
+      lastCfg = d.cfg;
+    }
     if (d.ok) replaySeq(d.seq, Date.now() - (d.now || Date.now()));
   } catch (e) { }
   pollRtt = Date.now() - t0;

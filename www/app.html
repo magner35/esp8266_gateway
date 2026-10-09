@@ -1835,6 +1835,7 @@ function portalBanner(ap, ssid, ip) {
   } else if (b) b.remove();
 }
 let lastSeqT = 0;      
+let lastCfg = null;    
 let replayTimers = [];
 function replaySeq(seq, off) {
   for (const t of replayTimers) clearTimeout(t);
@@ -1879,6 +1880,10 @@ async function pollLoop() {
     }
     portalMode = !!d.ap;
     portalBanner(d.ap, d.ssid, d.ip);
+    if (d.cfg !== undefined && d.cfg !== lastCfg) {
+      if (lastCfg !== null) paramsTick();
+      lastCfg = d.cfg;
+    }
     if (d.ok) replaySeq(d.seq, Date.now() - (d.now || Date.now()));
   } catch (e) { }
   pollRtt = Date.now() - t0;

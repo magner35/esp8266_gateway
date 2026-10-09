@@ -2,10 +2,12 @@
 #define GW_PROTOCOL_H
 
 /*
- * Pure C core of the SKE-02 service console client: parameter cache,
- * listing/value line parser, Cyrillic homoglyph restore, prompt matcher,
- * live values ('m' CSV frames). Freestanding - no SDK includes, so the
- * host test bench compiles the SAME source (single source of truth).
+ * Pure C core of the SKE-02 service console client: listing parser
+ * (STREAMING: параметр за параметром через on_param - дерево не
+ * копится в ОЗУ, константная часть уходит в NVS через tree_store),
+ * value line parser, Cyrillic homoglyph restore, prompt matcher,
+ * live values ('m' CSV frames). Freestanding - no SDK includes, so
+ * the host test bench compiles the SAME source.
  *
  * The console protocol (include/console.h of the firmware repo):
  *   commands ? l g s x p k w d i e r, CR/LF terminated
@@ -15,7 +17,7 @@
  *      or the [v1|v2|..] enum/bool option list; command items are
  *      "<id> CMD <name>" without a value
  *   s  values: numbers only, TIME packed as HHMM, DATE as DDMMYY
- *   m  machine data: MeterData_t as three CSV lines, bitwise members in hex
+ *   m  machine data: MeterData_t as CSV, bitwise members in hex
  */
 
 #include <stdbool.h>
@@ -51,8 +53,8 @@ enum
 #define SKE_MENU_LEN      44   /* one pool for L1 sections and submenus */
 #define SKE_MAX_MENUS     40
 #define SKE_MAX_SECTIONS  12   /* L1 sections tracked in order */
-#define SKE_OPT_POOL      3584 /* NUL-separated enum/bool option labels */
 #define SKE_OPT_MAX       16   /* options per parameter */
+#define SKE_OPT_SCRATCH   512  /* labels of the CURRENT param only */
 #define SKE_PROMPT        "SKE02> "
 
 typedef struct
@@ -62,13 +64,12 @@ typedef struct
     uint32_t minv;    /* raw numeric range, both 0 when not reported */
     uint32_t maxv;
     uint32_t updated; /* timestamp of the last refresh, 0 = never */
-    uint16_t optPool; /* offset into the option pool + 1, 0 = none */
     uint8_t optCnt;   /* enum/bool option count */
     uint8_t type;     /* SKT_* */
-    uint8_t section;  /* L1 submenu index */
-    uint8_t group;    /* nearest submenu of any depth */
+    uint8_t section;  /* L1 submenu pool id */
+    uint8_t group;    /* nearest submenu pool id */
     uint8_t groupLvl; /* level of the owning submenu (L1=1, L2=2, ...) */
-    uint8_t tab2;     /* owning L2 submenu (the tab), 0 = section root */
+    uint8_t tab2;     /* owning L2 submenu pool id, 0 = section root */
     bool present;
     bool readOnly;
     bool masked;      /* password U32, shown as ****** by the console */
@@ -83,20 +84,21 @@ typedef struct
     float kf_value, batch;
     uint32_t pulses_packet, pulses;
     uint8_t status, setpoint, isr;
+    uint16_t cfg_rev;  /* версия настроек прибора (7-е поле кадра 'm') */
     uint32_t updated; /* 0 = no frame yet */
 } SkeValues;
 
 /*
- * The whole protocol state in one plain struct, owned by the meter task
- * and read by the web/modbus tasks under its mutex.
+ * Protocol state. Худой: массив параметров и пул опций БОЛЬШЕ не
+ * живут здесь - парсер отдаёт каждый параметр в on_param (владелец
+ * пишет его в NVS), значения вне листинга - в on_value. Здесь только
+ * меню-пул (нужен парсеру для секций), живые значения и скрэтч
+ * опций текущего параметра.
  */
-typedef struct
+typedef struct ProtoCtx
 {
-    SkeParam params[SKE_MAX_PARAMS];
     char menus[SKE_MAX_MENUS][SKE_MENU_LEN]; /* L1 sections + submenus */
     uint16_t menuCount;
-    char optPool[SKE_OPT_POOL];
-    uint16_t optPoolUsed;
     uint16_t count;      /* parameter count from 'i' */
     char version[20];
     uint8_t sectionIds[SKE_MAX_SECTIONS]; /* pool ids of L1 menus, in order */
@@ -116,12 +118,23 @@ typedef struct
 
     /* timestamp source, set by the owner before each parse pass */
     uint32_t nowMs;
+
+    /* потоковый выход парсера */
+    void (*on_param)(struct ProtoCtx *, uint16_t id, const SkeParam *p);
+    void (*on_value)(struct ProtoCtx *, uint16_t id, uint32_t raw);
+    char optScratch[SKE_OPT_SCRATCH];      /* метки опций текущ. парам. */
+    const char *optLabel[SKE_OPT_MAX + 1]; /* указатели в optScratch */
+    char strVal[SKE_NAME_LEN];             /* SKT_STRING значение */
+    uint8_t seenMap[(SKE_MAX_PARAMS + 7) / 8]; /* id, встреченные в листинге */
+    uint16_t liveCount;                    /* сколько разных id видели */
+    uint16_t maxId;
 } ProtoCtx;
 
 void proto_init(ProtoCtx *ctx);
 void proto_reset(ProtoCtx *ctx); /* full wipe (rescan) */
 
 void proto_parse_line(ProtoCtx *ctx, char *line);   /* one 'l'/'g'/'s' line */
+void proto_listing_begin(ProtoCtx *ctx);            /* reset stream counters */
 void proto_values_line(ProtoCtx *ctx, char *line);  /* one 'm' CSV line */
 void proto_values_restart(ProtoCtx *ctx);           /* before an 'm' frame */
 bool proto_values_ready(const ProtoCtx *ctx);
@@ -130,26 +143,26 @@ bool proto_values_ready(const ProtoCtx *ctx);
 void proto_prompt_reset(ProtoCtx *ctx);
 bool proto_prompt_feed(ProtoCtx *ctx, char c);
 
-/* cache accessors */
-SkeParam *proto_param(ProtoCtx *ctx, uint16_t id);
+/* menu pool accessors (ids -> names, для парсера и tree_store) */
 const char *proto_section_name(const ProtoCtx *ctx, uint8_t idx);
 int8_t proto_section_index_of(const ProtoCtx *ctx, uint8_t poolId);
 const char *proto_group_name(const ProtoCtx *ctx, uint8_t idx);
 uint8_t proto_type_size(uint8_t type);
-const char *proto_opt_text(const ProtoCtx *ctx, const SkeParam *p, uint8_t idx);
 
 /* value formatting: display text (labels, hh:mm, dd.mm.yy) */
-void proto_value_text(const ProtoCtx *ctx, uint16_t id, char *buf, size_t cap);
+void proto_raw_to_display(uint8_t type, uint32_t raw, char *buf, size_t cap);
 void proto_bound_text(const SkeParam *p, bool max, char *buf, size_t cap);
 
 /* console 's' value formatting: packed numbers (TIME=HHMM, DATE=DDMMYY),
  * floats with at most 9 significant digits */
 void proto_raw_to_cmd(uint8_t type, uint32_t raw, char *buf, size_t cap);
 
-/* UI input text -> raw u32 (composes TIME/DATE on top of the cached
- * value, clamps the rest); returns false with a message in err */
-bool proto_input_to_raw(ProtoCtx *ctx, uint16_t id, const char *text,
-                        uint32_t *raw, char *err, size_t errcap);
+/* UI input text -> raw u32 по ЗАПИСИ дерева (SkeParam из tree_get +
+ * opts - метки enum/bool; compose TIME/DATE поверх p->value, clamp);
+ * false => сообщение в err */
+bool proto_input_to_raw_rec(const SkeParam *p, const char *const *opts,
+                            const char *text, uint32_t *raw,
+                            char *err, size_t errcap);
 
 /* civil date helpers (TZ-free unix seconds <-> y/m/d) */
 void proto_civil_from_days(int32_t days, int16_t *y, uint8_t *m, uint8_t *d);

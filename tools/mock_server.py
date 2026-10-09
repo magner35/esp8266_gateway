@@ -227,6 +227,7 @@ def values(since=0):
     d = {
         "ok": True, "link": True, "ready": True,
         "now": int(now * 1000),
+        "cfg": STATE.get("cfg_rev", 1),
         "ap": ap,
         "ip": "10.0.0.1" if ap else "127.0.0.1",
         "ssid": "ske02setup-TEST" if ap else "mock",
@@ -330,6 +331,7 @@ class H(http.server.SimpleHTTPRequestHandler):
                 return
             v = f.get('v', '')
             p['v'] = v
+            STATE["cfg_rev"] = STATE.get("cfg_rev", 1) + 1
             if p['o'] and v in p['o']:
                 p['r'] = p['o'].index(v)
             self._json({"ok": True, "value": v})

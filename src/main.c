@@ -100,5 +100,5 @@ void app_main(void)
     dbg_init(); /* UART1 log + silence the SDK console on UART0 */
     xTaskCreate(boot_task, "boot", 3072, NULL, 4, NULL);
     xTaskCreate(stat_task, "stat", 2048, NULL, 2, NULL);
-    xTaskCreate(heap_watch_task, "heapw", 1536, NULL, 1, NULL);
+    xTaskCreate(heap_watch_task, "heapw", 2048, NULL, 1, NULL);
 }

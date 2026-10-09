@@ -14,3 +14,7 @@ CONFIG_LOG_DEFAULT_LEVEL_NONE=y
 # окно отправки TCP = 1 сегмент: пиковая память pbuf на соединение
 # вдвое меньше (куча ESP мала), скорости в локальной сети хватает
 CONFIG_LWIP_TCP_SND_BUF_DEFAULT=1440
+
+# дерево параметров прибора живёт в NVS: раздел 64К (partitions.csv)
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"

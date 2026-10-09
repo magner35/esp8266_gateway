@@ -1,0 +1,6 @@
+# Name,   Type, SubType, Offset,   Size, Flags
+# nvs расширен до 64К: в нём теперь и дерево параметров прибора
+# (~30К записей "по параметру"), помимо настроек и виджетов
+nvs,      data, nvs,     0x9000,   0x10000,
+phy_init, data, phy,     0x19000,  0x1000,
+factory,  app,  factory, 0x20000,  0xFE0000,
