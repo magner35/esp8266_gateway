@@ -254,6 +254,13 @@ static bool ske_info(void)
 static void text_start(void)
 {
     uart_flush_rx();
+    /*
+     * erase_all дерева ЗДЕСЬ, до отправки 'l': стирание flash
+     * подвешивает CPU на десятки мс, но UART ещё молчит - безопасно.
+     * Во время листинга страницы уже стёрты, записи идут без GC-пауз,
+     * 4К UART-буфер легко поглощает микросекундные паузы записи.
+     */
+    tree_begin();
     uart_send_line("l");
     xSemaphoreTake(sLock, portMAX_DELAY);
     sCtx.inListing = true;
@@ -278,104 +285,55 @@ static bool capture_listing(TickType_t timeout)
 {
     char line[512];
     bool ok = false;
-    size_t len = 0;
     /*
-     * Буфер в КУЧЕ, НО с деградацией: если целый 14К не выделился,
-     * пробуем меньше (10К/6К) - листинг 13К влезет не весь, но
-     * capture честно провалится и повторится, НО приём идёт и
-     * UART не теряет данные. Кучу НЕ держим: free сразу после фазы 2.
-     * Статику не используем: 14К навсегда - RAM нет.
+     * Однопроходная: читать строку -> сразу парсить -> сразу NVS.
+     * Без буфера кучи (14К malloc падал на фрагментации - хвост
+     * листинга терялся). Безопасно: tree_begin с erase_all уже
+     * отработал в text_start ДО передачи, страницы стёрты, пауз GC
+     * во время записи нет.
      */
-    char *buf = malloc(14 * 1024);
-    size_t bufSz = 14 * 1024;
-    while (!buf && bufSz > 4096)
-    {
-        bufSz -= 2048;
-        buf = malloc(bufSz);
-    }
-    if (!buf)
-        return false;
-
     proto_prompt_reset(&sCtx);
-
-    /* фаза 1: чистый приём в буфер */
+    proto_listing_begin(&sCtx);
     for (;;)
     {
         int rc = read_line_until_prompt(line, sizeof(line), timeout);
         if (rc == 0)
-            break;         /* таймаут */
+            break;             /* таймаут */
         if (rc == 2)
-        {
-            size_t n = strlen(line);
-            if (len + n + 2 <= bufSz)
-            {
-                memcpy(buf + len, line, n);
-                len += n;
-                buf[len++] = '\n';
-            }
-        }
+            line_to_parser(line);
         if (rc == 1)
         {
-            ok = true;     /* промпт = листинг принят целиком */
+            ok = true;         /* промпт: листинг принят целиком */
             break;
         }
     }
-
-    if (ok)
-    {
-        /* фаза 2: парсинг + NVS уже без давления на UART */
-        proto_listing_begin(&sCtx);
-        tree_begin();
-        {
-            char *p = buf;
-            char *end = buf + len;
-            while (p < end)
-            {
-                char *nl = memchr(p, '\n', (size_t)(end - p));
-                size_t n = nl ? (size_t)(nl - p) : (size_t)(end - p);
-                if (n >= sizeof(line))
-                    n = sizeof(line) - 1;
-                memcpy(line, p, n);
-                line[n] = 0;
-                line_to_parser(line);
-                p = nl ? nl + 1 : end;
-            }
-        }
-        xSemaphoreTake(sLock, portMAX_DELAY);
-        sCtx.inListing = false;
-        xSemaphoreGive(sLock);
-        /* полный ли листинг? (count из 'i'; иначе - провал/ретрай) */
-        if (sCtx.liveCount &&
-            sCtx.liveCount >= (sCtx.count ? sCtx.count * 9 / 10
-                                          : sCtx.liveCount))
-            tree_commit(&sCtx, sCtx.liveCount);
-        else
-        {
-            tree_abort();
-            ok = false;
-        }
-    }
-
-    free(buf);
-    if (ok)
-        sLastOk = xTaskGetTickCount();
-    return ok;
-}
-
-static void values_cb(char *line, void *user)
-{
-    (void)user;
     xSemaphoreTake(sLock, portMAX_DELAY);
-    sCtx.nowMs = (uint32_t)xTaskGetTickCount();
-    proto_values_line(&sCtx, line);
+    sCtx.inListing = false;
     xSemaphoreGive(sLock);
+    /*
+     * Коммитим ТОЛЬКО ПОЛНЫЙ листинг (liveCount >= count из 'i'):
+     * потерянные строки = неполное меню, такое дерево не публикуем.
+     */
+    if (ok && sCtx.liveCount &&
+        sCtx.liveCount >= (sCtx.count ? sCtx.count
+                                      : sCtx.liveCount))
+    {
+        tree_commit(&sCtx, sCtx.liveCount);
+        sLastOk = xTaskGetTickCount();
+    }
+    else
+    {
+        tree_abort();
+        ok = false;
+    }
+    return ok;
 }
 
 /*
  * Кэш единиц "Единицы измерения" (Расход/Период/Объём/Общий):
  * enum-индексы собираются ПОТОКОМ во время листинга (on_param) -
- * сканировать дерево на каждом кадре 'm' больше не нужно (его в ОЗУ
- * и нет - оно в NVS). Индекс = множитель (settings.c прибора).
+ * сканировать дерево на каждом кадре 'm' больше не нужно. Индекс
+ * = множитель (settings.c прибора).
  */
 static float sU_mlPerRate = 1000.0f;
 static float sU_tb = 60.0f;
@@ -399,14 +357,6 @@ static void units_note(const SkeParam *p)
         sU_gtotDiv = P3[idx < 4 ? idx : 1];
 }
 
-/*
- * Новый кадр 'm' прибора несёт только ml-базис (rateMLPM мл/мин,
- * totalml_*, gtotalml). Производные в единицах прибора считаем тут
- * по тем же формулам, что раньше считал сам прибор (settings.c):
- *   rate = rateMLPM x [сек/периода] / (60 x [мл на ед. расхода])
- *   total_* = totalml_* / 1000^ед, gtotal = gtotalml / 1000^ед
- * Множитель K-фактора и коррекция уже встроены в rateMLPM.
- */
 static void vals_derive(ProtoCtx *ctx)
 {
     SkeValues *v = &ctx->vals;
@@ -484,6 +434,15 @@ int ske02_valring_since(uint32_t since_ms, uint32_t *ts, SkeValues *out, int max
     return n;
 }
 
+static void values_cb(char *line, void *user)
+{
+    (void)user;
+    xSemaphoreTake(sLock, portMAX_DELAY);
+    sCtx.nowMs = (uint32_t)xTaskGetTickCount();
+    proto_values_line(&sCtx, line);
+    xSemaphoreGive(sLock);
+}
+
 static bool ske_query_values(void)
 {
     bool ok;
@@ -500,7 +459,7 @@ static bool ske_query_values(void)
         vals_derive(&sCtx);
         snap = sCtx.vals;
     }
-    /* БАГ-ФИКС: лок отдавался только при ok — битый ответ прибора
+    /* БАГ-ФИКС: лок отдавался только при ok - битый ответ прибора
      * оставлял мьютекс взятым НАВСЕГДА, и все portMAX_DELAY-ловцы
      * (httpd-обработчики) намертво вешали однопоточный сервер */
     xSemaphoreGive(sLock);
