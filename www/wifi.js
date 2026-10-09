@@ -3,15 +3,16 @@
             /* /scan блокирующий: отвечает готовым списком (~2 с) */
             const box = document.getElementById('nets');
             box.innerHTML = '<p class="scanmsg">сканирование…</p>';
+            let r = null;
             try {
-                const r = await (await fetch('/scan')).json();
+                r = await (await fetch('/scan')).json();
                 NETS = r.nets || [];
             } catch (e) {
                 NETS = [];
             }
             if (!NETS.length) {
                 box.innerHTML = '<p class="scanmsg">сети не найдены' +
-                    (r.err ? ' (ошибка скана ' + r.err + ')' : '') +
+                    (r && r.err ? ' (ошибка скана ' + r.err + ')' : '') +
                     ' — <button class="pick" onclick="wifiLoad()">повторить скан</button>' +
                     '<br>Сеть можно ввести вручную в поле ниже</p>';
                 return;

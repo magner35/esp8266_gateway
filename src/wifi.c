@@ -159,6 +159,9 @@ static void wifi_manager_task(void *arg)
         esp_wifi_set_mode(WIFI_MODE_STA);
         esp_wifi_set_config(ESP_IF_WIFI_STA, &sta);
         esp_wifi_start(); /* the connect comes on WIFI_EVENT_STA_START */
+        /* PS off и в STA: modem-sleep ронял скан (0 сетей) и рвал
+         * 5 Гц обмен с прибором в DTIM-окнах */
+        esp_wifi_set_ps(WIFI_PS_NONE);
         DBG("wifi: joining \"%s\"\n", st->ssid);
         bits = xEventGroupWaitBits(sEvents, EVT_GOT_IP | EVT_LOST, pdTRUE,
                                    pdFALSE, pdMS_TO_TICKS(STA_TIMEOUT_MS));

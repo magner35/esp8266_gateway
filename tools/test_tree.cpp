@@ -213,6 +213,31 @@ int main(int argc, char **argv)
         }
     }
 
+    /* регрессия "Информация" (94, Строка1): текст опции из браузера
+     * должен матчиться обратно в индекс после rusify+NVS */
+    {
+        TreeRec r;
+        uint32_t raw;
+        char err[64];
+        /* UTF-8 hex-литералы: "Информация" без консольных кодировок */
+        char opt[24];
+        unsigned char bin[] = {0xD0,0x98,0xD0,0xBD,0xD1,0x84,0xD0,0xBE,0xD1,
+                               0x80,0xD0,0xBC,0xD0,0xB0,0xD1,0x86,0xD0,0xB8,
+                               0xD1,0x8F,0};
+        memcpy(opt, bin, sizeof(bin));
+        if (!tree_get(94, &r))
+            CHECK(false, "no param 94");
+        else
+        {
+            bool ok = proto_input_to_raw_rec(&r.p, r.opts, opt, &raw, err, sizeof(err));
+            printf("input match: ok=%d raw=%u err=%s optCnt=%u\n",
+                   (int)ok, (unsigned)raw, err, r.p.optCnt);
+            for (int k = 0; k < r.p.optCnt; k++)
+                printf("  opt[%d] = %s\n", k, r.opts[k] ? r.opts[k] : "(null)");
+            CHECK(ok && raw == 7, "option match failed");
+        }
+    }
+
     printf(fails ? "FAILED (%d)\n" : "OK (%d fails)\n", fails);
     if (argc > 2) /* dump JSON в файл для diff */
     {

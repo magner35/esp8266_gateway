@@ -4,7 +4,6 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>SKE-02 Gateway</title>
   <style>
     /* баннер режима точки доступа (index.js infoTick) */
     #apbanner {
@@ -18,6 +17,7 @@
       text-decoration: none;
       font-size: 13px;
     }
+
     /* ==================================================================
      * STYLE MAP (index.html - главная страница мониторинга)
      *   1. общие: body, header, h1, .tag/.ok/.bad, button, #debug
@@ -144,7 +144,7 @@
 
     #debug button {
       font-size: 12px;
-      padding: 4px 4px
+      padding: 3px 5px
     }
 
     /* --- 2. сетка виджетов ------------------------------------------- */
@@ -220,7 +220,7 @@
       border: 2px solid #2a3140;
       /* рамка карточки */
       border-radius: 4px;
-      padding: 2px 4px;
+      padding: 2px 5px;
       /* vertical horizontal */
       height: 50px;
       box-sizing: border-box;
@@ -276,7 +276,11 @@
       gap: 10px;
       padding: 8px 12px
     }
-    .vcard.chart.off .vname { margin: 0 }
+
+    .vcard.chart.off .vname {
+      margin: 0
+    }
+
     .chartsoff {
       color: #8b94a7;
       font-size: 12px
@@ -498,7 +502,7 @@
 
 <body>
   <header>
-    <h1>SKE-02 Gateway</h1>
+    <h1>СКЭ-02 Шлюз</h1>
     <span id="link" class="tag">…</span>
     <!-- кнопка справа вверху: страница панели (раскладка/виджеты/
          Wi-Fi/перезагрузка/прибор/профили); в режиме правки

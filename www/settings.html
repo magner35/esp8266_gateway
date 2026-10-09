@@ -4,7 +4,6 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>СКЭ-02 Настройки</title>
   <style>
     /* ==================================================================
      * STYLE MAP (settings.html - страница настроек параметров прибора)
@@ -31,25 +30,6 @@
       gap: 8px
     }
 
-    /* метка-пилюля в шапке (UART: связь, fw) */
-    .tag {
-      background: #2a3140;
-      border-radius: 4px;
-      padding: 2px 8px;
-      font-size: 12px;
-      white-space: nowrap
-    }
-
-    /* метка связи: зелёный (связь есть) */
-    .ok {
-      background: #1d5c2f
-    }
-
-    /* метка связи: красный (нет связи) */
-    .bad {
-      background: #6c2431
-    }
-
     /* все обычные кнопки */
     button {
       background: #21366c;
@@ -58,7 +38,7 @@
       border-radius: 4px;
       padding: 3px 5px;
       cursor: pointer;
-      font-size: 12px
+      font-size: 13px
     }
 
     /* поля ввода и комбобоксы (редакторы параметров) */
@@ -74,7 +54,7 @@
 
     /* поле фильтра по имени/id в панели действий */
     #filter {
-      width: 200px
+      width: 80px
     }
 
     /* --- 2. навигация меню ----------------------------------------- */
@@ -88,22 +68,31 @@
     }
 
     #nav button {
-      background: #2a3140;
-      font-size: 12px;
-      padding: 8px 8px
+      background: transparent;
+      color: #8b94a7;
+      border: 0;
+      border-bottom: 2px solid transparent;
+      border-radius: 4px 4px 0 0;
+      padding: 5px 5px;
+      /* минимум внутри таба */
+      cursor: pointer;
+      font-size: 13px
     }
 
     #nav button.act {
-      background: #21366c;
+      color: #d8dee9;
+      background: #1b202a;
+      border-bottom-color: #2a5bdb
     }
 
     /* ряд табов второго уровня внутри раздела */
     .tabs {
       display: flex;
       flex-wrap: wrap;
-      gap: 2px;                    /* минимальный зазор между табами */
+      gap: 2px;
+      /* минимальный зазор между табами */
       border-bottom: 2px solid #2a3140;
-      margin-bottom: 3px
+      margin-bottom: 3px;
     }
 
     .tabs button {
@@ -111,10 +100,11 @@
       color: #8b94a7;
       border: 0;
       border-bottom: 2px solid transparent;
-      border-radius: 6px 6px 0 0;
-      padding: 2px 6px;             /* минимум внутри таба */
+      border-radius: 4px 4px 0 0;
+      padding: 5px 5px;
+      /* минимум внутри таба */
       cursor: pointer;
-      font-size: 12px
+      font-size: 13px
     }
 
     .tabs button.act {
@@ -128,22 +118,27 @@
       display: flex;
       flex-wrap: wrap;
       gap: 2px;
-      margin: 0 0 4px 4px
+      /* минимальный зазор между табами */
+      border-bottom: 2px solid #2a3140;
+      margin-bottom: 3px;
     }
 
     .subtabs button {
-      background: #232a38;
+      background: transparent;
       color: #8b94a7;
       border: 0;
-      border-radius: 8px;
-      padding: 2px 4px;
+      border-bottom: 2px solid transparent;
+      border-radius: 4px 4px 0 0;
+      padding: 5px 5px;
+      /* минимум внутри таба */
       cursor: pointer;
-      font-size: 12px
+      font-size: 13px
     }
 
     .subtabs button.act {
-      background: #1d5c2f;
-      color: #d8dee9
+      color: #d8dee9;
+      background: #1b202a;
+      border-bottom-color: #2a5bdb
     }
 
     /* --- 3. таблица параметров -------------------------------------- */
@@ -156,7 +151,8 @@
 
     td,
     th {
-      padding: 2px 4px;             /* компактнее внутри таба */
+      padding: 2px 4px;
+      /* компактнее внутри таба */
       border-top: 1px solid #2a3140;
       text-align: left;
       vertical-align: middle
@@ -165,7 +161,7 @@
     th {
       color: #8b94a7;
       font-weight: 500;
-      font-size: 12px
+      font-size: 13px
     }
 
     /*отображение значение параметра (моноширинный текст) */
@@ -188,7 +184,7 @@
     /* подпись-путь меню под именем параметра (в поиске) */
     .where {
       color: #8b94a7;
-      font-size: 12px;
+      font-size: 13px;
       margin-top: 1px
     }
 
@@ -199,7 +195,8 @@
       display: flex;
       gap: 6px;
       align-items: center;
-      flex-wrap: nowrap;          /* блок без переносов */
+      flex-wrap: nowrap;
+      /* блок без переносов */
       justify-content: flex-end
     }
 
@@ -241,7 +238,7 @@
 
     /* поле пароля текущего раздела */
     #secPw {
-      width: 140px
+      width: 80px
     }
 
     /* зелёная кнопка "Выполнить" у пунктов CMD */
@@ -258,13 +255,12 @@
     .flash {
       color: #7aa2f7
     }
-
   </style>
 </head>
 
 <body>
   <header>
-    <h1>SKE-02 Прибор</h1>
+    <h1>Прибор</h1>
     <!-- меток UART/fw и кнопки Wi-Fi здесь больше нет: всё это на /panel -->
     <a href="#panel" style="margin-left:auto"><button>&#8592; Назад</button></a>
   </header>
@@ -272,13 +268,13 @@
   <div id="tabs"></div>
   <div id="subtabs"></div>
   <div id="actions">
-    <input id="secPw" type="password" inputmode="numeric" maxlength="6" placeholder="пароль меню" oninput="pwInput()">
+    <input id="secPw" type="password" inputmode="numeric" maxlength="6" placeholder="пароль" oninput="pwInput()">
     <button id="btnApply" onclick="applyAll()">Применить</button>
     <button id="btnRefresh" onclick="refreshAll()">Обновить</button>
     <span id="applyMsg" class="flash"></span>
   </div>
   <div id="bar">
-    <input id="filter" placeholder="фильтр по имени или id" oninput="applyFilter()">
+    <input id="filter" placeholder="фильтр" oninput="applyFilter()">
   </div>
   <div id="sections">
     <p>Опрос прибора…</p>

@@ -110,33 +110,6 @@ static bool field(char *body, const char *name, char *out, size_t cap)
 }
 
 /*
- * Страница уходит ЧАНКАМИ по 2 КБ с проверкой результата: если
- * браузер оборвал загрузку (refresh посреди 80 КБ), первый же
- * неудачный chunk прерывает отправку и handler вернёт ошибку —
- * httpd сразу закрывает сессию. Отправка одним куском оставляла
- * поток httpd толкать данные в мёртвый сокет (send : 0 / recv : 0
- * в логе), однопоточный сервер замирал.
- */
-static esp_err_t send_page(httpd_req_t *req, const char *page)
-{
-    /* no-store: после перепрошивки браузер не показывает старую
-     * закэшированную страницу (иначе её JS зовёт удалённые URI) */
-    httpd_resp_set_type(req, "text/html");
-    httpd_resp_set_hdr(req, "Cache-Control", "no-store");
-    size_t len = strlen(page), off = 0;
-    while (off < len)
-    {
-        size_t k = len - off;
-        if (k > 2048)
-            k = 2048;
-        if (httpd_resp_send_chunk(req, page + off, k) != ESP_OK)
-            return ESP_FAIL;
-        off += k;
-    }
-    return httpd_resp_send_chunk(req, NULL, 0);
-}
-
-/*
  * Gzip-вариант страницы (~5x меньше): телефон с энергосбережением
  * по B+G не успевает принять 80 КБ за send-таймаут — отправка
  * рвалась на середине. Отдаём PAGE_APP_GZ с Content-Encoding.
@@ -228,9 +201,10 @@ static esp_err_t h_scan(httpd_req_t *req)
      * hand-rolled 2.5 s timers lost results and never worked in STA
      * mode. Blocking here ties one httpd worker, acceptable for a
      * manual rescan. Retry: первый скан после старта портала может
-     * вернуть STATE, пока wifi-таск устраивается.
+     * вернуть STATE, пока wifi-таск устраивается; в STA-режиме скан
+     * может попасть на реконнект - даём 3 попытки по 750 мс.
      */
-    for (attempt = 0; attempt < 2; attempt++)
+    for (attempt = 0; attempt < 3; attempt++)
     {
         wifi_scan_config_t cfg = {0};
         n = 16;
@@ -238,11 +212,15 @@ static esp_err_t h_scan(httpd_req_t *req)
         if (err == ESP_OK)
         {
             err = esp_wifi_scan_get_ap_records(&n, aps);
-            if (err == ESP_OK)
+            if (err == ESP_OK && n)
                 break;
+            /* ESP_OK с 0 записей - тоже повод повторить (пустой свип) */
+            DBG("web: scan attempt %d: %d nets, err %d\n",
+                attempt, (int)n, (int)err);
         }
-        DBG("web: scan attempt %d failed: %d\n", attempt, (int)err);
-        vTaskDelay(pdMS_TO_TICKS(500));
+        else
+            DBG("web: scan attempt %d failed: %d\n", attempt, (int)err);
+        vTaskDelay(pdMS_TO_TICKS(750));
     }
     if (err != ESP_OK)
         n = 0;
@@ -269,10 +247,12 @@ static esp_err_t h_scan(httpd_req_t *req)
 
 static esp_err_t h_save(httpd_req_t *req)
 {
-    char body[160];
+    /* поля под PERCENT-код: field() копирует сырую строку, кириллица
+     * в SSID/пароле = 3 симв. на байт */
+    char body[320];
     char head[512];
-    char ssid[33];
-    char pass[65];
+    char ssid[100];
+    char pass[196];
     int len = httpd_req_recv(req, body, sizeof(body) - 1);
     if (len <= 0)
     {
@@ -342,7 +322,7 @@ static esp_err_t h_api_info(httpd_req_t *req)
     tcpip_adapter_ip_info_t ip;
     const gw_settings_t *st = storage_get();
     bool portal = wifi_ap_ssid() != NULL;
-    bool sta = wifi_sta_connected();
+    // bool sta = wifi_sta_connected();
     int rssi = 0;
 
     if (portal)
@@ -383,7 +363,6 @@ static esp_err_t h_api_values(httpd_req_t *req)
     const SkeValues *v;
     int link, ready;
     static SkeValues cached;     /* last snapshot, served without waiting */
-    static TickType_t cachedAt;
     const gw_settings_t *st = storage_get();
     bool portal = wifi_ap_ssid() != NULL;
 
@@ -402,7 +381,6 @@ static esp_err_t h_api_values(httpd_req_t *req)
         if (v)
         {
             cached = *v;
-            cachedAt = xTaskGetTickCount();
         }
         xSemaphoreGive(ske02_lock());
     }
@@ -728,7 +706,11 @@ static esp_err_t h_api_set(httpd_req_t *req)
     char err[64];
     char val[64];
     char ids[12];
-    char vtext[48];
+    /* РАЗМЕР ПОД PERCENT-КОДИРОВКУ: field() копирует СЫРУЮ строку и
+     * декодирует in-place. Метка до 44Б UTF-8 = 132 симв. %XX + слэк.
+     * 48 обрезало "%D1%8F" до "%D1%8" -> хвост опции превращался в
+     * мусор D1 '%' '8' -> "net takoj opcii" на длинных русских метках */
+    char vtext[160];
 
     if (len <= 0)
     {
@@ -766,9 +748,39 @@ static esp_err_t h_api_set(httpd_req_t *req)
     if (!packed[0])
     {
         ske_req_t bad;
+        char hex[192];
+        size_t hl = 0;
+        const char *vp;
+        uint8_t k;
+        memset(&bad, 0, sizeof(bad)); /* иначе wait_s - мусор "ждать 51408 с" */
         bad.result = BS_BAD_TYPE;
         snprintf(bad.err, sizeof(bad.err), "%s", err);
-        return reply_ok_err(req, &bad, NULL);
+        /* hex входа и всех меток опций: видно РАСХОЖДЕНИЕ байт */
+        hl += (size_t)snprintf(hex + hl, sizeof(hex) - hl, "in:");
+        for (vp = vtext; *vp && hl + 3 < sizeof(hex); vp++)
+            hl += (size_t)snprintf(hex + hl, sizeof(hex) - hl, "%02X",
+                                   (unsigned char)*vp);
+        for (k = 0; k < rec.p.optCnt && k < SKE_OPT_MAX; k++)
+        {
+            if (hl + 6 >= sizeof(hex))
+                break;
+            hl += (size_t)snprintf(hex + hl, sizeof(hex) - hl, "|o%u:", k);
+            for (vp = rec.opts[k]; vp && *vp && hl + 3 < sizeof(hex); vp++)
+                hl += (size_t)snprintf(hex + hl, sizeof(hex) - hl, "%02X",
+                                       (unsigned char)*vp);
+        }
+        DBG("web: set id=%s rejected '%s': %s | %s\n", ids, vtext, err, hex);
+        /* hex и в ответ браузеру: видно без UART */
+        httpd_resp_set_type(req, "application/json");
+        {
+            char esc[48];
+            char out[288];
+            json_escape(err, esc, sizeof(esc));
+            snprintf(out, sizeof(out),
+                     "{\"ok\":false,\"error\":\"%s\",\"dbg\":\"%s\"}", esc, hex);
+            httpd_resp_send(req, out, strlen(out));
+        }
+        return ESP_OK;
     }
 
     r.cmd = SKEQ_SET;
@@ -924,10 +936,19 @@ static esp_err_t h_captive(httpd_req_t *req)
     return ESP_OK;
 }
 
+/* Пробы детекта captive-сети: Android(gstatic/play), Apple(captive.apple),
+ * Windows(msftconnecttest), Kindle/Fire, Ubuntu. DNS-часть ловит wildcard-dns.
+ * Пути во flash (const), хендлеры - копеечная куча при старте. */
 static const char *const sCaptiveProbes[] = {
-    "/generate_204",  "/gen_204",  "/hotspot-detect.html",
-    "/library/test/success.html", "/connecttest.txt", "/ncsi.txt",
-    "/fwlink", "/redirect", "/check_network_status.txt", NULL,
+    /* Android */
+    "/generate_204", "/gen_204", "/finance/generate_204",
+    /* Apple (iOS/macOS): оба варианта пробы */
+    "/hotspot-detect.html", "/library/test/success.html",
+    /* Windows NCSI */
+    "/connecttest.txt", "/ncsi.txt", "/redirect",
+    /* прочие */
+    "/fwlink", "/check_network_status.txt", "/kindle-wifi/wifistor.html",
+    NULL,
 };
 
 /* ------------------------------------------------------------------ */
@@ -935,7 +956,7 @@ static const char *const sCaptiveProbes[] = {
 void web_start(void)
 {
     httpd_config_t cfg = HTTPD_DEFAULT_CONFIG();
-    cfg.max_uri_handlers = 32;   /* 26 needed: 17 api/pages + 9 captive */
+    cfg.max_uri_handlers = 32;   /* 28 needed: 17 api/pages + 11 captive */
     /* ВАЖНО: не меньше 8 КБ — h_scan держит на стеке ~2.7 КБ буферов
      * + кадры; на 6 КБ стек переполнялся и затаптывал кучу (куча
      * "уменьшалась", страница портала со сканом ломалась) */

@@ -390,16 +390,33 @@ bool proto_input_to_raw_rec(const SkeParam *p, const char *const *opts,
         return false;
     }
 
-    /* enum/bool: клиент присылает ТЕКСТ опции - ищем индекс по меткам */
+    /* enum/bool: клиент присылает ТЕКСТ опции - ищем индекс по меткам.
+     * Сравнение КАНОНИЧЕСКОЕ: обе стороны через rusify (идемпотентен),
+     * иначе гомоглифныйmix в NVS против чистой кириллицы из браузера
+     * (или наоборот) роняет конкретную опцию - "net takoj opcii" */
     if ((p->type == SKT_ENUM || p->type == SKT_BOOL) && opts && p->optCnt)
     {
         uint8_t k;
+        char in[48], lab[48];
+        snprintf(in, sizeof(in), "%s", text);
+        proto_rusify(in);
         for (k = 0; k < p->optCnt; k++)
-            if (opts[k] && !strcmp(opts[k], text))
+        {
+            if (!opts[k])
+                break;
+            if (!strcmp(opts[k], text))
             {
                 *raw = k;
                 return true;
             }
+            snprintf(lab, sizeof(lab), "%s", opts[k]);
+            proto_rusify(lab);
+            if (!strcmp(lab, in))
+            {
+                *raw = k;
+                return true;
+            }
+        }
         snprintf(err, errcap, "net takoj opcii");
         return false;
     }

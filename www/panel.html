@@ -4,7 +4,6 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>SKE-02 Панель</title>
   <style>
     /* ==================================================================
      * STYLE MAP (panel.html - панель управления главным экраном)
@@ -17,7 +16,8 @@
     /* --- 1. общие ---------------------------------------------------- */
     body {
       font: 14px/1.45 system-ui, sans-serif;
-      background: #000000;       /* цвет фона страницы (как на главной) */
+      background: #000000;
+      /* цвет фона страницы (как на главной) */
       color: #d8dee9;
       margin: 0;
       padding: 4px
@@ -37,36 +37,50 @@
     }
 
     button {
-      background: #21366c;       /* синяя кнопка */
+      background: #21366c;
+      /* синяя кнопка */
       color: #fff;
       border: 0;
       border-radius: 4px;
       padding: 3px 5px;
       cursor: pointer;
-      font-size: 12px
+      font-size: 13px
     }
 
-    
-    button.warn { background: #a23b2e }  /* красная (удалить, перезагрузить) */
-    button.ok { background: #1d5c2f }    /* зелёная (применить) */
+
+    button.warn {
+      background: #a23b2e
+    }
+
+    /* красная (удалить, перезагрузить) */
+    button.ok {
+      background: #1d5c2f
+    }
+
+    /* зелёная (применить) */
 
     input {
-      background: #0e1116;       /* тёмное поле ввода */
+      background: #0e1116;
+      /* тёмное поле ввода */
       color: #d8dee9;
       border: 1px solid #39414f;
       border-radius: 4px;
-      padding: 4px 8px;
+      padding: 2px 5px;
       box-sizing: border-box
     }
 
-    :root { color-scheme: dark }         /* тёмные чекбоксы/списки */
+    :root {
+      color-scheme: dark
+    }
+
+    /* тёмные чекбоксы/списки */
 
     /* метка-пилюля (состояние сохранения профиля) */
     .tag {
       background: #2a3140;
       border-radius: 4px;
-      padding: 2px 8px;
-      font-size: 12px;
+      padding: 2px 5px;
+      font-size: 13px;
       white-space: nowrap
     }
 
@@ -87,20 +101,27 @@
     }
 
     .tile {
-      background: #1b202a;       /* фон плитки */
+      background: #1b202a;
+      /* фон плитки */
       border: 1px solid #2a3140;
       border-radius: 4px;
-      padding: 14px 10px;
+      padding: 7px 5px;
       text-align: center;
       cursor: pointer;
       color: #d8dee9;
       text-decoration: none;
-      font-size: 14px
+      font-size: 13px
     }
 
-    .tile:hover { background: #232a38 }
+    .tile:hover {
+      background: #232a38
+    }
 
-    .tile .ic { font-size: 20px; display: block; margin-bottom: 4px }
+    .tile .ic {
+      font-size: 20px;
+      display: block;
+      margin-bottom: 4px
+    }
 
     /* --- 3. профили виджетов ----------------------------------------- */
     .prow {
@@ -111,14 +132,20 @@
       background: #1b202a;
       border: 1px solid #232a38;
       border-radius: 4px;
-      padding: 4px 8px;
+      padding: 2px 5px;
       margin-bottom: 6px;
       font-size: 13px
     }
 
-    .prow .pname { flex: 1 }     /* имя профиля растягивается */
+    .prow .pname {
+      flex: 1
+    }
 
-    #newName { width: 160px }
+    /* имя профиля растягивается */
+
+    #newName {
+      width: 160px
+    }
 
     /* --- 4. отладочная панель ---------------------------------------- */
     #debug {
@@ -127,30 +154,31 @@
       gap: 6px;
       align-items: center;
       margin: 0 0 8px 0;
-      padding: 4px 8px;
+      padding: 3px 5px;
       border: 1px dashed #39414f;
       border-radius: 4px;
       color: #8b94a7;
-      font-size: 12px
+      font-size: 13px
     }
 
     #debug .tag {
       background: transparent;
       border: 1px solid #2a3140;
-      padding: 1px 6px
+      padding: 2px 5px
     }
   </style>
 </head>
 
 <body>
   <header>
-    <h1>SKE-02 Панель</h1>
+    <h1>Настройки</h1>
     <a href="#main" style="margin-left:auto"><button>&#8592; Назад</button></a>
   </header>
 
   <!-- 2. плитки навигации: ранее жили в шапке главного экрана -->
   <div class="tiles">
-    <a class="tile" href="#main" onclick="setTimeout(()=>{ if(!editing) toggleEdit() },80)"><span class="ic">&#9998;</span>Раскладка</a>
+    <a class="tile" href="#main" onclick="setTimeout(()=>{ if(!editing) toggleEdit() },80)"><span
+        class="ic">&#9998;</span>Раскладка</a>
     <a class="tile" href="#widgets"><span class="ic">&#9633;</span>Виджеты</a>
     <a class="tile" href="#settings"><span class="ic">&#9881;</span>Прибор</a>
     <a class="tile" href="#wifi"><span class="ic">&#128246;</span>Wi-Fi</a>
@@ -166,12 +194,14 @@
   </div>
 
   <!-- 4. отладочная панель -->
-  <h2>Отладочная панель</h2>
+  <h2>info</h2>
   <div id="debug">
-    <button onclick="rescan()">Пересканировать</button>
+    <button onclick="rescan()">rescan</button>
     <span id="fw" class="tag"></span>
-    <span class="tag" id="ip"></span><span class="tag" id="rss"></span>
-    <span class="tag" id="upt"></span><span class="tag" id="heap"></span>
+    <span class="tag" id="ip"></span>
+    <span class="tag" id="rss"></span>
+    <span class="tag" id="upt"></span>
+    <span class="tag" id="heap"></span>
   </div>
 
   <script src="/panel.js"></script>

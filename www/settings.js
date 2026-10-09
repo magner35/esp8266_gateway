@@ -20,8 +20,18 @@
           retryT = setTimeout(() => { retryT = 0; tick() }, 3000);
       } catch (e) { }
     }
+    /* пароли меню - в localStorage (НЕ менеджер паролей): переживают
+     * перезагрузку, привязаны к адресу шлюза. Очистка поля = забыть. */
+    try { pwMap = JSON.parse(localStorage.getItem('skePw') || '{}') || {} } catch (e) { pwMap = {} }
+    function pwSave() {
+      try { localStorage.setItem('skePw', JSON.stringify(pwMap)) } catch (e) { }
+    }
     /* the per-section password field follows the active section */
-    function pwInput() { pwMap[cur] = $('secPw').value }
+    function pwInput() {
+      pwMap[cur] = $('secPw').value;
+      if (!$('secPw').value) delete pwMap[cur];
+      pwSave();
+    }
     function syncPw() { $('secPw').value = pwMap[cur] || '' }
     function mark(i) {
       dirty.add(i);
@@ -159,7 +169,7 @@
         const body = 'id=' + i + '&v=' + encodeURIComponent(curVal(q)) + '&pw=' + encodeURIComponent(pwMap[q.s] || '');
         try {
           const r = await (await fetch('/api/set', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body })).json();
-          if (!r.ok) { alert('«' + (q.n || ('P' + i)) + '»: ' + r.error + (r.wait ? ' (ждать ' + r.wait + ' с)' : '')); break }
+          if (!r.ok) { alert('«' + (q.n || ('P' + i)) + '»: ' + r.error + (r.wait ? ' (ждать ' + r.wait + ' с)' : '') + (r.dbg ? '\n' + r.dbg : '')); break }
           dirty.delete(i); done++;
           unmark(i);
           /* keep the local cache in sync with the device read-back, so a

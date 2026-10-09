@@ -289,7 +289,7 @@ class H(http.server.SimpleHTTPRequestHandler):
                 {"s": "Keenetic-911", "r": -71, "e": 1},
                 {"s": "FreeWiFi", "r": -85, "e": 0}
             ]})
-        elif self._path == "/api/widgets":
+        elif self.path == "/api/widgets":  # self.path: _path ставится только в do_GET
             self._json(self.WCFG)
         elif self._path == "/stamp":
             self._json({"t": www_stamp()})
@@ -320,7 +320,7 @@ class H(http.server.SimpleHTTPRequestHandler):
 
     def do_POST(self):
         n = int(self.headers.get('Content-Length') or 0)
-        body = self.rfile.read(n).decode() if n else ''
+        body = self.rfile.read(n).decode('utf-8', 'replace') if n else ''
         f = dict(urllib.parse.parse_qsl(body))
         if self.path == "/api/forgetwifi":
             self._json({"ok": True})
@@ -337,7 +337,7 @@ class H(http.server.SimpleHTTPRequestHandler):
             self._json({"ok": True, "value": v})
         elif self.path == "/api/run":
             self._json({"ok": True})
-        elif self._path == "/api/widgets":
+        elif self.path == "/api/widgets":   # self.path! _path ставится только в do_GET
             try:
                 d = json.loads(body)
                 assert 'rev' in d and isinstance(d.get('cur') or d.get('cfg'), list)
