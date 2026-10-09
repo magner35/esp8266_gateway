@@ -51,7 +51,7 @@ typedef struct
 
 /* menus-таблица: имена меню пишутся ОДИН раз ("menus" блоб),
  * записи ссылаются id - вместо ~60-100Б имён в каждой записи */
-uint8_t tree_menus_load(char *buf, size_t cap);  /* -> count, имена NUL-джойн */
+uint8_t tree_menus_load(char *buf, size_t cap);  /* -> count, строки по SKE_MENU_LEN */
 const char *tree_menu_name(const char *buf, uint8_t id); /* id -> имя */
 
 void tree_init(void);

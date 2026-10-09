@@ -159,7 +159,7 @@
         const body = 'id=' + i + '&v=' + encodeURIComponent(curVal(q)) + '&pw=' + encodeURIComponent(pwMap[q.s] || '');
         try {
           const r = await (await fetch('/api/set', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body })).json();
-          if (!r.ok) { alert('«' + (q.n || ('P' + i)) + '»: ' + r.error + (r.wait ? ' (ждать ~' + r.wait + ' с)' : '')); break }
+          if (!r.ok) { alert('«' + (q.n || ('P' + i)) + '»: ' + r.error + (r.wait ? ' (ждать ' + r.wait + ' с)' : '')); break }
           dirty.delete(i); done++;
           unmark(i);
           /* keep the local cache in sync with the device read-back, so a
@@ -185,7 +185,7 @@
           method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
           body: 'id=' + i + '&pw=' + encodeURIComponent(pwMap[q.s] || '')
         })).json();
-        if (!r.ok) alert('«' + (q.n || ('P' + i)) + '»: ' + r.error + (r.wait ? ' (ждать ~' + r.wait + ' с)' : ''));
+        if (!r.ok) alert('«' + (q.n || ('P' + i)) + '»: ' + r.error + (r.wait ? ' (ждать ' + r.wait + ' с)' : ''));
         else flash('команда выполнена');
       } catch (e) { alert('нет ответа от шлюза') }
     }

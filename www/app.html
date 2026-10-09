@@ -14,14 +14,14 @@ button,input,select,textarea{font:inherit;color:inherit}
 /* --- index.html --- */
 #sec-main #apbanner {
       display: block;
-      margin: 8px 14px 0;
-      padding: 10px 12px;
+      margin: 4px 7px 0;
+      padding: 5px 6px;
       background: #3a3020;
       color: #e8c46a;
       border: 1px solid #6b5b2a;
-      border-radius: 8px;
+      border-radius: 4px;
       text-decoration: none;
-      font-size: 14px;
+      font-size: 13px;
     }#sec-main {
       font: 13px/1.45 system-ui, sans-serif;
       background: #000000;
@@ -43,7 +43,7 @@ button,input,select,textarea{font:inherit;color:inherit}
       background: #2a3140;
       border: 1px solid #3b4252;
       border-radius: 4px;
-      padding: 6px 12px
+      padding: 3px 5px
     }#sec-main .gear:hover {
       background: #3b4252
     }#sec-main .gear.ok {
@@ -55,7 +55,7 @@ button,input,select,textarea{font:inherit;color:inherit}
     }#sec-main .tag {
       background: #2a3140;
       border-radius: 4px;
-      padding: 2px 4px;
+      padding: 3px 5px;
       font-size: 12px;
       white-space: nowrap
     }#sec-main .ok {
@@ -67,7 +67,7 @@ button,input,select,textarea{font:inherit;color:inherit}
       color: #fff;
       border: 0;
       border-radius: 4px;
-      padding: 4px 4px;
+      padding: 3px 5px;
       cursor: pointer;
       font-size: 12px
     }#sec-main button.warn {
@@ -78,7 +78,7 @@ button,input,select,textarea{font:inherit;color:inherit}
       gap: 6px;
       align-items: center;
       margin: 0 0 4px 0;
-      padding: 4px 4px;
+      padding: 3px 5px;
       border: 1px dashed #39414f;
       border-radius: 4px;
       color: #8b94a7;
@@ -287,7 +287,7 @@ button,input,select,textarea{font:inherit;color:inherit}
       color: #fff;
       border: 0;
       border-radius: 4px;
-      padding: 5px 5px;
+      padding: 3px 5px;
       cursor: pointer;
       font-size: 12px
     }#sec-widgets button.warn { background: #a23b2e }#sec-widgets { color-scheme: dark }#sec-widgets .flash {
@@ -374,7 +374,7 @@ button,input,select,textarea{font:inherit;color:inherit}
       color: #fff;
       border: 0;
       border-radius: 4px;
-      padding: 5px 5px;
+      padding: 3px 5px;
       cursor: pointer;
       font-size: 12px
     }#sec-panel button.warn { background: #a23b2e }#sec-panel button.ok { background: #1d5c2f }#sec-panel input {
@@ -460,7 +460,7 @@ button,input,select,textarea{font:inherit;color:inherit}
       color: #fff;
       border: 0;
       border-radius: 4px;
-      padding: 5px 5px;
+      padding: 3px 5px;
       cursor: pointer;
       font-size: 12px
     }#sec-settings input, #sec-settings select {
@@ -603,7 +603,7 @@ button,input,select,textarea{font:inherit;color:inherit}
             color: #fff;
             border: 0;
             border-radius: 4px;
-            padding: 9px 9px;
+            padding: 3px 5px;
             cursor: pointer;
             font-size: 12px
         }#sec-wifi table {
@@ -611,14 +611,14 @@ button,input,select,textarea{font:inherit;color:inherit}
             border-collapse: collapse;
             margin-top: 6px
         }#sec-wifi td {
-            padding: 6px 8px;
+            padding: 3px 5px;
             border-top: 1px solid #2a3140
         }#sec-wifi .pick {
             background: #233047;
             color: #d8dee9;
             border: 1px solid #39414f;
-            border-radius: 6px;
-            padding: 3px 10px;
+            border-radius: 4px;
+            padding: 3px 5px;
             cursor: pointer
         }#sec-wifi .dbm {
             color: #8b94a7
@@ -895,7 +895,7 @@ const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;'
           headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body
         })).json();
         if (r.ok) { INP[w.src].v = parseFloat(r.value); paramsTick() }
-        else alert((INPS[w.src].n) + ': ' + r.error + (r.wait ? ' (ждать ~' + r.wait + ' с)' : ''));
+        else alert((INPS[w.src].n) + ': ' + r.error + (r.wait ? ' (ждать ' + r.wait + ' с)' : ''));
       } catch (e2) { alert('нет ответа от шлюза') }
     }
     const CHSRC = {
@@ -1808,9 +1808,9 @@ function portalBanner(ap, ssid, ip) {
       b.href = '/wifi';
       document.querySelector('header').after(b);
     }
-    b.textContent = 'WiFi не подключён — шлюз в режиме точки доступа ' +
+    b.textContent = 'Wi-Fi не подключён — шлюз в режиме точки доступа ' +
       (ssid || '') + ' (открытая), адрес http://' +
-      (ip || '192.168.4.1') + '. Нажмите, чтобы выбрать сеть →';
+      (ip || '192.168.4.1');
   } else if (b) b.remove();
 }
 let lastSeqT = 0;      
@@ -2082,7 +2082,7 @@ wSync();
         const body = 'id=' + i + '&v=' + encodeURIComponent(curVal(q)) + '&pw=' + encodeURIComponent(pwMap[q.s] || '');
         try {
           const r = await (await fetch('/api/set', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body })).json();
-          if (!r.ok) { alert('«' + (q.n || ('P' + i)) + '»: ' + r.error + (r.wait ? ' (ждать ~' + r.wait + ' с)' : '')); break }
+          if (!r.ok) { alert('«' + (q.n || ('P' + i)) + '»: ' + r.error + (r.wait ? ' (ждать ' + r.wait + ' с)' : '')); break }
           dirty.delete(i); done++;
           unmark(i);
           if (r.value !== undefined) {
@@ -2105,7 +2105,7 @@ wSync();
           method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
           body: 'id=' + i + '&pw=' + encodeURIComponent(pwMap[q.s] || '')
         })).json();
-        if (!r.ok) alert('«' + (q.n || ('P' + i)) + '»: ' + r.error + (r.wait ? ' (ждать ~' + r.wait + ' с)' : ''));
+        if (!r.ok) alert('«' + (q.n || ('P' + i)) + '»: ' + r.error + (r.wait ? ' (ждать ' + r.wait + ' с)' : ''));
         else flash('команда выполнена');
       } catch (e) { alert('нет ответа от шлюза') }
     }
@@ -2143,7 +2143,7 @@ wSync();
             let h = '<table>';
             NETS.forEach((n, i) => {
                 h += '<tr><td>' + esc(n.s) + '</td><td class="dbm">' + n.r + ' dBm</td><td>' +
-                    (n.e ? '🔒' : '') + '</td><td><button class="pick" onclick="pick(' + i + ')">выбрать</button></td></tr>';
+                    (n.e ? '🔒' : '') + '</td><td><button class="pick" onclick="pick(' + i + ')">Выбрать</button></td></tr>';
             });
             box.innerHTML = h + '</table>';
         }

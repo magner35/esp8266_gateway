@@ -261,7 +261,7 @@ const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;'
           headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body
         })).json();
         if (r.ok) { INP[w.src].v = parseFloat(r.value); paramsTick() }
-        else alert((INPS[w.src].n) + ': ' + r.error + (r.wait ? ' (ждать ~' + r.wait + ' с)' : ''));
+        else alert((INPS[w.src].n) + ': ' + r.error + (r.wait ? ' (ждать ' + r.wait + ' с)' : ''));
       } catch (e2) { alert('нет ответа от шлюза') }
     }
     /*

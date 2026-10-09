@@ -251,9 +251,9 @@ function portalBanner(ap, ssid, ip) {
       b.href = '/wifi';
       document.querySelector('header').after(b);
     }
-    b.textContent = 'WiFi не подключён — шлюз в режиме точки доступа ' +
+    b.textContent = 'Wi-Fi не подключён — шлюз в режиме точки доступа ' +
       (ssid || '') + ' (открытая), адрес http://' +
-      (ip || '192.168.4.1') + '. Нажмите, чтобы выбрать сеть →';
+      (ip || '192.168.4.1');
   } else if (b) b.remove();
 }
 

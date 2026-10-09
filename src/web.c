@@ -30,6 +30,8 @@ static httpd_handle_t sServer;
 /* ------------------------------------------------------------------ */
 /* helpers                                                             */
 
+static TreeRec rec;   /* единая на web.c (httpd однопоточен) */
+
 static void json_escape(const char *s, char *out, size_t cap)
 {
     size_t o = 0;
@@ -536,7 +538,8 @@ static esp_err_t h_api_params(httpd_req_t *req)
     static char chunk[1024];
     static char esc[192];
     static char val[64];
-    static TreeRec rec;
+    /* rec — единая static на весь web.c (httpd однопоточна):
+     * три локальных static TreeRec ели 6.9КБ статики */
     static char secs[SKE_MAX_SECTIONS][SKE_NAME_LEN];
     size_t off;
     uint16_t id;
@@ -548,7 +551,7 @@ static esp_err_t h_api_params(httpd_req_t *req)
 
     /* секции: имена записей дерева, в порядке первого появления */
     count = tree_count();
-    static char menus[2048];
+    static char menus[SKE_MAX_MENUS * SKE_MENU_LEN];
     tree_menus_load(menus, sizeof(menus));
     {
         for (id = 0; id < count && secNum < SKE_MAX_SECTIONS; id++)
@@ -752,7 +755,6 @@ static esp_err_t h_api_set(httpd_req_t *req)
 
     /* UI text -> packed console value, then queue the 's' command */
     {
-        static TreeRec rec;
         bool ok = tree_get((uint16_t)atoi(ids), &rec) &&
                   proto_input_to_raw_rec(&rec.p, rec.opts, vtext,
                                          &raw, err, sizeof(err));
@@ -776,7 +778,6 @@ static esp_err_t h_api_set(httpd_req_t *req)
     ske02_request(&r, 15000);
 
     {
-        static TreeRec rec;
         val[0] = 0;
         if (tree_get(r.id, &rec))
             rec_value_text(&rec, val, sizeof(val));

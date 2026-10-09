@@ -19,7 +19,7 @@
             let h = '<table>';
             NETS.forEach((n, i) => {
                 h += '<tr><td>' + esc(n.s) + '</td><td class="dbm">' + n.r + ' dBm</td><td>' +
-                    (n.e ? '🔒' : '') + '</td><td><button class="pick" onclick="pick(' + i + ')">выбрать</button></td></tr>';
+                    (n.e ? '🔒' : '') + '</td><td><button class="pick" onclick="pick(' + i + ')">Выбрать</button></td></tr>';
             });
             box.innerHTML = h + '</table>';
         }

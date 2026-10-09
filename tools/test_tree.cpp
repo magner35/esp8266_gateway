@@ -95,7 +95,7 @@ int main(int argc, char **argv)
 
     /* JSON как h_api_params: секции + все параметры */
     {
-        static char menus[2048];
+        static char menus[SKE_MAX_MENUS * SKE_MENU_LEN];
         tree_menus_load(menus, sizeof(menus));
         uint16_t count = tree_count();
         char secs[12][SKE_NAME_LEN];

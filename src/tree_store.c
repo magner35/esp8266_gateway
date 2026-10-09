@@ -21,7 +21,7 @@
 /* тип с отрицательным размером не соберётся, если упаковка сломалась
  * (портабельно: и C, и C++ — файл включается в хост-тест как C++) */
 typedef char tree_hdr_must_be_21_bytes[(sizeof(TreeHdr) == 21) ? 1 : -1];
-#define TREE_MAGIC 0x54524545u /* "TREE" */
+#define TREE_MAGIC 0x54524546u /* "TREE" v2: v1=NUL-джойн menus, v2=строки по 44Б */
 
 static nvs_handle_t sNvs;
 static bool sWriting;
@@ -69,16 +69,10 @@ void tree_abort(void)
 void tree_commit(const ProtoCtx *ctx, uint16_t count)
 {
     uint32_t meta[2] = { TREE_MAGIC, count };
-    /* menus-таблица: имена меню ОДИН раз (id в записях на неё) */
-    {
-        static char mblob[SKE_MAX_MENUS * SKE_MENU_LEN];
-        char *w = mblob;
-        char *end = mblob + sizeof(mblob);
-        uint16_t m;
-        for (m = 0; m < ctx->menuCount; m++)
-            w = put_str(w, end, ctx->menus[m]);
-        nvs_set_blob(sNvs, "menus", mblob, (size_t)(w - mblob));
-    }
+    /* menus-таблица: строки фиксированной длины SKE_MENU_LEN, пишутся
+     * ПРЯМО из контекста - без промежуточной копии (экономия 1.7КБ статики) */
+    nvs_set_blob(sNvs, "menus", ctx->menus,
+                 (size_t)ctx->menuCount * SKE_MENU_LEN);
     if (!sWriting)
         return;
     sWriting = false;
@@ -250,7 +244,7 @@ void tree_dump_blob(uint16_t id)
     printf("\n");
 }
 
-/* menus-таблица: загрузить имена (NUL-джойн), вернуть count */
+/* menus-таблица: строки фиксированной длины SKE_MENU_LEN, вернуть count */
 uint8_t tree_menus_load(char *buf, size_t cap)
 {
     size_t len = cap;
@@ -260,30 +254,11 @@ uint8_t tree_menus_load(char *buf, size_t cap)
             buf[0] = 0;
         return 0;
     }
-    {
-        uint8_t cnt = 0;
-        const char *p = buf;
-        const char *end = buf + len;
-        while (p < end)
-        {
-            cnt++;
-            p += strlen(p) + 1;
-        }
-        return cnt;
-    }
+    return (uint8_t)(len / SKE_MENU_LEN);
 }
 
 /* id (1-based, как pool-id прибора) -> имя; 0 -> "" */
 const char *tree_menu_name(const char *buf, uint8_t id)
 {
-    const char *p = buf;
-    if (!id)
-        return "";
-    while (*p)
-    {
-        if (--id == 0)
-            return p;
-        p += strlen(p) + 1;
-    }
-    return "";
+    return id ? buf + (size_t)(id - 1) * SKE_MENU_LEN : "";
 }
