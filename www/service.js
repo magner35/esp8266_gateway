@@ -52,9 +52,16 @@
           body
         })).json();
         ntpShow(r);
+        /* сохранение = сразу и отправка времени в прибор */
+        let msg = 'сохранено';
+        try {
+          const p = await (await fetch('/api/ntp/push', { method: 'POST' })).json();
+          if (p.ok) msg += ', время в приборе';
+          else msg += ' (время не отправлено: ' + p.error + ')';
+        } catch (e) { }
         const m = $('ntpMsg');
-        m.textContent = 'сохранено';
-        setTimeout(() => { if (m.textContent === 'сохранено') m.textContent = '' }, 2500);
+        m.textContent = msg;
+        setTimeout(() => { if (m.textContent === msg) m.textContent = '' }, 4000);
       } catch (e) {
         $('ntpMsg').textContent = 'нет ответа от шлюза';
       }

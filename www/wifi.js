@@ -1,6 +1,7 @@
         let NETS = [];
         async function wifiLoad() {
-            /* /scan блокирующий: отвечает готовым списком (~2 с) */
+            /* /scan блокирующий (~2-6 с): запускается при ЗАХОДЕ
+             * в раздел Wi-Fi (не при загрузке всей страницы) */
             const box = document.getElementById('nets');
             box.innerHTML = '<p class="scanmsg">сканирование…</p>';
             let r = null;
@@ -25,7 +26,10 @@
             box.innerHTML = h + '</table>';
         }
         function pick(i) { document.getElementById('ssid').value = NETS[i].s }
-        wifiLoad();
+        /* скан запускать при каждом входе в раздел Wi-Fi */
+        const inWifi = () => location.hash === '#wifi' || location.hash === '';
+        if (inWifi()) wifiLoad();
+        window.addEventListener('hashchange', () => { if (inWifi()) wifiLoad() });
         async function forgetWifi() {
             if (!confirm('Стереть сохранённые сети и перезапустить шлюз ' +
                          'в режиме точки доступа?')) return;

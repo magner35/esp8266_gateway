@@ -866,7 +866,7 @@ button,input,select,textarea{font:inherit;color:inherit}
                 <input type="checkbox" id="ntpAuto" onchange="ntpAutoChk()">Авто</label>
         </div>
         <div class="row" style="margin-top:10px">
-            <button onclick="ntpSave()">Сохранить</button>
+            <button onclick="ntpSave()" title="Сохранить настройки и отправить время в прибор">Сохранить</button>
             <span class="msg" id="ntpMsg"></span>
         </div>
         <div class="st" id="ntpSt" style="margin-top:8px"></div>
@@ -2331,7 +2331,9 @@ wSync();
             box.innerHTML = h + '</table>';
         }
         function pick(i) { document.getElementById('ssid').value = NETS[i].s }
-        wifiLoad();
+        const inWifi = () => location.hash === '#wifi' || location.hash === '';
+        if (inWifi()) wifiLoad();
+        window.addEventListener('hashchange', () => { if (inWifi()) wifiLoad() });
         async function forgetWifi() {
             if (!confirm('Стереть сохранённые сети и перезапустить шлюз ' +
                          'в режиме точки доступа?')) return;
@@ -2388,9 +2390,15 @@ wSync();
           body
         })).json();
         ntpShow(r);
+        let msg = 'сохранено';
+        try {
+          const p = await (await fetch('/api/ntp/push', { method: 'POST' })).json();
+          if (p.ok) msg += ', время в приборе';
+          else msg += ' (время не отправлено: ' + p.error + ')';
+        } catch (e) { }
         const m = $('ntpMsg');
-        m.textContent = 'сохранено';
-        setTimeout(() => { if (m.textContent === 'сохранено') m.textContent = '' }, 2500);
+        m.textContent = msg;
+        setTimeout(() => { if (m.textContent === msg) m.textContent = '' }, 4000);
       } catch (e) {
         $('ntpMsg').textContent = 'нет ответа от шлюза';
       }

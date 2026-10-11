@@ -366,6 +366,9 @@ class H(http.server.SimpleHTTPRequestHandler):
                 return
             type(self).WCFG = d
             self._json({"ok": True})
+        elif self.path == "/api/ntp/push":
+            self._json({"ok": self.NTP["on"],
+                        "error": None if self.NTP["on"] else "sync off"})
         elif self.path in ("/api/refresh", "/api/rescan", "/api/reboot"):
             self._json({"ok": 1, "ready": 1})
         else:

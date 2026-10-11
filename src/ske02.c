@@ -12,10 +12,12 @@
  * the command queue; the UART is touched from this task only.
  */
 #include "ske02.h"
+#include "ntp.h"
 
 #include <stdio.h>
 #include <stdlib.h>   /* atoi: lockout seconds */
 #include <string.h>
+#include <time.h>
 
 #include "driver/uart.h"
 #include "freertos/queue.h"
@@ -627,6 +629,71 @@ static const char *bs_message(int rc)
     }
 }
 
+/* собрать текст "HHMMSS DDMMYY" локального времени; false = нечего
+ * слать (NTP выключен или не синхронизирован) */
+static bool time_text(char *text, size_t cap)
+{
+    struct tm tm;
+    time_t t;
+    const ntp_cfg_t *nc = ntp_cfg();
+
+    if (!nc->on || !ntp_synced())
+        return false;
+    t = (time_t)ntp_epoch_utc() + (time_t)ntp_tz_effective() * 3600;
+    gmtime_r(&t, &tm);
+    snprintf(text, cap, "%02d%02d%02d %02d%02d%02d",
+             tm.tm_hour, tm.tm_min, tm.tm_sec,
+             tm.tm_mday, tm.tm_mon + 1, tm.tm_year % 100);
+    return true;
+}
+
+static void exec_request(ske_req_t *req); /* вперёд: из push_time_if_needed */
+
+/* однократная отправка NTP-времени в прибор (DS1307) — ДЛЯ ЧУЖИХ
+ * задач (httpd): через очередь ske02_request. Из задачи Meter звать
+ * НЕЛЬЗЯ - она ждёт сама себя (deadlock на 5 с на каждый тик). */
+bool ske02_time_push(char *err, size_t errcap)
+{
+    ske_req_t r;
+
+    memset(&r, 0, sizeof(r));
+    if (!time_text(r.text, sizeof(r.text)))
+    {
+        snprintf(err, errcap, "%s", "время не синхронизировано");
+        return false;
+    }
+    r.cmd = SKEQ_SETTIME;
+    ske02_request(&r, 5000);
+    DBG("ske02: time push %s -> %s\n", r.text, r.err);
+    snprintf(err, errcap, "%s", r.err[0] ? r.err : "прибор отказал");
+    return r.result == BS_OK;
+}
+
+/* автоотправка: сразу после первой синхронизации, далее не чаще
+ * 2 раз в сутки (12 ч). Выполняется В ЗАДАЧЕ METER: exec_request
+ * напрямую, без очереди (иначе самоожидание) */
+static void push_time_if_needed(void)
+{
+    static TickType_t sLastPush;
+    static bool sEverPushed;
+    ske_req_t r;
+    TickType_t now = xTaskGetTickCount();
+
+    if (sEverPushed && now - sLastPush < pdMS_TO_TICKS(12UL * 3600 * 1000))
+        return;
+    memset(&r, 0, sizeof(r));
+    if (!time_text(r.text, sizeof(r.text)))
+        return;
+    r.cmd = SKEQ_SETTIME;
+    exec_request(&r);
+    DBG("ske02: auto time push %s -> %s\n", r.text, r.err);
+    if (r.result == BS_OK)
+    {
+        sLastPush = now;
+        sEverPushed = true;
+    }
+}
+
 static void exec_request(ske_req_t *req)
 {
     char cmd[64];
@@ -639,6 +706,21 @@ static void exec_request(ske_req_t *req)
 
     switch (req->cmd)
     {
+    case SKEQ_SETTIME:
+        {
+            /* req->text уже "HHMMSS DDMMYY" (локальное время) */
+            snprintf(cmd, sizeof(cmd), "TIME %s", req->text);
+            if (!txt_command(cmd, reply_cb, &rc_, SKE_CMD_TIMEOUT))
+            {
+                req->result = SKE_ERR_TRANSPORT;
+                break;
+            }
+            req->result = rc_.seen_ok ? BS_OK
+                              : (rc_.status ? rc_.status : BS_BAD_TYPE);
+            snprintf(req->err, sizeof(req->err), "%.40s", rc_.value_line);
+        }
+        break;
+
     case SKEQ_SET:
         {
             TreeRec rec;
@@ -856,6 +938,7 @@ static void meter_task(void *arg)
                         DBG("ske02: cfg rev %u (debounced)\n",
                             (unsigned)sCtx.vals.cfg_rev);
                     }
+                    push_time_if_needed();
                     if (sLastOk - lastBeat >= pdMS_TO_TICKS(10000))
                     {
                         lastBeat = sLastOk;

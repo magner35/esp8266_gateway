@@ -20,7 +20,8 @@ typedef enum
     SKEQ_UNLOCK,   /* p <pass> */
     SKEQ_REFRESH,  /* full 'l' listing (the "Обновить" button) */
     SKEQ_RESCAN,   /* wipe the cache + full rediscovery */
-    SKEQ_REBOOT    /* r */
+    SKEQ_REBOOT,   /* r */
+    SKEQ_SETTIME   /* TIME hhmmss ddmmyy: толкнуть NTP-время в DS1307 */
 } ske_cmd_t;
 
 typedef struct
@@ -35,6 +36,8 @@ typedef struct
 } ske_req_t;
 
 void ske02_start(void);            /* create the task (from app_main) */
+#include <stddef.h>
+bool ske02_time_push(char *err, size_t errcap); /* отправить NTP-время в прибор (err: причина отказа) */
 
 /* async command API: queues the request and waits (timeout ms) for it */
 bool ske02_request(const ske_req_t *req, uint32_t timeout_ms);

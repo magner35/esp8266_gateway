@@ -868,9 +868,6 @@ static esp_err_t h_api_ntp_get(httpd_req_t *req)
 {
     const ntp_cfg_t *c = ntp_cfg();
     char out[256];
-    /* ленивый доза́прос пояса: страница открыта, а он не определён */
-    if (!ntp_tz_resolved())
-        ntp_tz_auto_fetch();
     httpd_resp_set_type(req, "application/json");
     snprintf(out, sizeof(out),
              "{\"on\":%u,\"auto\":%u,\"tz\":%d,\"tzok\":%u,"
@@ -880,6 +877,27 @@ static esp_err_t h_api_ntp_get(httpd_req_t *req)
              (int)ntp_tz_effective(), (unsigned)ntp_tz_resolved(),
              c->s1, c->s2,
              (unsigned)ntp_synced(), (unsigned long)ntp_epoch_utc());
+    httpd_resp_send(req, out, strlen(out));
+    return ESP_OK;
+}
+
+/* принудительная отправка времени в прибор (кнопка на Сервисе) */
+static esp_err_t h_api_ntp_push(httpd_req_t *req)
+{
+    char out[192];
+    char esc[96];
+    char err[64];
+    bool ok;
+    httpd_resp_set_type(req, "application/json");
+    err[0] = 0;
+    ok = ske02_time_push(err, sizeof(err));
+    if (ok)
+        snprintf(out, sizeof(out), "{\"ok\":true}");
+    else
+    {
+        json_escape(err[0] ? err : "ошибка", esc, sizeof(esc));
+        snprintf(out, sizeof(out), "{\"ok\":false,\"error\":\"%s\"}", esc);
+    }
     httpd_resp_send(req, out, strlen(out));
     return ESP_OK;
 }
@@ -1097,6 +1115,9 @@ void web_start(void)
     httpd_register_uri_handler(sServer, &u);
     u = (httpd_uri_t){.uri = "/api/ntp", .method = HTTP_POST,
                       .handler = h_api_ntp_set};
+    httpd_register_uri_handler(sServer, &u);
+    u = (httpd_uri_t){.uri = "/api/ntp/push", .method = HTTP_POST,
+                      .handler = h_api_ntp_push};
     httpd_register_uri_handler(sServer, &u);
     u = (httpd_uri_t){.uri = "/api/widgets", .method = HTTP_GET,
                       .handler = h_api_widgets_get};

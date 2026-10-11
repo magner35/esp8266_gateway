@@ -14,6 +14,8 @@
 
 #include "lwip/apps/sntp.h"
 #include "esp_http_client.h"
+#include "lwip/sockets.h"
+#include "lwip/netdb.h"
 
 #include "debug.h"
 #include "ntp.h"
@@ -26,6 +28,7 @@ static bool sSynced = false;
 static int8_t sAutoTz = 0;
 static bool sAutoTzOk = false;
 static bool sTzBusy = false;
+static TickType_t sTzRetryAfter = 0; /* бэкофф после неудачного цикла */
 
 void ntp_tz_auto_fetch(void); /* вперёд: зовётся из on_sync */
 
@@ -46,10 +49,66 @@ void ntp_init(void)
 
 /* ---- авто-часовой пояс ------------------------------------------- */
 
-/* HTTP(S) GET через esp_http_client (синхронный open/read, буфер в
- * стеке задачи): ip-api.com по HTTP, подстраховка ipapi.co по HTTPS
- * (сертификат не проверяется - CONFIG_ESP_TLS_SKIP_SERVER_CERT_VERIFY;
- * для геолокации это приемлемый риск) */
+/* HTTP-провайдер (ip-api.com, порт 80) - СЫРЫМ TCP-сокетом: без
+ * esp-tls/TLS-кучи, которая на повторных попытках просаживала кучу
+ * шлюза почти в ноль. Ответ копится циклом recv до закрытия. */
+static bool tz_http_plain(char *buf, size_t cap, const char *host,
+                          const char *path)
+{
+    struct hostent *he;
+    struct sockaddr_in sa;
+    char req[96];
+    size_t len = 0;
+    struct timeval tv = { .tv_sec = 5, .tv_usec = 0 };
+    int fd, got;
+
+    he = gethostbyname(host);
+    if (!he || !he->h_addr_list[0])
+    {
+        DBG("ntp: tz dns fail %s\n", host);
+        return false;
+    }
+    memset(&sa, 0, sizeof(sa));
+    sa.sin_family = AF_INET;
+    sa.sin_port = htons(80);
+    memcpy(&sa.sin_addr, he->h_addr_list[0], 4);
+    snprintf(req, sizeof(req),
+             "GET %s HTTP/1.0\r\nHost: %s\r\n\r\n", path, host);
+    fd = socket(AF_INET, SOCK_STREAM, 0);
+    if (fd < 0)
+    {
+        DBG("ntp: tz socket fail\n");
+        return false;
+    }
+    setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+    setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
+    if (connect(fd, (struct sockaddr *)&sa, sizeof(sa)) != 0)
+    {
+        close(fd);
+        DBG("ntp: tz connect fail %s\n", host);
+        return false;
+    }
+    if (send(fd, req, strlen(req), 0) <= 0)
+    {
+        close(fd);
+        DBG("ntp: tz send fail %s\n", host);
+        return false;
+    }
+    while (len < cap - 1)
+    {
+        got = recv(fd, buf + len, (int)(cap - 1 - len), 0);
+        if (got <= 0)
+            break;
+        len += (size_t)got;
+    }
+    close(fd);
+    buf[len] = 0;
+    DBG("ntp: tz %s -> %u bytes: %.40s\n", host, (unsigned)len, buf);
+    return len > 0 && strstr(buf, "200");
+}
+
+/* HTTPS-провайдер (ipapi.co) через esp_http_client: буфер в стеке
+ * задачи; сертификат не проверяется (SKIP_SERVER_CERT_VERIFY) */
 static bool tz_http_get(const char *url, char *buf, size_t cap)
 {
     esp_http_client_config_t cfg = {
@@ -58,6 +117,7 @@ static bool tz_http_get(const char *url, char *buf, size_t cap)
         .method = HTTP_METHOD_GET,
     };
     esp_http_client_handle_t h = esp_http_client_init(&cfg);
+    esp_err_t er;
     int rd, code;
     size_t len = 0;
     bool ok = false;
@@ -67,7 +127,8 @@ static bool tz_http_get(const char *url, char *buf, size_t cap)
         DBG("ntp: tz client init fail\n");
         return false;
     }
-    if (esp_http_client_open(h, 0) == ESP_OK)
+    er = esp_http_client_open(h, 0);
+    if (er == ESP_OK)
     {
         esp_http_client_fetch_headers(h);
         code = esp_http_client_get_status_code(h);
@@ -83,7 +144,7 @@ static bool tz_http_get(const char *url, char *buf, size_t cap)
         ok = (code == 200 && len > 0);
     }
     else
-        DBG("ntp: tz open fail %s\n", url);
+        DBG("ntp: tz open fail %s, err %d\n", url, (int)er);
     esp_http_client_cleanup(h);
     return ok;
 }
@@ -94,7 +155,7 @@ static bool tz_try_ipapi_com(char *buf, int8_t *out)
     char *o;
     long sec;
     int8_t h;
-    if (!tz_http_get("http://ip-api.com/json/?fields=offset", buf, 512))
+    if (!tz_http_plain(buf, 512, "ip-api.com", "/json/?fields=offset"))
         return false;
     o = strstr(buf, "\"offset\":");
     if (!o)
@@ -160,7 +221,12 @@ static void tz_fetch_task(void *arg)
         DBG("ntp: auto tz = UTC%+d\n", (int)h);
     }
     else
-        DBG("ntp: tz lookup failed (3 tries)\n");
+    {
+        /* БЭКОФФ: неудача бьёт по куче (TLS-попытки), повтор не раньше
+         * чем через час; "Сохранить" сбрасывает ожидание */
+        sTzRetryAfter = xTaskGetTickCount() + pdMS_TO_TICKS(3600UL * 1000);
+        DBG("ntp: tz lookup failed, retry in 1h\n");
+    }
     sTzBusy = false;
     vTaskDelete(NULL);
 }
@@ -169,6 +235,8 @@ void ntp_tz_auto_fetch(void)
 {
     if (!sCfg.on || !sCfg.autoTz || sAutoTzOk || sTzBusy)
         return;
+    if ((int32_t)(xTaskGetTickCount() - sTzRetryAfter) < 0)
+        return; /* бэкофф после неудачи */
     sTzBusy = true;
     if (xTaskCreate(tz_fetch_task, "tzq", 4096, NULL, 3, NULL) != pdPASS)
         sTzBusy = false;
@@ -206,6 +274,7 @@ void ntp_set(const ntp_cfg_t *c)
     /* переключение "Авто" взад-вперёд - способ перезапросить пояс */
     if (autoChanged && c->autoTz)
         sAutoTzOk = false;
+    sTzRetryAfter = 0; /* "Сохранить" сбрасывает бэкофф */
     ntp_apply();
 }
 
