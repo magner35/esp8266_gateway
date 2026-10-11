@@ -119,7 +119,11 @@
         .msg {
             min-height: 18px;
             font-size: 13px;
-            color: #3fb950
+            color: #52e052
+        }
+
+        .msg.err {
+            color: #e05252
         }
     </style>
 </head>
@@ -133,7 +137,7 @@
     <!-- перезапуск прибора: переехал с панели -->
     <div class="box">
         <h2 style="margin:0 0 6px">Перезапуск прибора</h2>
-        <button class="warn" onclick="rebootDev()">&#8635; Перезапустить прибор</button>
+        <button class="warn" onclick="rebootDev()">&#8635; Перезапуск</button>
     </div>
 
     <!-- NTP: два сервера + ручной ввод; время уйдёт в прибор для DS1307 -->

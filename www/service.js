@@ -39,32 +39,53 @@
       if (a) $('ntpTz').disabled = a.checked;
     }
 
+    /* Сохранить: сохранить настройки -> дождаться синхронизации ->
+     * отправить TIME в прибор. Неудача = короткое сообщение, TIME не шлём */
     async function ntpSave() {
-      const body = 'on=' + ($('ntpOn').checked ? 1 : 0) +
-          'auto=' + ($('ntpAuto').checked ? 1 : 0) +
-        '&s1=' + encodeURIComponent($('ntpS1').value.trim()) +
-        '&s2=' + encodeURIComponent($('ntpS2').value.trim()) +
-        '&tz=' + encodeURIComponent($('ntpTz').value || 0);
+      const m = $('ntpMsg');
       try {
-        const r = await (await fetch('/api/ntp', {
+        await fetch('/api/ntp', {
           method: 'POST',
           headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-          body
-        })).json();
-        ntpShow(r);
-        /* сохранение = сразу и отправка времени в прибор */
-        let msg = 'сохранено';
+          body: 'on=' + ($('ntpOn').checked ? 1 : 0) +
+            '&auto=' + ($('ntpAuto').checked ? 1 : 0) +
+            '&s1=' + encodeURIComponent($('ntpS1').value.trim()) +
+            '&s2=' + encodeURIComponent($('ntpS2').value.trim()) +
+            '&tz=' + encodeURIComponent($('ntpTz').value || 0)
+        });
+      } catch (e) { m.className = 'msg err'; m.textContent = 'нет ответа от шлюза'; return }
+      if (!$('ntpOn').checked) { m.className = 'msg'; m.textContent = ''; return }
+      /* с "Авто" полный цикл = sync + определение пояса по IP;
+       * пока оба не готовы - TIME не шлём */
+      const wantAuto = $('ntpAuto').checked;
+      m.className = 'msg';
+      m.textContent = 'синхронизация…';
+      let synced = false, tzok = false;
+      for (let i = 0; i < 15; i++) {
+        await new Promise(r => setTimeout(r, 1000));
         try {
-          const p = await (await fetch('/api/ntp/push', { method: 'POST' })).json();
-          if (p.ok) msg += ', время в приборе';
-          else msg += ' (время не отправлено: ' + p.error + ')';
+          const st = await (await fetch('/api/ntp')).json();
+          synced = !!st.sync;
+          tzok = !!st.tzok;
         } catch (e) { }
-        const m = $('ntpMsg');
-        m.textContent = msg;
-        setTimeout(() => { if (m.textContent === msg) m.textContent = '' }, 4000);
-      } catch (e) {
-        $('ntpMsg').textContent = 'нет ответа от шлюза';
+        if (synced && (!wantAuto || tzok)) break;
+        if (synced && wantAuto && !tzok) m.textContent = 'определяем часовой пояс…';
       }
+      if (!synced) {
+        m.className = 'msg err';
+        m.textContent = 'серверы времени не ответили, не синхронизировано';
+        return;
+      }
+      if (wantAuto && !tzok) {
+        m.className = 'msg err';
+        m.textContent = 'часовой пояс не определён, не синхронизировано';
+        return;
+      }
+      try {
+        const r = await (await fetch('/api/ntp/push', { method: 'POST' })).json();
+        if (r.ok) { m.className = 'msg'; m.textContent = 'синхронизировано' }
+        else { m.className = 'msg err'; m.textContent = 'не синхронизировано: ' + r.error }
+      } catch (e) { m.className = 'msg err'; m.textContent = 'нет ответа от шлюза' }
     }
 
     ntpLoad();
