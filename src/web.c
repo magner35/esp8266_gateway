@@ -21,6 +21,7 @@
 #define PAGE_APP_GZ_LEN ((int)sizeof(PAGE_APP_GZ))
 #include "protocol.h"
 #include "ske02.h"
+#include "ntp.h"
 #include "tree_store.h"
 #include "storage.h"
 #include "wifi.h"
@@ -861,6 +862,58 @@ static esp_err_t h_api_reboot(httpd_req_t *req)
     return ESP_OK;
 }
 
+/* ---- NTP: конфиг + статус синхронизации -------------------------- */
+
+static esp_err_t h_api_ntp_get(httpd_req_t *req)
+{
+    const ntp_cfg_t *c = ntp_cfg();
+    char out[224];
+    httpd_resp_set_type(req, "application/json");
+    snprintf(out, sizeof(out),
+             "{\"on\":%u,\"tz\":%d,\"s1\":\"%s\",\"s2\":\"%s\","
+             "\"sync\":%u,\"utc\":%lu}",
+             (unsigned)c->on, (int)c->tz, c->s1, c->s2,
+             (unsigned)ntp_synced(), (unsigned long)ntp_epoch_utc());
+    httpd_resp_send(req, out, strlen(out));
+    return ESP_OK;
+}
+
+static esp_err_t h_api_ntp_set(httpd_req_t *req)
+{
+    char body[256];
+    char s1[32], s2[32], tz[8], on[8];
+    int len = httpd_req_recv(req, body, sizeof(body) - 1);
+    ntp_cfg_t c;
+
+    if (len <= 0)
+    {
+        httpd_resp_set_status(req, "400 Bad Request");
+        httpd_resp_send(req, NULL, 0);
+        return ESP_FAIL;
+    }
+    body[len] = 0;
+    if (!field(body, "s1", s1, sizeof(s1)))
+        s1[0] = 0;
+    if (!field(body, "s2", s2, sizeof(s2)))
+        s2[0] = 0;
+    if (!field(body, "tz", tz, sizeof(tz)))
+        tz[0] = 0;
+    if (!field(body, "on", on, sizeof(on)))
+        on[0] = 0;
+
+    storage_get_ntp(&c);
+    c.on = (on[0] == '1' || on[0] == 'o' || on[0] == 't');
+    c.tz = (int8_t)atoi(tz);
+    if (c.tz < -12)
+        c.tz = -12;
+    if (c.tz > 14)
+        c.tz = 14;
+    snprintf(c.s1, sizeof(c.s1), "%s", s1);
+    snprintf(c.s2, sizeof(c.s2), "%s", s2);
+    ntp_set(&c);
+    return h_api_ntp_get(req);
+}
+
 static esp_err_t h_api_widgets_get(httpd_req_t *req)
 {
     char *buf = malloc(4200);
@@ -956,7 +1009,7 @@ static const char *const sCaptiveProbes[] = {
 void web_start(void)
 {
     httpd_config_t cfg = HTTPD_DEFAULT_CONFIG();
-    cfg.max_uri_handlers = 32;   /* 28 needed: 17 api/pages + 11 captive */
+    cfg.max_uri_handlers = 36;   /* 32 needed: 19 api/pages + 11 captive + запас */
     /* ВАЖНО: не меньше 8 КБ — h_scan держит на стеке ~2.7 КБ буферов
      * + кадры; на 6 КБ стек переполнялся и затаптывал кучу (куча
      * "уменьшалась", страница портала со сканом ломалась) */
@@ -993,6 +1046,8 @@ void web_start(void)
     httpd_register_uri_handler(sServer, &u);
     u = (httpd_uri_t){.uri = "/panel", .method = HTTP_GET, .handler = h_app};
     httpd_register_uri_handler(sServer, &u);
+    u = (httpd_uri_t){.uri = "/service", .method = HTTP_GET, .handler = h_app};
+    httpd_register_uri_handler(sServer, &u);
     u = (httpd_uri_t){.uri = "/widgets", .method = HTTP_GET, .handler = h_app};
     httpd_register_uri_handler(sServer, &u);
     u = (httpd_uri_t){.uri = "/scan", .method = HTTP_GET, .handler = h_scan};
@@ -1025,6 +1080,12 @@ void web_start(void)
     httpd_register_uri_handler(sServer, &u);
     u = (httpd_uri_t){.uri = "/api/forgetwifi", .method = HTTP_POST,
                       .handler = h_api_forgetwifi};
+    httpd_register_uri_handler(sServer, &u);
+    u = (httpd_uri_t){.uri = "/api/ntp", .method = HTTP_GET,
+                      .handler = h_api_ntp_get};
+    httpd_register_uri_handler(sServer, &u);
+    u = (httpd_uri_t){.uri = "/api/ntp", .method = HTTP_POST,
+                      .handler = h_api_ntp_set};
     httpd_register_uri_handler(sServer, &u);
     u = (httpd_uri_t){.uri = "/api/widgets", .method = HTTP_GET,
                       .handler = h_api_widgets_get};

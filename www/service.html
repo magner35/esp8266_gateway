@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="ru">
+
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <style>
+        body {
+            font: 14px/1.45 system-ui, sans-serif;
+            background: #000000;
+            color: #d8dee9;
+            margin: 0;
+            padding: 4px
+        }
+
+        header {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 10px
+        }
+
+        h1 {
+            font-size: 18px;
+            margin: 0 8px 0 0
+        }
+
+        h2 {
+            font-size: 15px;
+            margin: 16px 0 6px
+        }
+
+        button {
+            background: #21366c;
+            color: #fff;
+            border: 0;
+            border-radius: 4px;
+            padding: 5px 10px;
+            cursor: pointer;
+            font-size: 13px
+        }
+
+        button.warn {
+            background: #4a2a2a
+        }
+
+        input {
+            box-sizing: border-box;
+            background: #0e1116;
+            border: 1px solid #39414f;
+            border-radius: 4px;
+            color: #d8dee9;
+            padding: 4px 6px;
+            font-size: 13px
+        }
+
+        label {
+            display: block;
+            color: #8b94a7;
+            font-size: 12px;
+            margin: 8px 0 3px
+        }
+
+        .row {
+            display: flex;
+            gap: 8px;
+            align-items: center
+        }
+
+        .box {
+            background: #14171c;
+            border: 1px solid #2a3140;
+            border-radius: 8px;
+            padding: 10px;
+            margin-bottom: 12px
+        }
+
+        .srv {
+            width: 100%
+        }
+
+        .tz {
+            width: 70px
+        }
+
+        .chk {
+            display: flex;
+            gap: 6px;
+            align-items: center;
+            margin: 4px 0
+        }
+
+        .chk input {
+            width: auto
+        }
+
+        .st {
+            font-size: 12px;
+            color: #8b94a7
+        }
+
+        .st b {
+            color: #d8dee9;
+            font-family: ui-monospace, Consolas, monospace
+        }
+
+        .ok {
+            color: #3fb950
+        }
+
+        .msg {
+            min-height: 18px;
+            font-size: 13px;
+            color: #3fb950
+        }
+    </style>
+</head>
+
+<body>
+    <header>
+        <h1>Сервис</h1>
+        <a href="#panel" style="margin-left:auto"><button>&#8592; Назад</button></a>
+    </header>
+
+    <!-- перезапуск прибора: переехал с панели -->
+    <div class="box">
+        <h2 style="margin:0 0 6px">Перезапуск прибора</h2>
+        <div class="st" style="margin-bottom:8px">Полный перезапуск СКЭ-02 по служебной команде консоли.</div>
+        <button class="warn" onclick="rebootDev()">&#8635; Перезапустить прибор</button>
+    </div>
+
+    <!-- NTP: два сервера + ручной ввод; время уйдёт в прибор для DS1307 -->
+    <div class="box">
+        <h2 style="margin:0 0 6px">Сервер времени NTP</h2>
+        <label class="chk"><input type="checkbox" id="ntpOn"> Синхронизировать время
+            (и корректировать таймер прибора)</label>
+        <label>Сервер 1</label>
+        <input class="srv" id="ntpS1" maxlength="31" autocapitalize="off" spellcheck="false">
+        <label>Сервер 2 (подстраховка, можно оставить пустым)</label>
+        <input class="srv" id="ntpS2" maxlength="31" autocapitalize="off" spellcheck="false">
+        <label>Часовой пояс, UTC ± ч</label>
+        <input class="tz" id="ntpTz" type="number" min="-12" max="14" step="1">
+        <div class="row" style="margin-top:10px">
+            <button onclick="ntpSave()">Сохранить</button>
+            <span class="msg" id="ntpMsg"></span>
+        </div>
+        <div class="st" id="ntpSt" style="margin-top:8px"></div>
+    </div>
+
+    <script src="/service.js"></script>
+</body>
+
+</html>

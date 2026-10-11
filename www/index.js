@@ -198,10 +198,17 @@ function vApply(d) {
         hi = barHi[w.k];
         if (hi - (barLo[w.k] || 0) < 1e-9) hi = (barLo[w.k] || 0) + 1;
       }
+      /* перелив: процент показываем РЕАЛЬНЫЙ (>100%), дорожка при этом
+       * заполнена целиком, а заливка и цифра - тревожного цвета */
+      const over = v / hi * 100 > 100.5;
       const pct = Math.max(0, Math.min(100, v / hi * 100));
       f.style.width = pct.toFixed(1) + '%';
+      f.classList.toggle('alarm', over);
       const t = $('bp_' + w.k);
-      if (t) t.textContent = pct.toFixed(0) + '%';
+      if (t) {
+        t.classList.toggle('alarm', over);
+        t.textContent = (over ? v / hi * 100 : pct).toFixed(0) + '%';
+      }
       /* уставка-100% с единицами, прижата вправо в строке имени;
        * для Qmax единицы фиксированы - л/мин (уставка в них и задана) */
       const su = $('su_' + w.k);

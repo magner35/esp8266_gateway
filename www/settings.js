@@ -95,7 +95,7 @@
     }
     let curTab = COMMON;                 /* active L2 tab name of the section */
     function setRender(fp) {
-      if (!P.length) { $('tabs').innerHTML = ''; $('subtabs').innerHTML = ''; $('sections').innerHTML = '<p>Опрос прибора… если через минуту пусто — проверьте подключение UART и питание, затем нажмите «Обновить».</p>'; built = fp; return }
+      if (!P.length) { $('tabs').innerHTML = ''; $('subtabs').innerHTML = ''; $('sections').innerHTML = '<p>Опрос прибора… если через минуту пусто — проверьте подключение UART и питание, затем нажмите «Обновить».</p>'; built = fp; syncPw(); return }
       let h = '';
       SECT.forEach((s, k) => h += '<button class="' + (k === cur ? 'act' : '') + '" onclick="go(' + k + ')">' + esc(s) + '</button>');
       $('nav').innerHTML = h;

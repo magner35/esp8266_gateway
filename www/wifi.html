@@ -5,23 +5,38 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width,initial-scale=1">
     <style>
+        /* --- 1. общие ---------------------------------------------------- */
         body {
-            font: 13px/1.45 system-ui, sans-serif;
+            font: 14px/1.45 system-ui, sans-serif;
             background: #000000;
+            /* цвет фона страницы (как на главной) */
             color: #d8dee9;
-            max-width: 520px;
-            margin: auto;
-            padding: 0 12px
+            margin: 0;
+            padding: 4px
+        }
+
+        header {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            align-items: center;
+            margin-bottom: 10px
         }
 
         h1 {
-            font-size: 18px
+            font-size: 18px;
+            margin: 0 8px 0 0
         }
 
-        label {
-            display: block;
-            margin: 12px 0 4px;
-            color: #8b94a7
+        button {
+            background: #21366c;
+            /* синяя кнопка */
+            color: #fff;
+            border: 0;
+            border-radius: 4px;
+            padding: 3px 5px;
+            cursor: pointer;
+            font-size: 13px
         }
 
         input {
@@ -31,19 +46,7 @@
             color: #d8dee9;
             border: 1px solid #39414f;
             border-radius: 4px;
-            padding: 8px
-        }
-
-        /* Размер кнопки */
-        button {
-            margin-top: 14px;
-            background: #21366c;
-            color: #fff;
-            border: 0;
-            border-radius: 4px;
-            padding: 3px 5px;
-            cursor: pointer;
-            font-size: 13px
+            padding: 4px
         }
 
         table {
@@ -55,6 +58,23 @@
         td {
             padding: 3px 5px;
             border-top: 1px solid #2a3140
+        }
+
+        /* уровень сигнала и замок - по центру своих колонок */
+        td:nth-child(2),
+        td:nth-child(3) {
+            text-align: center
+        }
+
+        /* ячейка кнопки - минимальная (по содержимому): тянется ПЕРВАЯ
+ * колонка с именем сети, а уровень/замок/кнопка_packаются вправо */
+        td:first-child {
+            width: 100%
+        }
+
+        /* последняя ячейка строки (кнопка «Выбрать») - прижата вправо */
+        td:last-child {
+            text-align: right
         }
 
         .pick {

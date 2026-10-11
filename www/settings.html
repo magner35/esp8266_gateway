@@ -16,8 +16,17 @@
      *   5. панель действий: #actions (пароль/Применить/Обновить),
      *      #filter (фильтр поиска), #secPw, tr.dirty, button.run
      *   6. F|V-грид линеаризации:
+          /* заголовок "SKE-02 Настройки" */
 
-    /* заголовок "SKE-02 Настройки" */
+    body {
+      font: 14px/1.45 system-ui, sans-serif;
+      background: #000000;
+      /* цвет фона страницы (как на главной) */
+      color: #d8dee9;
+      margin: 0;
+      padding: 4px
+    }
+
     h1 {
       font-size: 18px;
       margin: 0 8px 0 0
@@ -26,8 +35,10 @@
     /* шапка - flex: «Назад» прижата вправо (margin-left:auto) */
     header {
       display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
       align-items: center;
-      gap: 8px
+      margin-bottom: 10px
     }
 
     /* все обычные кнопки */

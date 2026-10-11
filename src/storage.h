@@ -26,4 +26,18 @@ void storage_set_wifi(const char *ssid, const char *pass);
 bool widgets_load(char *buf, size_t cap); /* false = not stored yet */
 bool widgets_store(const char *json, size_t len);
 
+/* NTP-настройки: два сервера + смещение UTC; on = синхронизировать и
+ * (в дальнейшем) корректировать таймер DS1307 прибора */
+typedef struct
+{
+    uint16_t magic;
+    uint8_t on;
+    int8_t tz; /* смещение UTC в часах (может быть отрицательным) */
+    char s1[32];
+    char s2[32];
+} ntp_cfg_t;
+
+void storage_get_ntp(ntp_cfg_t *c); /* дефолты при пустом NVS */
+bool storage_set_ntp(const ntp_cfg_t *c);
+
 #endif /* GW_STORAGE_H */

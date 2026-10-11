@@ -12,6 +12,7 @@
 
 #include "debug.h"
 #include "storage.h"
+#include "ntp.h"
 
 #define GW_HOSTNAME   "ske02-gw"
 #define GW_AP_PASS    "ske02setup"
@@ -86,6 +87,7 @@ static void on_event(void *arg, esp_event_base_t base, int32_t id,
             sStaEverConnected = true;
             sStaFails = 0;
             xEventGroupSetBits(sEvents, EVT_GOT_IP);
+            ntp_apply();   /* появился интернет - запуск SNTP */
             if (data)
                 DBG("wifi: got ip %s\n",
                     ip4addr_ntoa(&((const ip_event_got_ip_t *)data)->ip_info.ip));

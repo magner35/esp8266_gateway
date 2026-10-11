@@ -238,6 +238,7 @@ def values(since=0):
 
 class H(http.server.SimpleHTTPRequestHandler):
     WCFG = {"rev": 0, "cfg": None}   # NVS stand-in, survives page reloads
+    NTP = {"on": False, "s1": "pool.ntp.org", "s2": "time.google.com", "tz": 3}
 
     def __init__(self, *a, **kw):
         super().__init__(*a, directory=str(WWW), **kw)
@@ -258,7 +259,7 @@ class H(http.server.SimpleHTTPRequestHandler):
 
     # SPA: все страницы отдают скомпонованный app.html (роутер внутри)
     PAGES = {p: "app.html" for p in
-             ["/", "/index.html", "/settings", "/wifi", "/panel", "/widgets"]}
+             ["/", "/index.html", "/settings", "/wifi", "/panel", "/widgets", "/service"]}
 
     def do_GET(self):
         self._path = urllib.parse.urlparse(self.path).path
@@ -291,6 +292,9 @@ class H(http.server.SimpleHTTPRequestHandler):
             ]})
         elif self.path == "/api/widgets":  # self.path: _path ставится только в do_GET
             self._json(self.WCFG)
+        elif self.path == "/api/ntp":
+            self._json({**self.NTP, "sync": self.NTP["on"],
+                        "utc": int(time.time()) if self.NTP["on"] else 0})
         elif self._path == "/stamp":
             self._json({"t": www_stamp()})
         elif self._path in self.PAGES:
@@ -335,6 +339,13 @@ class H(http.server.SimpleHTTPRequestHandler):
             if p['o'] and v in p['o']:
                 p['r'] = p['o'].index(v)
             self._json({"ok": True, "value": v})
+        elif self.path == "/api/ntp":
+            if self.command == "POST":
+                type(self).NTP.update({"on": f.get("on") == "1",
+                                       "s1": f.get("s1", ""), "s2": f.get("s2", ""),
+                                       "tz": int(f.get("tz") or 0)})
+            self._json({**self.NTP, "sync": self.NTP["on"],
+                        "utc": int(time.time()) if self.NTP["on"] else 0})
         elif self.path == "/api/run":
             self._json({"ok": True})
         elif self.path == "/api/widgets":   # self.path! _path ставится только в do_GET

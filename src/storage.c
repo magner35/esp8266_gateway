@@ -104,3 +104,42 @@ bool widgets_store(const char *json, size_t len)
     nvs_close(h);
     return ok;
 }
+
+/* ---- NTP-настройки ---------------------------------------------- */
+
+#define NTP_MAGIC 0x4E54 /* "NT" */
+
+void storage_get_ntp(ntp_cfg_t *c)
+{
+    nvs_handle_t h;
+    size_t len = sizeof(*c);
+    ntp_cfg_t def = {
+        .magic = NTP_MAGIC, .on = 0, .tz = 3,
+        .s1 = "pool.ntp.org", .s2 = "time.google.com",
+    };
+    *c = def;
+    if (nvs_open(NVS_NAMESPACE, NVS_READONLY, &h) != ESP_OK)
+        return;
+    if (nvs_get_blob(h, "ntp", c, &len) == ESP_OK &&
+        len == sizeof(*c) && c->magic == NTP_MAGIC)
+    {
+        /* строковые поля обязаны быть NUL-завершёнными */
+        c->s1[sizeof(c->s1) - 1] = 0;
+        c->s2[sizeof(c->s2) - 1] = 0;
+    }
+    else
+        *c = def;
+    nvs_close(h);
+}
+
+bool storage_set_ntp(const ntp_cfg_t *c)
+{
+    nvs_handle_t h;
+    bool ok;
+    if (nvs_open(NVS_NAMESPACE, NVS_READWRITE, &h) != ESP_OK)
+        return false;
+    ok = (nvs_set_blob(h, "ntp", c, sizeof(*c)) == ESP_OK &&
+          nvs_commit(h) == ESP_OK);
+    nvs_close(h);
+    return ok;
+}

@@ -114,7 +114,7 @@ def js_minified(fname: str) -> str:
 # порядок секций единого приложения; секция из модуля filename
 # получает id sec-<имя без расширения>
 SECTIONS = ["index.html", "widgets.html", "panel.html",
-            "settings.html", "wifi.html"]
+            "settings.html", "wifi.html", "service.html"]
 
 
 def scope_css(css: str, sid: str) -> str:

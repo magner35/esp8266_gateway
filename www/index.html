@@ -241,7 +241,9 @@
       font-family: ui-monospace, Consolas, monospace;
       font-size: 20px;
       /* размер цифр значения */
-      white-space: nowrap
+      white-space: nowrap;
+      /* text-shadow: 0 0 8px #ffffff, 0 0 8px #ffffff */
+      text-shadow: 0 0 8px #52607e85, 0 0 8px #52607e85
     }
 
     .vcard.wide {
@@ -256,7 +258,7 @@
     }
 
     /* canvas самого графика внутри карточки */
-    /* график: высота от canvas (3x барграф), НЕ фиксированные 44px */
+    /* график: высота от canvas (2x барграф), НЕ фиксированные 44px */
     .vcard.chart {
       height: auto;
       overflow: visible;
@@ -265,7 +267,7 @@
 
     .vcard.chart canvas {
       width: 100%;
-      /* высота задаётся из JS: 3 × высота карточки параметра */
+      /* высота задаётся из JS: 2 × высота карточки параметра */
       display: block
     }
 
@@ -337,8 +339,7 @@
       width: 0;
       transition: width .20s ease-out;
       /* плавность движения заливки */
-      /* green torn stripe: wide dashes, hairline gaps */
-      background: repeating-linear-gradient(90deg, #3f5dbf 0 10px, transparent 10px 12px)
+      background: repeating-linear-gradient(90deg, #314892 0 10px, transparent 10px 12px)
         /* штрих 8px, зазор 2px */
         /* цвет штриха */
     }
@@ -349,6 +350,16 @@
       flex-direction: column;
       gap: 2px;
       padding: 3px
+    }
+
+    /* ПЕРЕЛИВ >100%: заливка тревожно-красная, процент ярче */
+    .hfill.alarm {
+      background: repeating-linear-gradient(90deg, #7d2727 0 10px, transparent 10px 12px)
+    }
+
+    .bpct.alarm {
+      color: #ffffff;
+      text-shadow: 0 0 4px #400, 0 0 4px #400
     }
 
     /* дорожка внутри карточки барграфа - чуть выше */
@@ -422,7 +433,7 @@
     /* подпись карточки бита: мелкая, переносится по пробелам */
     .vcard.wbit .vname {
       white-space: normal;
-      font-size: 12px;
+      font-size: 11px;
       line-height: 1.15;
       color: #a8bfc5;
       overflow: hidden
@@ -436,7 +447,7 @@
       border-radius: 6px;
       background: #0e1116;
       /* inactive level - keep in sync with BITOFF */
-      transition: background .15s
+      transition: background .2s
         /* плавность включения */
     }
 
@@ -463,7 +474,7 @@
       cursor: pointer;
       user-select: none;
       font-weight: 650;
-      font-size: 18px;
+      font-size: 17px;
       color: #E0E0E0;
     }
 

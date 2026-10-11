@@ -209,10 +209,10 @@ const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;'
      * current firmware and follows Стоп until one appears.
      */
     const BTN = {
-      stop:  { n: 'СТОП',  col: '#a23b2e', h: 'стоп дозатора' },
-      start: { n: 'СТАРТ', col: '#1d5c2f', h: 'старт дозатора' },
-      pause: { n: 'ПАУЗА', col: '#b58a2e', h: 'пауза дозатора' },
-      reset: { n: 'СБРОС', col: '#2a5bdb', h: 'сброс объёма' }
+      stop:  { n: 'СТОП',  col: '#802f24', h: 'стоп дозатора' },
+      start: { n: 'СТАРТ', col: '#1e6131', h: 'старт дозатора' },
+      pause: { n: 'ПАУЗА', col: '#856622', h: 'пауза дозатора' },
+      reset: { n: 'СБРОС', col: '#1a3c91', h: 'сброс объёма' }
     };
     let BTNP = { mode: 89, reset: 142 };   /* param ids, refreshed by paramsTick */
     async function btnAct(mode) {

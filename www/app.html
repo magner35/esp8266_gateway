@@ -123,7 +123,8 @@ button,input,select,textarea{font:inherit;color:inherit}
     }#sec-main .vval {
       font-family: ui-monospace, Consolas, monospace;
       font-size: 20px;
-      white-space: nowrap
+      white-space: nowrap;
+      text-shadow: 0 0 8px #52607e85, 0 0 8px #52607e85
     }#sec-main .vcard.wide {
       grid-column: span 4
     }#sec-main .vcard.chart {
@@ -169,12 +170,17 @@ button,input,select,textarea{font:inherit;color:inherit}
       height: 100%;
       width: 0;
       transition: width .20s ease-out;
-      background: repeating-linear-gradient(90deg, #3f5dbf 0 10px, transparent 10px 12px)
+      background: repeating-linear-gradient(90deg, #314892 0 10px, transparent 10px 12px)
     }#sec-main .vcard.wbar {
       display: flex;
       flex-direction: column;
       gap: 2px;
       padding: 3px
+    }#sec-main .hfill.alarm {
+      background: repeating-linear-gradient(90deg, #7d2727 0 10px, transparent 10px 12px)
+    }#sec-main .bpct.alarm {
+      color: #ffffff;
+      text-shadow: 0 0 4px #400, 0 0 4px #400
     }#sec-main .vcard.wbar .hbar {
       height: 20px;
       margin-top: 0
@@ -216,7 +222,7 @@ button,input,select,textarea{font:inherit;color:inherit}
       padding: 3px 4px
     }#sec-main .vcard.wbit .vname {
       white-space: normal;
-      font-size: 12px;
+      font-size: 11px;
       line-height: 1.15;
       color: #a8bfc5;
       overflow: hidden
@@ -225,7 +231,7 @@ button,input,select,textarea{font:inherit;color:inherit}
       border: 1px solid #39414f;
       border-radius: 6px;
       background: #0e1116;
-      transition: background .15s
+      transition: background .2s
     }#sec-main .bitlamp.on {
       box-shadow: 0 0 6px 0 currentColor
     }#sec-main .vcard.wbtn {
@@ -242,7 +248,7 @@ button,input,select,textarea{font:inherit;color:inherit}
       cursor: pointer;
       user-select: none;
       font-weight: 650;
-      font-size: 18px;
+      font-size: 17px;
       color: #E0E0E0;
     }#sec-main .vcard.wbtn:active {
       filter: brightness(1.3)
@@ -456,13 +462,21 @@ button,input,select,textarea{font:inherit;color:inherit}
       padding: 2px 5px
     }
 /* --- settings.html --- */
-#sec-settings h1 {
+#sec-settings {
+      font: 14px/1.45 system-ui, sans-serif;
+      background: #000000;
+      color: #d8dee9;
+      margin: 0;
+      padding: 4px
+    }#sec-settings h1 {
       font-size: 18px;
       margin: 0 8px 0 0
     }#sec-settings header {
       display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
       align-items: center;
-      gap: 8px
+      margin-bottom: 10px
     }#sec-settings button {
       background: #21366c;
       color: #fff;
@@ -595,28 +609,21 @@ button,input,select,textarea{font:inherit;color:inherit}
     }
 /* --- wifi.html --- */
 #sec-wifi {
-            font: 13px/1.45 system-ui, sans-serif;
+            font: 14px/1.45 system-ui, sans-serif;
             background: #000000;
             color: #d8dee9;
-            max-width: 520px;
-            margin: auto;
-            padding: 0 12px
+            margin: 0;
+            padding: 4px
+        }#sec-wifi header {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            align-items: center;
+            margin-bottom: 10px
         }#sec-wifi h1 {
-            font-size: 18px
-        }#sec-wifi label {
-            display: block;
-            margin: 12px 0 4px;
-            color: #8b94a7
-        }#sec-wifi input {
-            width: 100%;
-            box-sizing: border-box;
-            background: #0e1116;
-            color: #d8dee9;
-            border: 1px solid #39414f;
-            border-radius: 4px;
-            padding: 8px
+            font-size: 18px;
+            margin: 0 8px 0 0
         }#sec-wifi button {
-            margin-top: 14px;
             background: #21366c;
             color: #fff;
             border: 0;
@@ -624,6 +631,14 @@ button,input,select,textarea{font:inherit;color:inherit}
             padding: 3px 5px;
             cursor: pointer;
             font-size: 13px
+        }#sec-wifi input {
+            width: 100%;
+            box-sizing: border-box;
+            background: #0e1116;
+            color: #d8dee9;
+            border: 1px solid #39414f;
+            border-radius: 4px;
+            padding: 4px
         }#sec-wifi table {
             width: 100%;
             border-collapse: collapse;
@@ -631,6 +646,12 @@ button,input,select,textarea{font:inherit;color:inherit}
         }#sec-wifi td {
             padding: 3px 5px;
             border-top: 1px solid #2a3140
+        }#sec-wifi td:nth-child(2), #sec-wifi td:nth-child(3) {
+            text-align: center
+        }#sec-wifi td:first-child {
+            width: 100%
+        }#sec-wifi td:last-child {
+            text-align: right
         }#sec-wifi .pick {
             background: #233047;
             color: #d8dee9;
@@ -651,6 +672,81 @@ button,input,select,textarea{font:inherit;color:inherit}
         }#sec-wifi .forgetbtn {
             background: #4a2a2a;
             border-color: #6b3a3a
+        }
+/* --- service.html --- */
+#sec-service {
+            font: 14px/1.45 system-ui, sans-serif;
+            background: #000000;
+            color: #d8dee9;
+            margin: 0;
+            padding: 4px
+        }#sec-service header {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 10px
+        }#sec-service h1 {
+            font-size: 18px;
+            margin: 0 8px 0 0
+        }#sec-service h2 {
+            font-size: 15px;
+            margin: 16px 0 6px
+        }#sec-service button {
+            background: #21366c;
+            color: #fff;
+            border: 0;
+            border-radius: 4px;
+            padding: 5px 10px;
+            cursor: pointer;
+            font-size: 13px
+        }#sec-service button.warn {
+            background: #4a2a2a
+        }#sec-service input {
+            box-sizing: border-box;
+            background: #0e1116;
+            border: 1px solid #39414f;
+            border-radius: 4px;
+            color: #d8dee9;
+            padding: 4px 6px;
+            font-size: 13px
+        }#sec-service label {
+            display: block;
+            color: #8b94a7;
+            font-size: 12px;
+            margin: 8px 0 3px
+        }#sec-service .row {
+            display: flex;
+            gap: 8px;
+            align-items: center
+        }#sec-service .box {
+            background: #14171c;
+            border: 1px solid #2a3140;
+            border-radius: 8px;
+            padding: 10px;
+            margin-bottom: 12px
+        }#sec-service .srv {
+            width: 100%
+        }#sec-service .tz {
+            width: 70px
+        }#sec-service .chk {
+            display: flex;
+            gap: 6px;
+            align-items: center;
+            margin: 4px 0
+        }#sec-service .chk input {
+            width: auto
+        }#sec-service .st {
+            font-size: 12px;
+            color: #8b94a7
+        }#sec-service .st b {
+            color: #d8dee9;
+            font-family: ui-monospace, Consolas, monospace
+        }#sec-service .ok {
+            color: #3fb950
+        }#sec-service .msg {
+            min-height: 18px;
+            font-size: 13px;
+            color: #3fb950
         }
 </style>
 </head>
@@ -684,7 +780,7 @@ button,input,select,textarea{font:inherit;color:inherit}
     <a class="tile" href="#widgets"><span class="ic">&#9633;</span>Виджеты</a>
     <a class="tile" href="#settings"><span class="ic">&#9881;</span>Прибор</a>
     <a class="tile" href="#wifi"><span class="ic">&#128246;</span>Wi-Fi</a>
-    <a class="tile" href="#" onclick="rebootDev();return false"><span class="ic">&#8635;</span>Перезапуск</a>
+    <a class="tile" href="#service"><span class="ic">&#128295;</span>Сервис</a>
   </div>
   <h2>Профили виджетов</h2>
   <div id="profiles"></div>
@@ -741,6 +837,33 @@ button,input,select,textarea{font:inherit;color:inherit}
     </form>
     <h3>Найденные сети</h3>
     <div id="nets" class="nets">сканирование…</div>
+</section>
+<section class="sec" id="sec-service">
+<header>
+        <h1>Сервис</h1>
+        <a href="#panel" style="margin-left:auto"><button>&#8592; Назад</button></a>
+    </header>
+    <div class="box">
+        <h2 style="margin:0 0 6px">Перезапуск прибора</h2>
+        <div class="st" style="margin-bottom:8px">Полный перезапуск СКЭ-02 по служебной команде консоли.</div>
+        <button class="warn" onclick="rebootDev()">&#8635; Перезапустить прибор</button>
+    </div>
+    <div class="box">
+        <h2 style="margin:0 0 6px">Сервер времени NTP</h2>
+        <label class="chk"><input type="checkbox" id="ntpOn"> Синхронизировать время
+            (и корректировать таймер прибора)</label>
+        <label>Сервер 1</label>
+        <input class="srv" id="ntpS1" maxlength="31" autocapitalize="off" spellcheck="false">
+        <label>Сервер 2 (подстраховка, можно оставить пустым)</label>
+        <input class="srv" id="ntpS2" maxlength="31" autocapitalize="off" spellcheck="false">
+        <label>Часовой пояс, UTC ± ч</label>
+        <input class="tz" id="ntpTz" type="number" min="-12" max="14" step="1">
+        <div class="row" style="margin-top:10px">
+            <button onclick="ntpSave()">Сохранить</button>
+            <span class="msg" id="ntpMsg"></span>
+        </div>
+        <div class="st" id="ntpSt" style="margin-top:8px"></div>
+    </div>
 </section>
 <script>
 /* --- shared.js --- */
@@ -870,10 +993,10 @@ const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;'
     const BITCOL = ['#1d5c2f', '#a23b2e', '#2a5bdb', '#e3b341'];
     const BITOFF = '#14171c';  
     const BTN = {
-      stop:  { n: 'СТОП',  col: '#a23b2e', h: 'стоп дозатора' },
-      start: { n: 'СТАРТ', col: '#1d5c2f', h: 'старт дозатора' },
-      pause: { n: 'ПАУЗА', col: '#b58a2e', h: 'пауза дозатора' },
-      reset: { n: 'СБРОС', col: '#2a5bdb', h: 'сброс объёма' }
+      stop:  { n: 'СТОП',  col: '#802f24', h: 'стоп дозатора' },
+      start: { n: 'СТАРТ', col: '#1e6131', h: 'старт дозатора' },
+      pause: { n: 'ПАУЗА', col: '#856622', h: 'пауза дозатора' },
+      reset: { n: 'СБРОС', col: '#1a3c91', h: 'сброс объёма' }
     };
     let BTNP = { mode: 89, reset: 142 };   
     async function btnAct(mode) {
@@ -1801,10 +1924,15 @@ function vApply(d) {
         hi = barHi[w.k];
         if (hi - (barLo[w.k] || 0) < 1e-9) hi = (barLo[w.k] || 0) + 1;
       }
+      const over = v / hi * 100 > 100.5;
       const pct = Math.max(0, Math.min(100, v / hi * 100));
       f.style.width = pct.toFixed(1) + '%';
+      f.classList.toggle('alarm', over);
       const t = $('bp_' + w.k);
-      if (t) t.textContent = pct.toFixed(0) + '%';
+      if (t) {
+        t.classList.toggle('alarm', over);
+        t.textContent = (over ? v / hi * 100 : pct).toFixed(0) + '%';
+      }
       const su = $('su_' + w.k);
       if (su) {
         if (SP[w.mode] > 0) {
@@ -2059,7 +2187,7 @@ wSync();
     }
     let curTab = COMMON;                 
     function setRender(fp) {
-      if (!P.length) { $('tabs').innerHTML = ''; $('subtabs').innerHTML = ''; $('sections').innerHTML = '<p>Опрос прибора… если через минуту пусто — проверьте подключение UART и питание, затем нажмите «Обновить».</p>'; built = fp; return }
+      if (!P.length) { $('tabs').innerHTML = ''; $('subtabs').innerHTML = ''; $('sections').innerHTML = '<p>Опрос прибора… если через минуту пусто — проверьте подключение UART и питание, затем нажмите «Обновить».</p>'; built = fp; syncPw(); return }
       let h = '';
       SECT.forEach((s, k) => h += '<button class="' + (k === cur ? 'act' : '') + '" onclick="go(' + k + ')">' + esc(s) + '</button>');
       $('nav').innerHTML = h;
@@ -2205,6 +2333,57 @@ wSync();
                 'перезагружается в режим точки доступа. Подключитесь к ' +
                 'SKE02-GW-XXXX (открытая) и откройте 192.168.4.1</p>';
         }
+;
+/* --- service.js --- */
+    function rebootDev() {
+      if (confirm('Перезагрузить прибор?'))
+        fetch('/api/reboot', { method: 'POST' });
+    }
+    async function ntpLoad() {
+      try {
+        const r = await (await fetch('/api/ntp')).json();
+        $('ntpOn').checked = !!r.on;
+        $('ntpS1').value = r.s1 || '';
+        $('ntpS2').value = r.s2 || '';
+        $('ntpTz').value = (r.tz !== undefined) ? r.tz : 3;
+        ntpShow(r);
+      } catch (e) { }
+    }
+    function ntpShow(r) {
+      const st = $('ntpSt');
+      if (!st) return;
+      if (!r.on) { st.innerHTML = 'синхронизация выключена'; return }
+      if (!r.sync) { st.innerHTML = 'ждём ответа сервера…'; return }
+      const d = new Date((r.utc + (r.tz || 0) * 3600) * 1000);
+      const two = n => String(n).padStart(2, '0');
+      st.innerHTML = 'синхронизировано: <b>' +
+        two(d.getUTCDate()) + '.' + two(d.getUTCMonth() + 1) + '.' + d.getUTCFullYear() +
+        ' ' + two(d.getUTCHours()) + ':' + two(d.getUTCMinutes()) + ':' + two(d.getUTCSeconds()) +
+        '</b> (UTC' + (r.tz >= 0 ? '+' : '') + r.tz + ')';
+    }
+    async function ntpSave() {
+      const body = 'on=' + ($('ntpOn').checked ? 1 : 0) +
+        '&s1=' + encodeURIComponent($('ntpS1').value.trim()) +
+        '&s2=' + encodeURIComponent($('ntpS2').value.trim()) +
+        '&tz=' + encodeURIComponent($('ntpTz').value || 0);
+      try {
+        const r = await (await fetch('/api/ntp', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body
+        })).json();
+        ntpShow(r);
+        const m = $('ntpMsg');
+        m.textContent = 'сохранено';
+        setTimeout(() => { if (m.textContent === 'сохранено') m.textContent = '' }, 2500);
+      } catch (e) {
+        $('ntpMsg').textContent = 'нет ответа от шлюза';
+      }
+    }
+    ntpLoad();
+    setInterval(async () => {
+      try { ntpShow(await (await fetch('/api/ntp')).json()) } catch (e) { }
+    }, 5000);
 ;/* --- router --- */
 /* SPA-роутер: один html, переходы между секциями без подгрузок.
  * Секция = hash (#main/#widgets/#panel/#settings/#wifi); путь

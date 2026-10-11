@@ -17,6 +17,7 @@
 #include "modbus_tcp.h"
 #include "ske02.h"
 #include "storage.h"
+#include "ntp.h"
 #include "web.h"
 #include "wifi.h"
 
@@ -25,6 +26,7 @@ static void boot_task(void *arg)
     (void)arg;
     DBG("gateway rtos: boot\n");
     storage_init();
+    ntp_init();   /* конфиг из NVS; сам SNTP стартует по получении IP */
     /*
      * ПРИБОР ПЕРВЫМ: листинг дерева читается ДО старта беспроводных
      * задач - куча девственная (14К буфер гарантирован), flash-паузы
