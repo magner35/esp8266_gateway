@@ -107,14 +107,14 @@ bool widgets_store(const char *json, size_t len)
 
 /* ---- NTP-настройки ---------------------------------------------- */
 
-#define NTP_MAGIC 0x4E54 /* "NT" */
+#define NTP_MAGIC 0x4E55 /* "NT" v2: +autoTz */
 
 void storage_get_ntp(ntp_cfg_t *c)
 {
     nvs_handle_t h;
     size_t len = sizeof(*c);
     ntp_cfg_t def = {
-        .magic = NTP_MAGIC, .on = 0, .tz = 3,
+        .magic = NTP_MAGIC, .on = 0, .autoTz = 0, .tz = 3,
         .s1 = "pool.ntp.org", .s2 = "time.google.com",
     };
     *c = def;

@@ -238,7 +238,7 @@ def values(since=0):
 
 class H(http.server.SimpleHTTPRequestHandler):
     WCFG = {"rev": 0, "cfg": None}   # NVS stand-in, survives page reloads
-    NTP = {"on": False, "s1": "pool.ntp.org", "s2": "time.google.com", "tz": 3}
+    NTP = {"on": False, "auto": False, "s1": "pool.ntp.org", "s2": "time.google.com", "tz": 3}
 
     def __init__(self, *a, **kw):
         super().__init__(*a, directory=str(WWW), **kw)
@@ -293,7 +293,11 @@ class H(http.server.SimpleHTTPRequestHandler):
         elif self.path == "/api/widgets":  # self.path: _path ставится только в do_GET
             self._json(self.WCFG)
         elif self.path == "/api/ntp":
-            self._json({**self.NTP, "sync": self.NTP["on"],
+            tz = self.NTP["tz"]
+            if self.NTP.get("auto"):
+                tz = int(time.localtime().tm_gmtoff // 3600)
+            self._json({**self.NTP, "tz": tz, "tzok": True,
+                        "sync": self.NTP["on"],
                         "utc": int(time.time()) if self.NTP["on"] else 0})
         elif self._path == "/stamp":
             self._json({"t": www_stamp()})
@@ -342,9 +346,14 @@ class H(http.server.SimpleHTTPRequestHandler):
         elif self.path == "/api/ntp":
             if self.command == "POST":
                 type(self).NTP.update({"on": f.get("on") == "1",
+                                       "auto": f.get("auto") == "1",
                                        "s1": f.get("s1", ""), "s2": f.get("s2", ""),
                                        "tz": int(f.get("tz") or 0)})
-            self._json({**self.NTP, "sync": self.NTP["on"],
+            tz = self.NTP["tz"]
+            if self.NTP.get("auto"):
+                tz = int(time.localtime().tm_gmtoff // 3600)
+            self._json({**self.NTP, "tz": tz, "tzok": True,
+                        "sync": self.NTP["on"],
                         "utc": int(time.time()) if self.NTP["on"] else 0})
         elif self.path == "/api/run":
             self._json({"ok": True})

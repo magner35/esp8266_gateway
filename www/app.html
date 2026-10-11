@@ -394,7 +394,7 @@ button,input,select,textarea{font:inherit;color:inherit}
       color: #d8dee9;
       border: 1px solid #39414f;
       border-radius: 4px;
-      padding: 2px 5px;
+      padding: 2px 4px;
       box-sizing: border-box
     }#sec-panel {
       color-scheme: dark
@@ -490,7 +490,8 @@ button,input,select,textarea{font:inherit;color:inherit}
       color: #d8dee9;
       border: 1px solid #39414f;
       border-radius: 4px;
-      padding: 4px 4px;
+      padding: 2px 4px;
+      font-size: 13px;
       box-sizing: border-box
     }#sec-settings #filter {
       width: 80px
@@ -638,7 +639,8 @@ button,input,select,textarea{font:inherit;color:inherit}
             color: #d8dee9;
             border: 1px solid #39414f;
             border-radius: 4px;
-            padding: 4px
+            padding: 2px 4px;
+            font-size: 13px
         }#sec-wifi table {
             width: 100%;
             border-collapse: collapse;
@@ -675,7 +677,7 @@ button,input,select,textarea{font:inherit;color:inherit}
         }
 /* --- service.html --- */
 #sec-service {
-            font: 14px/1.45 system-ui, sans-serif;
+            font: 13px/1.45 system-ui, sans-serif;
             background: #000000;
             color: #d8dee9;
             margin: 0;
@@ -696,7 +698,7 @@ button,input,select,textarea{font:inherit;color:inherit}
             color: #fff;
             border: 0;
             border-radius: 4px;
-            padding: 5px 10px;
+            padding: 3px 5px;
             cursor: pointer;
             font-size: 13px
         }#sec-service button.warn {
@@ -707,7 +709,7 @@ button,input,select,textarea{font:inherit;color:inherit}
             border: 1px solid #39414f;
             border-radius: 4px;
             color: #d8dee9;
-            padding: 4px 6px;
+            padding: 2px 4px;
             font-size: 13px
         }#sec-service label {
             display: block;
@@ -743,6 +745,9 @@ button,input,select,textarea{font:inherit;color:inherit}
             font-family: ui-monospace, Consolas, monospace
         }#sec-service .ok {
             color: #3fb950
+        }#sec-service input:disabled {
+            opacity: .45;
+            color: #8b94a7
         }#sec-service .msg {
             min-height: 18px;
             font-size: 13px;
@@ -845,19 +850,21 @@ button,input,select,textarea{font:inherit;color:inherit}
     </header>
     <div class="box">
         <h2 style="margin:0 0 6px">Перезапуск прибора</h2>
-        <div class="st" style="margin-bottom:8px">Полный перезапуск СКЭ-02 по служебной команде консоли.</div>
         <button class="warn" onclick="rebootDev()">&#8635; Перезапустить прибор</button>
     </div>
     <div class="box">
         <h2 style="margin:0 0 6px">Сервер времени NTP</h2>
-        <label class="chk"><input type="checkbox" id="ntpOn"> Синхронизировать время
-            (и корректировать таймер прибора)</label>
+        <label class="chk" title="Синхронизировать время и корректировать таймер прибора"><input type="checkbox" id="ntpOn"> Синхронизировать время</label>
         <label>Сервер 1</label>
         <input class="srv" id="ntpS1" maxlength="31" autocapitalize="off" spellcheck="false">
-        <label>Сервер 2 (подстраховка, можно оставить пустым)</label>
+        <label>Сервер 2</label>
         <input class="srv" id="ntpS2" maxlength="31" autocapitalize="off" spellcheck="false">
         <label>Часовой пояс, UTC ± ч</label>
-        <input class="tz" id="ntpTz" type="number" min="-12" max="14" step="1">
+        <div class="row">
+            <input class="tz" id="ntpTz" type="number" min="-12" max="14" step="1">
+            <label class="chk" style="margin:0" title="Определить часовой пояс по публичному IP шлюза (ip-api.com)">
+                <input type="checkbox" id="ntpAuto" onchange="ntpAutoChk()">Авто</label>
+        </div>
         <div class="row" style="margin-top:10px">
             <button onclick="ntpSave()">Сохранить</button>
             <span class="msg" id="ntpMsg"></span>
@@ -2345,7 +2352,9 @@ wSync();
         $('ntpOn').checked = !!r.on;
         $('ntpS1').value = r.s1 || '';
         $('ntpS2').value = r.s2 || '';
-        $('ntpTz').value = (r.tz !== undefined) ? r.tz : 3;
+          $('ntpTz').value = (r.tz !== undefined) ? r.tz : 3;
+        $('ntpAuto').checked = !!r.auto;
+        ntpAutoChk();
         ntpShow(r);
       } catch (e) { }
     }
@@ -2353,16 +2362,22 @@ wSync();
       const st = $('ntpSt');
       if (!st) return;
       if (!r.on) { st.innerHTML = 'синхронизация выключена'; return }
+      if (r.auto && !r.tzok) { st.innerHTML = 'определяем часовой пояс по IP…'; return }
       if (!r.sync) { st.innerHTML = 'ждём ответа сервера…'; return }
       const d = new Date((r.utc + (r.tz || 0) * 3600) * 1000);
       const two = n => String(n).padStart(2, '0');
       st.innerHTML = 'синхронизировано: <b>' +
         two(d.getUTCDate()) + '.' + two(d.getUTCMonth() + 1) + '.' + d.getUTCFullYear() +
         ' ' + two(d.getUTCHours()) + ':' + two(d.getUTCMinutes()) + ':' + two(d.getUTCSeconds()) +
-        '</b> (UTC' + (r.tz >= 0 ? '+' : '') + r.tz + ')';
+        '</b> (UTC' + (r.tz >= 0 ? '+' : '') + r.tz + (r.auto ? ', пояс по IP' : '') + ')';
+    }
+    function ntpAutoChk() {
+      const a = $('ntpAuto');
+      if (a) $('ntpTz').disabled = a.checked;
     }
     async function ntpSave() {
       const body = 'on=' + ($('ntpOn').checked ? 1 : 0) +
+          'auto=' + ($('ntpAuto').checked ? 1 : 0) +
         '&s1=' + encodeURIComponent($('ntpS1').value.trim()) +
         '&s2=' + encodeURIComponent($('ntpS2').value.trim()) +
         '&tz=' + encodeURIComponent($('ntpTz').value || 0);

@@ -867,12 +867,18 @@ static esp_err_t h_api_reboot(httpd_req_t *req)
 static esp_err_t h_api_ntp_get(httpd_req_t *req)
 {
     const ntp_cfg_t *c = ntp_cfg();
-    char out[224];
+    char out[256];
+    /* ленивый доза́прос пояса: страница открыта, а он не определён */
+    if (!ntp_tz_resolved())
+        ntp_tz_auto_fetch();
     httpd_resp_set_type(req, "application/json");
     snprintf(out, sizeof(out),
-             "{\"on\":%u,\"tz\":%d,\"s1\":\"%s\",\"s2\":\"%s\","
+             "{\"on\":%u,\"auto\":%u,\"tz\":%d,\"tzok\":%u,"
+             "\"s1\":\"%s\",\"s2\":\"%s\","
              "\"sync\":%u,\"utc\":%lu}",
-             (unsigned)c->on, (int)c->tz, c->s1, c->s2,
+             (unsigned)c->on, (unsigned)c->autoTz,
+             (int)ntp_tz_effective(), (unsigned)ntp_tz_resolved(),
+             c->s1, c->s2,
              (unsigned)ntp_synced(), (unsigned long)ntp_epoch_utc());
     httpd_resp_send(req, out, strlen(out));
     return ESP_OK;
@@ -903,6 +909,11 @@ static esp_err_t h_api_ntp_set(httpd_req_t *req)
 
     storage_get_ntp(&c);
     c.on = (on[0] == '1' || on[0] == 'o' || on[0] == 't');
+    {
+        char au[8];
+        if (field(body, "auto", au, sizeof(au)))
+            c.autoTz = (au[0] == '1' || au[0] == 'o' || au[0] == 't');
+    }
     c.tz = (int8_t)atoi(tz);
     if (c.tz < -12)
         c.tz = -12;

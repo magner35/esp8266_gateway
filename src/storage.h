@@ -32,7 +32,9 @@ typedef struct
 {
     uint16_t magic;
     uint8_t on;
-    int8_t tz; /* смещение UTC в часах (может быть отрицательным) */
+    uint8_t autoTz; /* часовой пояс определять по IP (ip-api.com) */
+    int8_t tz; /* смещение UTC в часах (может быть отрицательным);
+                  при autoTz - последнее определённое, для отображения */
     char s1[32];
     char s2[32];
 } ntp_cfg_t;
