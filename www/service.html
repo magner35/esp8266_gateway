@@ -45,6 +45,11 @@
             background: #4a2a2a
         }
 
+        button:disabled {
+            opacity: .4;
+            cursor: default
+        }
+
         input {
             box-sizing: border-box;
             background: #0e1116;
@@ -125,6 +130,23 @@
         .msg.err {
             color: #e05252
         }
+
+        /* полоска прогресса прошивки */
+        .pbar {
+            height: 6px;
+            background: #0e1116;
+            border: 1px solid #39414f;
+            border-radius: 3px;
+            margin-top: 10px;
+            overflow: hidden
+        }
+
+        .pbar>div {
+            height: 100%;
+            width: 0;
+            background: #3f5dbf;
+            transition: width .5s ease-out
+        }
     </style>
 </head>
 
@@ -143,22 +165,33 @@
     <!-- NTP: два сервера + ручной ввод; время уйдёт в прибор для DS1307 -->
     <div class="box">
         <h2 style="margin:0 0 6px">Сервер времени NTP</h2>
-        <label class="chk" title="Синхронизировать время и корректировать таймер прибора"><input type="checkbox" id="ntpOn"> Синхронизировать время</label>
+        <div class="row" style="flex-wrap:wrap;gap:8px">
+            <label class="chk" style="margin:0" title="Синхронизировать время и корректировать таймер прибора"><input type="checkbox" id="ntpOn"> Синхронизировать время</label>
+            <input class="tz" id="ntpTz" type="number" min="-12" max="14" step="1" title="Часовой пояс, UTC ± ч">
+            <label class="chk" style="margin:0" title="Определить часовой пояс по публичному IP шлюза">
+                <input type="checkbox" id="ntpAuto" onchange="ntpAutoChk()">Авто</label>
+        </div>
         <label>Сервер 1</label>
         <input class="srv" id="ntpS1" maxlength="31" autocapitalize="off" spellcheck="false">
         <label>Сервер 2</label>
         <input class="srv" id="ntpS2" maxlength="31" autocapitalize="off" spellcheck="false">
-        <label>Часовой пояс, UTC ± ч</label>
-        <div class="row">
-            <input class="tz" id="ntpTz" type="number" min="-12" max="14" step="1">
-            <label class="chk" style="margin:0" title="Определить часовой пояс по публичному IP шлюза (ip-api.com)">
-                <input type="checkbox" id="ntpAuto" onchange="ntpAutoChk()">Авто</label>
-        </div>
         <div class="row" style="margin-top:10px">
             <button onclick="ntpSave()" title="Сохранить настройки и отправить время в прибор">Сохранить</button>
             <span class="msg" id="ntpMsg"></span>
         </div>
-        <div class="st" id="ntpSt" style="margin-top:8px"></div>
+    </div>
+
+    <!-- прошивка прибора: файл, запуск и прогресс - в одном блоке -->
+    <div class="box">
+        <h2 style="margin:0 0 6px">Прошивка прибора</h2>
+        <input class="srv" id="avrFile" type="file" accept=".hex"
+               title="Прошивка прибора (.hex)"
+               onchange="avrUploadAuto(this)">
+        <div class="row" style="margin-top:10px">
+            <button class="warn" id="avrBtn" onclick="avrFlash(this)" disabled>Прошить прибор</button>
+            <span class="msg" id="avrMsg"></span>
+        </div>
+        <div class="pbar"><div id="avrPb"></div></div>
     </div>
 
     <script src="/service.js"></script>

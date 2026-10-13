@@ -814,7 +814,7 @@ static void exec_request(ske_req_t *req)
 
     case SKEQ_REBOOT:
         uart_flush_rx();
-        uart_send_line("r");
+        uart_send_line("REBOOT");
         vTaskDelay(pdMS_TO_TICKS(200));
         sState = ST_WAKE;
         sT = 0;
@@ -833,6 +833,15 @@ static void exec_request(ske_req_t *req)
 /* ------------------------------------------------------------------ */
 /* the task                                                            */
 
+static volatile bool sSuspended = false; /* сессия прошивки AVR: обмен на паузе */
+
+void ske02_suspend(bool on)
+{
+    sSuspended = on;
+    if (on)
+        vTaskDelay(pdMS_TO_TICKS(300)); /* задача прибора успевает замолчать */
+}
+
 static void meter_task(void *arg)
 {
     (void)arg;
@@ -843,6 +852,13 @@ static void meter_task(void *arg)
         {
             exec_request(req);
             xSemaphoreGive(sReqDone);
+        }
+
+        if (sSuspended)
+        {
+            /* UART отдан программатору AVR: не слать ничего в линию */
+            vTaskDelay(pdMS_TO_TICKS(100));
+            continue;
         }
 
         switch (sState)

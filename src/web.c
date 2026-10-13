@@ -21,7 +21,11 @@
 #define PAGE_APP_GZ_LEN ((int)sizeof(PAGE_APP_GZ))
 #include "protocol.h"
 #include "ske02.h"
+
 #include "ntp.h"
+#include "hex_store.h"
+#include "uart_avr.h"
+#include "urclock.h"
 #include "tree_store.h"
 #include "storage.h"
 #include "wifi.h"
@@ -862,6 +866,117 @@ static esp_err_t h_api_reboot(httpd_req_t *req)
     return ESP_OK;
 }
 
+/* ---- прошивка AVR (urboot) --------------------------------------- */
+
+/* POST /api/avr/upload: тело = .hex, стримим в раздел avrhex */
+static esp_err_t h_api_avr_upload(httpd_req_t *req)
+{
+    char buf[1024];
+    int n;
+    uint32_t total = 0;
+
+    httpd_resp_set_type(req, "application/json");
+    if (!hex_store_begin(req->content_len))
+    {
+        httpd_resp_set_status(req, "400 Bad Request");
+        httpd_resp_send(req, "{\"ok\":false,\"error\":\"раздел недоступен или файл велик\"}", 0);
+        return ESP_OK;
+    }
+    while ((n = httpd_req_recv(req, buf, sizeof(buf))) > 0)
+    {
+        if (!hex_store_chunk(buf, (uint32_t)n))
+        {
+            httpd_resp_set_status(req, "500 Internal Server Error");
+            httpd_resp_send(req, "{\"ok\":false,\"error\":\"запись раздела\"}", 0);
+            return ESP_OK;
+        }
+        total += (uint32_t)n;
+    }
+    DBG("web: avr hex uploaded, %u bytes\n", (unsigned)total);
+    {
+        char out[96];
+        snprintf(out, sizeof(out), "{\"ok\":true,\"bytes\":%u}", (unsigned)total);
+        httpd_resp_send(req, out, strlen(out));
+    }
+    return ESP_OK;
+}
+
+/* цикл прошивки - в ОТДЕЛЬНОЙ задаче: конвейер (страницы/verify/
+ * парсер hex + esp_partition) не влезал в стек httpd уверенно, а
+ * переполнение стека на ESP = немой wdt reset */
+static struct
+{
+    volatile bool running;
+    bool ok;
+    urclock_result_t res;
+} sAvrFlash;
+
+static void avr_flash_task(void *arg)
+{
+    (void)arg;
+    avr_flash_begin();
+    sAvrFlash.ok = urclock_program_file(NULL, &sAvrFlash.res) == ESP_OK;
+    avr_flash_end();
+    DBG("web: avr flash %s: written %d, skipped %d, verify %d\n",
+        sAvrFlash.ok ? "OK" : "FAIL", sAvrFlash.res.written,
+        sAvrFlash.res.skipped, sAvrFlash.res.verify_fail);
+    sAvrFlash.running = false;
+    vTaskDelete(NULL);
+}
+
+static esp_err_t avr_flash_answer(httpd_req_t *req)
+{
+    char out[256];
+    int phase, done, total;
+    httpd_resp_set_type(req, "application/json");
+    urclock_progress(&phase, &done, &total);
+    snprintf(out, sizeof(out),
+             "{\"running\":%s,\"ok\":%s,\"kb\":%u,\"written\":%d,\"skipped\":%d,\"verify\":%d,\"bl\":\"%s\",\"ms\":%u,"
+             "\"phase\":%d,\"done\":%d,\"total\":%u}",
+             sAvrFlash.running ? "true" : "false",
+             sAvrFlash.ok ? "true" : "false",
+             (unsigned)(sAvrFlash.res.image_bytes / 1024),
+             sAvrFlash.res.written, sAvrFlash.res.skipped,
+             sAvrFlash.res.verify_fail, sAvrFlash.res.bl_desc,
+             (unsigned)sAvrFlash.res.ms,
+             phase, done, (unsigned)total);
+    httpd_resp_send(req, out, strlen(out));
+    return ESP_OK;
+}
+
+/* POST /api/avr/flash: запуск цикла; статус - GET /api/avr/flash */
+static esp_err_t h_api_avr_flash(httpd_req_t *req)
+{
+    if (sAvrFlash.running)
+        return avr_flash_answer(req);
+    memset(&sAvrFlash, 0, sizeof(sAvrFlash));
+    sAvrFlash.running = true;
+    if (xTaskCreate(avr_flash_task, "avrfl", 6144, NULL, 4, NULL) != pdPASS)
+    {
+        sAvrFlash.running = false;
+        httpd_resp_set_status(req, "500 Internal Server Error");
+        httpd_resp_send(req, NULL, 0);
+        return ESP_OK;
+    }
+    return avr_flash_answer(req);
+}
+
+/* GET /api/avr/flash: статус цикла прошивки */
+static esp_err_t h_api_avr_flash_st(httpd_req_t *req)
+{
+    return avr_flash_answer(req);
+}
+
+/* GET /api/avr: длина загруженного образа */
+static esp_err_t h_api_avr_status(httpd_req_t *req)
+{
+    char out[80];
+    httpd_resp_set_type(req, "application/json");
+    snprintf(out, sizeof(out), "{\"hex\":%u}", (unsigned)hex_store_stored());
+    httpd_resp_send(req, out, strlen(out));
+    return ESP_OK;
+}
+
 /* ---- NTP: конфиг + статус синхронизации -------------------------- */
 
 static esp_err_t h_api_ntp_get(httpd_req_t *req)
@@ -1118,6 +1233,18 @@ void web_start(void)
     httpd_register_uri_handler(sServer, &u);
     u = (httpd_uri_t){.uri = "/api/ntp/push", .method = HTTP_POST,
                       .handler = h_api_ntp_push};
+    httpd_register_uri_handler(sServer, &u);
+    u = (httpd_uri_t){.uri = "/api/avr/upload", .method = HTTP_POST,
+                      .handler = h_api_avr_upload};
+    httpd_register_uri_handler(sServer, &u);
+    u = (httpd_uri_t){.uri = "/api/avr/flash", .method = HTTP_POST,
+                      .handler = h_api_avr_flash};
+    httpd_register_uri_handler(sServer, &u);
+    u = (httpd_uri_t){.uri = "/api/avr/flash", .method = HTTP_GET,
+                      .handler = h_api_avr_flash_st};
+    httpd_register_uri_handler(sServer, &u);
+    u = (httpd_uri_t){.uri = "/api/avr", .method = HTTP_GET,
+                      .handler = h_api_avr_status};
     httpd_register_uri_handler(sServer, &u);
     u = (httpd_uri_t){.uri = "/api/widgets", .method = HTTP_GET,
                       .handler = h_api_widgets_get};

@@ -238,6 +238,7 @@ def values(since=0):
 
 class H(http.server.SimpleHTTPRequestHandler):
     WCFG = {"rev": 0, "cfg": None}   # NVS stand-in, survives page reloads
+    AVRFLASH = {"running": False, "ok": False, "written": 0, "skipped": 0, "verify": 0, "bl": "", "ms": 0, "t": 0}
     NTP = {"on": False, "auto": False, "s1": "pool.ntp.org", "s2": "time.google.com", "tz": 3}
 
     def __init__(self, *a, **kw):
@@ -292,6 +293,22 @@ class H(http.server.SimpleHTTPRequestHandler):
             ]})
         elif self.path == "/api/widgets":  # self.path: _path ставится только в do_GET
             self._json(self.WCFG)
+        elif self.path == "/api/avr/flash":  # GET: статус с прогрессом
+            st = self.AVRFLASH
+            if st["t"] and st["running"]:
+                dt = time.time() - st["t"]
+                if dt > 6:
+                    st.update({"running": False, "ok": True, "kb": 92,
+                               "written": 370, "skipped": 5, "verify": 0,
+                               "bl": "urboot u8.0 mcuid=86", "ms": 41200,
+                               "phase": 0, "done": 370, "total": 370})
+                else:
+                    done = min(370, int(dt / 6 * 370))
+                    st.update({"phase": 2 if dt < 4 else 3,
+                               "done": done, "total": 370})
+            self._json(st)
+        elif self.path == "/api/avr" and self.command == "GET":
+            self._json({"hex": 348000})
         elif self.path == "/api/ntp":
             tz = self.NTP["tz"]
             if self.NTP.get("auto"):
@@ -343,6 +360,14 @@ class H(http.server.SimpleHTTPRequestHandler):
             if p['o'] and v in p['o']:
                 p['r'] = p['o'].index(v)
             self._json({"ok": True, "value": v})
+        elif self.path == "/api/avr/upload":
+            # тело уже вычитано в начале do_POST
+            self._json({"ok": True, "bytes": len(body)})
+        elif self.path == "/api/pulse":
+            self._json({"ok": True, "ms": int(f.get("ms") or 10)})
+        elif self.path == "/api/avr/flash" and self.command == "POST":
+            type(self).AVRFLASH.update({"running": True, "t": time.time()})
+            self._json({**self.AVRFLASH, "running": True})
         elif self.path == "/api/ntp":
             if self.command == "POST":
                 type(self).NTP.update({"on": f.get("on") == "1",

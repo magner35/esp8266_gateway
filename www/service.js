@@ -17,21 +17,8 @@
       } catch (e) { }
     }
 
-    /* локальное время шлюза = utc + tz; без синхронизации utc - это
-     * аптайм с 1970, показываем только статус */
-    function ntpShow(r) {
-      const st = $('ntpSt');
-      if (!st) return;
-      if (!r.on) { st.innerHTML = 'синхронизация выключена'; return }
-      if (r.auto && !r.tzok) { st.innerHTML = 'определяем часовой пояс по IP…'; return }
-      if (!r.sync) { st.innerHTML = 'ждём ответа сервера…'; return }
-      const d = new Date((r.utc + (r.tz || 0) * 3600) * 1000);
-      const two = n => String(n).padStart(2, '0');
-      st.innerHTML = 'синхронизировано: <b>' +
-        two(d.getUTCDate()) + '.' + two(d.getUTCMonth() + 1) + '.' + d.getUTCFullYear() +
-        ' ' + two(d.getUTCHours()) + ':' + two(d.getUTCMinutes()) + ':' + two(d.getUTCSeconds()) +
-        '</b> (UTC' + (r.tz >= 0 ? '+' : '') + r.tz + (r.auto ? ', пояс по IP' : '') + ')';
-    }
+    /* строка периодического статуса времени убрана из интерфейса */
+    function ntpShow(r) { void r; }
 
     /* при "Авто" поле пояса неактивно: значение придёт с IP-геолокации */
     function ntpAutoChk() {
@@ -89,7 +76,66 @@
     }
 
     ntpLoad();
-    /* обновлять статус времени, пока страница открыта */
-    setInterval(async () => {
-      try { ntpShow(await (await fetch('/api/ntp')).json()) } catch (e) { }
-    }, 5000);
+    /* ---- прошивка прибора (urboot) ---- */
+    /* загрузка стартует сразу по выбору файла; прогресс - в строке
+     * над кнопкой (XHR: fetch прогресс отправки не показывает) */
+    function avrUploadAuto(inp) {
+      const f = inp.files[0];
+      const m = document.getElementById('avrMsg');
+      if (!f) return;
+      m.className = 'msg';
+      m.textContent = 'загрузка… 0%';
+      const xhr = new XMLHttpRequest();
+      xhr.open('POST', '/api/avr/upload');
+      xhr.upload.onprogress = e => {
+        if (e.lengthComputable)
+          m.textContent = 'загрузка… ' + Math.round(e.loaded / e.total * 100) + '%';
+      };
+      xhr.onload = () => {
+        try {
+          const r = JSON.parse(xhr.responseText);
+          if (r.ok) { m.textContent = ''; document.getElementById('avrBtn').disabled = false }
+          else { m.className = 'msg err'; m.textContent = 'ошибка: ' + (r.error || '?') }
+        } catch (e) { m.className = 'msg err'; m.textContent = 'ошибка ответа' }
+      };
+      xhr.onerror = () => { m.className = 'msg err'; m.textContent = 'нет ответа от шлюза' };
+      xhr.send(f);
+    }
+
+    async function avrFlash(btn) {
+      const m = document.getElementById('avrMsg');
+      if (!confirm('Прошить прибор? Обмен данными остановится на ~минуту.')) return;
+      btn.disabled = true;
+      m.className = 'msg';
+      m.textContent = 'прошиваем… (не закрывайте страницу)';
+      try {
+        const pb = document.getElementById('avrPb');
+        pb.style.width = '0';
+        /* БЕЗ отката назад: общий прогресс по фазам (запись 0..60%,
+         * верификация 60..100%), курс держим только вперёд */
+        let shown = 0;
+        const step = r => {
+          let p = 0;
+          if (r.total > 0 && r.done > 0) {
+            if (r.phase === 2) p = r.done / r.total * 60;
+            else if (r.phase === 3) p = 60 + r.done / r.total * 40;
+          }
+          if (r.phase === 3 && r.done === 0) p = 60;
+          if (p > shown) shown = p;
+          pb.style.width = Math.min(100, Math.round(shown)) + '%';
+        };
+        await fetch('/api/avr/flash', { method: 'POST' });
+        for (;;) {
+          await new Promise(r => setTimeout(r, 1000));
+          let r;
+          try { r = await (await fetch('/api/avr/flash')).json() } catch (e) { break }
+          step(r);
+          if (!r.running) {
+            if (r.ok) { m.textContent = 'готово: ' + r.kb + ' КБ, проверка ок'; pb.style.width = '100%' }
+            else { m.className = 'msg err'; m.textContent = 'ошибка прошивки' }
+            break;
+          }
+        }
+      } catch (e) { m.className = 'msg err'; m.textContent = 'нет ответа от шлюза' }
+      btn.disabled = false;
+    }

@@ -3,4 +3,6 @@
 # (~30К записей "по параметру"), помимо настроек и виджетов
 nvs,      data, nvs,     0x9000,   0x10000,
 phy_init, data, phy,     0x19000,  0x1000,
-factory,  app,  factory, 0x20000,  0x3E0000,
+factory,  app,  factory, 0x20000,  0x2E0000,
+# hex-образы прошивок прибора (текст Intel HEX ~3х от бинарника)
+avrhex,   data, 0x40,     0x300000, 0x70000,

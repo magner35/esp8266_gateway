@@ -18,6 +18,7 @@
 #include "ske02.h"
 #include "storage.h"
 #include "ntp.h"
+#include "hex_store.h"
 #include "web.h"
 #include "wifi.h"
 
@@ -27,6 +28,7 @@ static void boot_task(void *arg)
     DBG("gateway rtos: boot\n");
     storage_init();
     ntp_init();   /* конфиг из NVS; сам SNTP стартует по получении IP */
+    hex_store_init(); /* раздел avrhex под образы прибора */
     /*
      * ПРИБОР ПЕРВЫМ: листинг дерева читается ДО старта беспроводных
      * задач - куча девственная (14К буфер гарантирован), flash-паузы
@@ -94,6 +96,8 @@ static void stat_task(void *arg)
  * и печатает каждый НОВЫЙ минимум (шаг 512 Б) с аптаймом — по
  * таймштампам видно, какое событие (страница/params/скан) ест кучу.
  */
+static uint32_t sLastDipLog;
+
 static void heap_watch_task(void *arg)
 {
     uint32_t watermark = UINT32_MAX;
@@ -104,8 +108,18 @@ static void heap_watch_task(void *arg)
         if (h + 512 < watermark)
         {
             watermark = (h + 256) & ~255u;   /* гистерезис от дребезга */
-            DBG("gw: heap dip %u at %lus\n", (unsigned)h,
-                (unsigned long)(xTaskGetTickCount() * portTICK_PERIOD_MS / 1000));
+            /* не чаще раза в минуту: прошивка AVR сыплет дипами на
+             * каждую запись страницы и тонет в них */
+            {
+                uint32_t now_s = (uint32_t)(xTaskGetTickCount() *
+                                            portTICK_PERIOD_MS / 1000);
+                if (now_s - sLastDipLog >= 60)
+                {
+                    sLastDipLog = now_s;
+                    DBG("gw: heap dip %u at %lus\n", (unsigned)h,
+                        (unsigned long)now_s);
+                }
+            }
         }
         else if (h > watermark + 2048)
             watermark = h;

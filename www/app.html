@@ -703,6 +703,9 @@ button,input,select,textarea{font:inherit;color:inherit}
             font-size: 13px
         }#sec-service button.warn {
             background: #4a2a2a
+        }#sec-service button:disabled {
+            opacity: .4;
+            cursor: default
         }#sec-service input {
             box-sizing: border-box;
             background: #0e1116;
@@ -754,6 +757,18 @@ button,input,select,textarea{font:inherit;color:inherit}
             color: #52e052
         }#sec-service .msg.err {
             color: #e05252
+        }#sec-service .pbar {
+            height: 6px;
+            background: #0e1116;
+            border: 1px solid #39414f;
+            border-radius: 3px;
+            margin-top: 10px;
+            overflow: hidden
+        }#sec-service .pbar>div {
+            height: 100%;
+            width: 0;
+            background: #3f5dbf;
+            transition: width .5s ease-out
         }
 </style>
 </head>
@@ -856,22 +871,31 @@ button,input,select,textarea{font:inherit;color:inherit}
     </div>
     <div class="box">
         <h2 style="margin:0 0 6px">Сервер времени NTP</h2>
-        <label class="chk" title="Синхронизировать время и корректировать таймер прибора"><input type="checkbox" id="ntpOn"> Синхронизировать время</label>
+        <div class="row" style="flex-wrap:wrap;gap:8px">
+            <label class="chk" style="margin:0" title="Синхронизировать время и корректировать таймер прибора"><input type="checkbox" id="ntpOn"> Синхронизировать время</label>
+            <input class="tz" id="ntpTz" type="number" min="-12" max="14" step="1" title="Часовой пояс, UTC ± ч">
+            <label class="chk" style="margin:0" title="Определить часовой пояс по публичному IP шлюза">
+                <input type="checkbox" id="ntpAuto" onchange="ntpAutoChk()">Авто</label>
+        </div>
         <label>Сервер 1</label>
         <input class="srv" id="ntpS1" maxlength="31" autocapitalize="off" spellcheck="false">
         <label>Сервер 2</label>
         <input class="srv" id="ntpS2" maxlength="31" autocapitalize="off" spellcheck="false">
-        <label>Часовой пояс, UTC ± ч</label>
-        <div class="row">
-            <input class="tz" id="ntpTz" type="number" min="-12" max="14" step="1">
-            <label class="chk" style="margin:0" title="Определить часовой пояс по публичному IP шлюза (ip-api.com)">
-                <input type="checkbox" id="ntpAuto" onchange="ntpAutoChk()">Авто</label>
-        </div>
         <div class="row" style="margin-top:10px">
             <button onclick="ntpSave()" title="Сохранить настройки и отправить время в прибор">Сохранить</button>
             <span class="msg" id="ntpMsg"></span>
         </div>
-        <div class="st" id="ntpSt" style="margin-top:8px"></div>
+    </div>
+    <div class="box">
+        <h2 style="margin:0 0 6px">Прошивка прибора</h2>
+        <input class="srv" id="avrFile" type="file" accept=".hex"
+               title="Прошивка прибора (.hex)"
+               onchange="avrUploadAuto(this)">
+        <div class="row" style="margin-top:10px">
+            <button class="warn" id="avrBtn" onclick="avrFlash(this)" disabled>Прошить прибор</button>
+            <span class="msg" id="avrMsg"></span>
+        </div>
+        <div class="pbar"><div id="avrPb"></div></div>
     </div>
 </section>
 <script>
@@ -2362,19 +2386,7 @@ wSync();
         ntpShow(r);
       } catch (e) { }
     }
-    function ntpShow(r) {
-      const st = $('ntpSt');
-      if (!st) return;
-      if (!r.on) { st.innerHTML = 'синхронизация выключена'; return }
-      if (r.auto && !r.tzok) { st.innerHTML = 'определяем часовой пояс по IP…'; return }
-      if (!r.sync) { st.innerHTML = 'ждём ответа сервера…'; return }
-      const d = new Date((r.utc + (r.tz || 0) * 3600) * 1000);
-      const two = n => String(n).padStart(2, '0');
-      st.innerHTML = 'синхронизировано: <b>' +
-        two(d.getUTCDate()) + '.' + two(d.getUTCMonth() + 1) + '.' + d.getUTCFullYear() +
-        ' ' + two(d.getUTCHours()) + ':' + two(d.getUTCMinutes()) + ':' + two(d.getUTCSeconds()) +
-        '</b> (UTC' + (r.tz >= 0 ? '+' : '') + r.tz + (r.auto ? ', пояс по IP' : '') + ')';
-    }
+    function ntpShow(r) { void r; }
     function ntpAutoChk() {
       const a = $('ntpAuto');
       if (a) $('ntpTz').disabled = a.checked;
@@ -2424,9 +2436,63 @@ wSync();
       } catch (e) { m.className = 'msg err'; m.textContent = 'нет ответа от шлюза' }
     }
     ntpLoad();
-    setInterval(async () => {
-      try { ntpShow(await (await fetch('/api/ntp')).json()) } catch (e) { }
-    }, 5000);
+    function avrUploadAuto(inp) {
+      const f = inp.files[0];
+      const m = document.getElementById('avrMsg');
+      if (!f) return;
+      m.className = 'msg';
+      m.textContent = 'загрузка… 0%';
+      const xhr = new XMLHttpRequest();
+      xhr.open('POST', '/api/avr/upload');
+      xhr.upload.onprogress = e => {
+        if (e.lengthComputable)
+          m.textContent = 'загрузка… ' + Math.round(e.loaded / e.total * 100) + '%';
+      };
+      xhr.onload = () => {
+        try {
+          const r = JSON.parse(xhr.responseText);
+          if (r.ok) { m.textContent = ''; document.getElementById('avrBtn').disabled = false }
+          else { m.className = 'msg err'; m.textContent = 'ошибка: ' + (r.error || '?') }
+        } catch (e) { m.className = 'msg err'; m.textContent = 'ошибка ответа' }
+      };
+      xhr.onerror = () => { m.className = 'msg err'; m.textContent = 'нет ответа от шлюза' };
+      xhr.send(f);
+    }
+    async function avrFlash(btn) {
+      const m = document.getElementById('avrMsg');
+      if (!confirm('Прошить прибор? Обмен данными остановится на ~минуту.')) return;
+      btn.disabled = true;
+      m.className = 'msg';
+      m.textContent = 'прошиваем… (не закрывайте страницу)';
+      try {
+        const pb = document.getElementById('avrPb');
+        pb.style.width = '0';
+        let shown = 0;
+        const step = r => {
+          let p = 0;
+          if (r.total > 0 && r.done > 0) {
+            if (r.phase === 2) p = r.done / r.total * 60;
+            else if (r.phase === 3) p = 60 + r.done / r.total * 40;
+          }
+          if (r.phase === 3 && r.done === 0) p = 60;
+          if (p > shown) shown = p;
+          pb.style.width = Math.min(100, Math.round(shown)) + '%';
+        };
+        await fetch('/api/avr/flash', { method: 'POST' });
+        for (;;) {
+          await new Promise(r => setTimeout(r, 1000));
+          let r;
+          try { r = await (await fetch('/api/avr/flash')).json() } catch (e) { break }
+          step(r);
+          if (!r.running) {
+            if (r.ok) { m.textContent = 'готово: ' + r.kb + ' КБ, проверка ок'; pb.style.width = '100%' }
+            else { m.className = 'msg err'; m.textContent = 'ошибка прошивки' }
+            break;
+          }
+        }
+      } catch (e) { m.className = 'msg err'; m.textContent = 'нет ответа от шлюза' }
+      btn.disabled = false;
+    }
 ;/* --- router --- */
 /* SPA-роутер: один html, переходы между секциями без подгрузок.
  * Секция = hash (#main/#widgets/#panel/#settings/#wifi); путь

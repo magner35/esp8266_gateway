@@ -38,6 +38,7 @@ typedef struct
 void ske02_start(void);            /* create the task (from app_main) */
 #include <stddef.h>
 bool ske02_time_push(char *err, size_t errcap); /* отправить NTP-время в прибор (err: причина отказа) */
+void ske02_suspend(bool on);  /* пауза обмена (сессия прошивки AVR) */
 
 /* async command API: queues the request and waits (timeout ms) for it */
 bool ske02_request(const ske_req_t *req, uint32_t timeout_ms);
