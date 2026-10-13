@@ -15,7 +15,11 @@
  * на UART1 (GPIO4/GPIO5), но у ESP8266 UART1 не умеет принимать - обмен
  * с AVR переводится на UART0, а журнал уходит на UART1. */
 #define AVR_UART_NUM        0
-#define AVR_UART_BAUD       1000000
+/* Запись - на 1 Мбауд. Верификация - на пониженной: приём длинных
+ * кадров на 1М рвался всплесками WiFi-прерываний (FIFO ESP = 128 Б);
+ * urboot с AUTOBAUD перетренируется после переподключения */
+#define AVR_UART_BAUD        1000000
+#define AVR_UART_BAUD_VERIFY 1000000 /* не используется: одна сессия */
 #define AVR_UART_RX_BUF     1024
 
 /* GPIO, подключённый к /RESET ATmega128 (активный низкий).

@@ -143,3 +143,31 @@ bool storage_set_ntp(const ntp_cfg_t *c)
     nvs_close(h);
     return ok;
 }
+
+/* ---- отложенная установка OTA ---- */
+
+uint32_t storage_get_otapend(void)
+{
+    nvs_handle_t h;
+    uint32_t v = 0;
+    if (nvs_open(NVS_NAMESPACE, NVS_READONLY, &h) != ESP_OK)
+        return 0;
+    nvs_get_u32(h, "otapend", &v);
+    nvs_close(h);
+    return v;
+}
+
+bool storage_set_otapend(uint32_t size)
+{
+    nvs_handle_t h;
+    bool ok;
+    if (nvs_open(NVS_NAMESPACE, NVS_READWRITE, &h) != ESP_OK)
+        return false;
+    if (size)
+        ok = nvs_set_u32(h, "otapend", size) == ESP_OK;
+    else
+        ok = nvs_erase_key(h, "otapend") == ESP_OK;
+    ok = ok && nvs_commit(h) == ESP_OK;
+    nvs_close(h);
+    return ok;
+}

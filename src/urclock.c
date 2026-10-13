@@ -93,17 +93,19 @@ static int ur_page_write(uint32_t addr, const uint8_t *data)
     if (!g_info.compat)
     {
         /* urprotocol: cmd, адрес БАЙТОВЫЙ LE (24 бита у m128), длина
-         * одним байтом (0 = 256), данные, EOP */
-        uint8_t head[5] = {
-            UR_PROG_PAGE_FL,
-            (uint8_t)(addr & 0xFF),
-            (uint8_t)((addr >> 8) & 0xFF),
-            (uint8_t)((addr >> 16) & 0xFF),
-            (uint8_t)(AVR_PAGE_SIZE & 0xFF),
-        };
-        avr_send(head, sizeof(head));
-        avr_send(data, AVR_PAGE_SIZE);
-        avr_send(&eop, 1);
+         * одним байтом (0 = 256), данные, EOP. Кадр ОДНИМ куском:
+         * каждый лишний uart_write_bytes + wait_tx_done добавлял
+         * накладные на каждой странице */
+        uint8_t frame[5 + AVR_PAGE_SIZE + 1];
+        frame[0] = UR_PROG_PAGE_FL;
+        frame[1] = (uint8_t)(addr & 0xFF);
+        frame[2] = (uint8_t)((addr >> 8) & 0xFF);
+        frame[3] = (uint8_t)((addr >> 16) & 0xFF);
+        frame[4] = (uint8_t)(AVR_PAGE_SIZE & 0xFF);
+        memcpy(frame + 5, data, AVR_PAGE_SIZE);
+        frame[5 + AVR_PAGE_SIZE] = eop;
+        if (avr_send(frame, sizeof(frame)) <= 0)
+            return -1;
         return ur_reply(NULL, 0, UR_CMD_TIMEOUT_MS);
     }
     else
@@ -128,21 +130,50 @@ static int ur_page_write(uint32_t addr, const uint8_t *data)
     }
 }
 
-/* Чтение len байт flash с addr (len <= AVR_PAGE_SIZE). */
+/* Чтение len байт flash с addr (len <= AVR_PAGE_SIZE).
+ * urprotocol-ветка читает КУСКАМИ по 64 Б: непрерывный приём 256 Б
+ * на 1 Мбауд длится 2.6 мс - RX FIFO ESP всего 128 Б, и всплеск
+ * прерываний WiFi успевал уронить хвост кадра (верификация рвалась
+ * посередине). Кадр по 128 Б = 1.3 мс (ёмкость FIFO); повтор - кусок. */
+static int ur_read_chunk(uint32_t addr, uint8_t *data, int len)
+{
+    uint8_t f[6] = {
+        UR_READ_PAGE_FL,
+        (uint8_t)(addr & 0xFF),
+        (uint8_t)((addr >> 8) & 0xFF),
+        (uint8_t)((addr >> 16) & 0xFF),
+        (uint8_t)len,
+        UR_EOP,
+    };
+    /* до 3 попыток на кадр: потерянный из-за WiFi-всплеска кусок
+     * перезапрашивается - скорость не падает, платим только паузами
+     * в редких неудачных кадрах */
+    int attempt;
+    for (attempt = 0; attempt < 3; attempt++)
+    {
+        avr_send(f, sizeof(f));
+        if (ur_reply(data, len, UR_CMD_TIMEOUT_MS) == 0)
+            return 0;
+        /* дренаж обязателен: хвост побитого кадра не должен попасть
+         * в ответ повторного запроса */
+        avr_drain();
+        vTaskDelay(pdMS_TO_TICKS(60));
+    }
+    return -1;
+}
+
 static int ur_page_read(uint32_t addr, uint8_t *data, int len)
 {
     if (!g_info.compat)
     {
-        uint8_t f[6] = {
-            UR_READ_PAGE_FL,
-            (uint8_t)(addr & 0xFF),
-            (uint8_t)((addr >> 8) & 0xFF),
-            (uint8_t)((addr >> 16) & 0xFF),
-            (uint8_t)len,
-            UR_EOP,
-        };
-        avr_send(f, sizeof(f));
-        return ur_reply(data, len, UR_CMD_TIMEOUT_MS);
+        int off;
+        for (off = 0; off < len; off += 128)
+        {
+            int n = len - off > 128 ? 128 : len - off;
+            if (ur_read_chunk(addr + (uint32_t)off, data + off, n) != 0)
+                return -1;
+        }
+        return 0;
     }
     else
     {
@@ -247,12 +278,20 @@ static void read_bl_table(void)
 
 esp_err_t urclock_connect(void)
 {
+    return urclock_connect_baud(AVR_UART_BAUD);
+}
+
+/* подключение на заданной скорости: autobaud urboot тренируется на
+ * первый sync-кадр, поэтому запись и верификация могут идти на разных */
+esp_err_t urclock_connect_baud(uint32_t baud)
+{
     uint8_t ins = 0, ok = 0, ins2 = 0, ok2 = 0;
     int attempt;
 
     memset(&g_info, 0, sizeof(g_info));
     g_info.bl_start = AVR_FLASH_SIZE;    /* пока границ не знаем - весь flash */
 
+    avr_uart_set_baud(baud);
     if (avr_uart_init() != ESP_OK)
         return ESP_FAIL;
 
@@ -381,6 +420,7 @@ static void patch_page0(uint8_t *page)
 typedef struct
 {
     bool     verify;            /* false = запись, true = верификация */
+    int      consec_dead;       /* подряд нечитаемые страницы (verify) */
     bool     chip_erased;       /* можно пропускать страницы из 0xFF */
     uint32_t write_limit;       /* всё, что >= - область загрузчика */
     bool     host_vbl_patch;    /* патчить страницу 0 хостом */
@@ -424,6 +464,14 @@ static void page_cb(uint32_t addr, const uint8_t *page, void *user)
     if (c->verify)
     {
         uint8_t rd[AVR_PAGE_SIZE];
+        /* потеря связи: 5 подряд нечитаемых страниц = дальше не
+         * мучаем таймаутами, остаток страниц считается ошибочным
+         * (иначе полный проход по 368 стр × 2 таймаута = минуты) */
+        if (c->consec_dead >= 5)
+        {
+            c->errors++;
+            return;
+        }
         if (ur_page_read(addr, rd, AVR_PAGE_SIZE) != 0)
         {
             /* ПЕРВЫЙ read после пачки записей иногда ловит мусор в
@@ -433,12 +481,15 @@ static void page_cb(uint32_t addr, const uint8_t *page, void *user)
             vTaskDelay(pdMS_TO_TICKS(120));
             if (ur_page_read(addr, rd, AVR_PAGE_SIZE) != 0)
             {
-                logE(TAG, "verify 0x%X: чтение не удалось (после повтора)", addr);
+                if (++c->consec_dead == 5)
+                    logE(TAG, "verify: связь с загрузчиком потеряна - "
+                              "остаток пропускается");
                 c->errors++;
                 return;
             }
             logW(TAG, "verify 0x%X: чтение прошло со второго раза", addr);
         }
+        c->consec_dead = 0;
 
         /* Стр.0: во flash закономерно отличаются от образа области, которые
          * трогает сам загрузчик:
@@ -532,12 +583,28 @@ static void page_cb(uint32_t addr, const uint8_t *page, void *user)
         return;
     }
 
-    if (ur_page_write(addr, p) != 0)
+    /* запись с одним повтором; 5 подряд неудач = связь потеряна,
+     * остаток пропускаем (не молотим таймаутами все страницы) */
+    if (c->consec_dead >= 5)
     {
-        logE(TAG, "запись 0x%X не удалась", addr);
         c->errors++;
         return;
     }
+    if (ur_page_write(addr, p) != 0)
+    {
+        avr_drain();
+        vTaskDelay(pdMS_TO_TICKS(120));
+        if (ur_page_write(addr, p) != 0)
+        {
+            if (++c->consec_dead == 5)
+                logE(TAG, "запись: связь с загрузчиком потеряна - "
+                          "остаток пропускается");
+            logE(TAG, "запись 0x%X не удалась", addr);
+            c->errors++;
+            return;
+        }
+    }
+    c->consec_dead = 0;
     c->written++;
     sProgDone = c->written + c->skipped;
     if (++c->last_report >= c->report_every)
@@ -629,7 +696,7 @@ esp_err_t urclock_program_file(const char *hex_path, urclock_result_t *res)
     res->skipped = ctx.skipped;
     res->image_bytes = st.total_bytes;
 
-    /* верификация - второй проход по тому же файлу */
+    /* верификация - второй проход по тому же файлу, та же сессия */
     logI(TAG, "верификация...");
     sProgPhase = 3;
     sProgDone = 0;

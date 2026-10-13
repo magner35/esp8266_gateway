@@ -76,6 +76,11 @@
     }
 
     ntpLoad();
+    /* при каждом заходе в раздел Сервис - перечитать конфиг из шлюза:
+     * настройки живут в NVS ESP, не в браузере */
+    const inSvc = () => location.hash === '#service';
+    if (inSvc()) ntpLoad();
+    window.addEventListener('hashchange', () => { if (inSvc()) ntpLoad() });
     /* ---- прошивка прибора (urboot) ---- */
     /* загрузка стартует сразу по выбору файла; прогресс - в строке
      * над кнопкой (XHR: fetch прогресс отправки не показывает) */
@@ -84,12 +89,12 @@
       const m = document.getElementById('avrMsg');
       if (!f) return;
       m.className = 'msg';
-      m.textContent = 'загрузка… 0%';
+      m.textContent = 'подготовка… 0%';
       const xhr = new XMLHttpRequest();
       xhr.open('POST', '/api/avr/upload');
       xhr.upload.onprogress = e => {
         if (e.lengthComputable)
-          m.textContent = 'загрузка… ' + Math.round(e.loaded / e.total * 100) + '%';
+          m.textContent = 'подготовка… ' + Math.round(e.loaded / e.total * 100) + '%';
       };
       xhr.onload = () => {
         try {
@@ -104,23 +109,23 @@
 
     async function avrFlash(btn) {
       const m = document.getElementById('avrMsg');
-      if (!confirm('Прошить прибор? Обмен данными остановится на ~минуту.')) return;
+      if (!confirm('Обновить ПО? Обмен данными остановится на минуту.')) return;
       btn.disabled = true;
       m.className = 'msg';
-      m.textContent = 'прошиваем… (не закрывайте страницу)';
+      m.textContent = 'загрузка... ждите';
       try {
         const pb = document.getElementById('avrPb');
         pb.style.width = '0';
-        /* БЕЗ отката назад: общий прогресс по фазам (запись 0..60%,
+        /* БЕЗ отката назад: общий прогресс по фазам (запись 0..90%,
          * верификация 60..100%), курс держим только вперёд */
         let shown = 0;
         const step = r => {
           let p = 0;
           if (r.total > 0 && r.done > 0) {
-            if (r.phase === 2) p = r.done / r.total * 60;
-            else if (r.phase === 3) p = 60 + r.done / r.total * 40;
+            if (r.phase === 2) p = r.done / r.total * 90;
+            else if (r.phase === 3) p = 90 + r.done / r.total * 40;
           }
-          if (r.phase === 3 && r.done === 0) p = 60;
+          if (r.phase === 3 && r.done === 0) p = 90;
           if (p > shown) shown = p;
           pb.style.width = Math.min(100, Math.round(shown)) + '%';
         };
@@ -137,5 +142,47 @@
           }
         }
       } catch (e) { m.className = 'msg err'; m.textContent = 'нет ответа от шлюза' }
+      btn.disabled = false;
+    }
+
+    /* ---- OTA прошивки шлюза ---- */
+    function otaUploadAuto(inp) {
+      const f = inp.files[0];
+      const m = document.getElementById('otaMsg');
+      if (!f) return;
+      m.className = 'msg';
+      m.textContent = 'загрузка… 0%';
+      const xhr = new XMLHttpRequest();
+      xhr.open('POST', '/api/ota/upload');
+      xhr.upload.onprogress = e => {
+        if (e.lengthComputable)
+          m.textContent = 'загрузка… ' + Math.round(e.loaded / e.total * 100) + '%';
+      };
+      xhr.onload = () => {
+        try {
+          const r = JSON.parse(xhr.responseText);
+          if (r.ok) { m.textContent = ''; document.getElementById('otaBtn').disabled = false }
+          else { m.className = 'msg err'; m.textContent = 'ошибка: ' + (r.error || '?') }
+        } catch (e) { m.className = 'msg err'; m.textContent = 'ошибка ответа' }
+      };
+      xhr.onerror = () => { m.className = 'msg err'; m.textContent = 'нет ответа от шлюза' };
+      xhr.send(f);
+    }
+
+    async function otaFlash(btn) {
+      const m = document.getElementById('otaMsg');
+      if (!confirm('Прошить шлюз? Он перезагрузится, страница подождёт его возвращения.')) return;
+      btn.disabled = true;
+      m.className = 'msg';
+      m.textContent = 'прошиваем… шлюз перезагружается';
+      try { await fetch('/api/ota/flash', { method: 'POST' }) } catch (e) { }
+      for (let i = 0; i < 30; i++) {
+        await new Promise(r => setTimeout(r, 2000));
+        try {
+          const r = await (await fetch('/api/info', { cache: 'no-store' })).json();
+          if (r && r.gw) { m.textContent = 'готово, шлюз на связи'; break }
+        } catch (e) { }
+        m.textContent = 'ждём шлюз… ' + ((i + 1) * 2) + ' с';
+      }
       btn.disabled = false;
     }

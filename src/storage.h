@@ -42,4 +42,8 @@ typedef struct
 void storage_get_ntp(ntp_cfg_t *c); /* дефолты при пустом NVS */
 bool storage_set_ntp(const ntp_cfg_t *c);
 
+/* отложенная установка OTA: размер образа в staging (0 = нет) */
+uint32_t storage_get_otapend(void);
+bool storage_set_otapend(uint32_t size);
+
 #endif /* GW_STORAGE_H */

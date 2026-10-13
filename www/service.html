@@ -71,7 +71,18 @@
         .row {
             display: flex;
             gap: 8px;
-            align-items: center
+            align-items: center;
+            flex-wrap: wrap
+        }
+
+        /* кнопка не тянется за длинным текстом статуса */
+        .row button {
+            flex: 0 0 auto
+        }
+
+        .row .msg {
+            min-width: 0;
+            flex: 1 1 200px
         }
 
         .box {
@@ -159,15 +170,15 @@
     <!-- перезапуск прибора: переехал с панели -->
     <div class="box">
         <h2 style="margin:0 0 6px">Перезапуск прибора</h2>
-        <button class="warn" onclick="rebootDev()">&#8635; Перезапуск</button>
+        <button class="warn" onclick="rebootDev()">Перезапуск &#8635;</button>
     </div>
 
     <!-- NTP: два сервера + ручной ввод; время уйдёт в прибор для DS1307 -->
     <div class="box">
         <h2 style="margin:0 0 6px">Сервер времени NTP</h2>
         <div class="row" style="flex-wrap:wrap;gap:8px">
-            <label class="chk" style="margin:0" title="Синхронизировать время и корректировать таймер прибора"><input type="checkbox" id="ntpOn"> Синхронизировать время</label>
-            <input class="tz" id="ntpTz" type="number" min="-12" max="14" step="1" title="Часовой пояс, UTC ± ч">
+            <label style="margin:0;white-space:nowrap;color:#8b94a7;font-size:12px">Часовой пояс UTC</label>
+            <input class="tz" id="ntpTz" type="number" min="-12" max="14" step="1">
             <label class="chk" style="margin:0" title="Определить часовой пояс по публичному IP шлюза">
                 <input type="checkbox" id="ntpAuto" onchange="ntpAutoChk()">Авто</label>
         </div>
@@ -177,21 +188,35 @@
         <input class="srv" id="ntpS2" maxlength="31" autocapitalize="off" spellcheck="false">
         <div class="row" style="margin-top:10px">
             <button onclick="ntpSave()" title="Сохранить настройки и отправить время в прибор">Сохранить</button>
+            <label class="chk" style="margin:0" title="Синхронизировать время и корректировать таймер прибора"><input
+                    type="checkbox" id="ntpOn"> Синхронизировать время</label>
             <span class="msg" id="ntpMsg"></span>
+        </div>
+    </div>
+
+    <!-- OTA прошивки самого шлюза -->
+    <div class="box">
+        <h2 style="margin:0 0 6px">Обновление ПО шлюза</h2>
+        <input class="srv" id="otaFile" type="file" accept=".bin"
+               title="Прошивка шлюза (firmware.bin)"
+               onchange="otaUploadAuto(this)">
+        <div class="row" style="margin-top:10px">
+            <button id="otaBtn" class="warn" onclick="otaFlash(this)" disabled>Прошить шлюз</button>
+            <span class="msg" id="otaMsg"></span>
         </div>
     </div>
 
     <!-- прошивка прибора: файл, запуск и прогресс - в одном блоке -->
     <div class="box">
-        <h2 style="margin:0 0 6px">Прошивка прибора</h2>
-        <input class="srv" id="avrFile" type="file" accept=".hex"
-               title="Прошивка прибора (.hex)"
-               onchange="avrUploadAuto(this)">
+        <h2 style="margin:0 0 6px">Обновление ПО прибора</h2>
+        <input class="srv" id="avrFile" type="file" accept=".hex" onchange="avrUploadAuto(this)">
         <div class="row" style="margin-top:10px">
-            <button class="warn" id="avrBtn" onclick="avrFlash(this)" disabled>Прошить прибор</button>
+            <button class="warn" id="avrBtn" onclick="avrFlash(this)" disabled>Обновить</button>
             <span class="msg" id="avrMsg"></span>
         </div>
-        <div class="pbar"><div id="avrPb"></div></div>
+        <div class="pbar">
+            <div id="avrPb"></div>
+        </div>
     </div>
 
     <script src="/service.js"></script>

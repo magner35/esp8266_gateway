@@ -23,6 +23,9 @@
 #include "ske02.h"
 
 #include "ntp.h"
+#include "esp_ota_ops.h"
+#include "spi_flash.h"
+#include "esp_task_wdt.h"
 #include "hex_store.h"
 #include "uart_avr.h"
 #include "urclock.h"
@@ -344,7 +347,8 @@ static esp_err_t h_api_info(httpd_req_t *req)
         xSemaphoreTake(ske02_lock(), portMAX_DELAY);
         json_escape(ske02_ctx()->version, esc, sizeof(esc));
         snprintf(out, sizeof(out),
-                 "{\"fw\":\"%s\",\"count\":%u,\"link\":%d,\"ready\":%d,"
+                 "{\"gw\":\"" __DATE__ " " __TIME__ "\","
+                 "\"fw\":\"%s\",\"count\":%u,\"link\":%d,\"ready\":%d,"
                  "\"ap\":%d,\"ssid\":\"%s\",\"ip\":\"%s\",\"rssi\":%d,"
                  "\"uptime\":%lu,\"heap\":%lu}",
                  esc, (unsigned)ske02_ctx()->count,
@@ -874,6 +878,7 @@ static esp_err_t h_api_avr_upload(httpd_req_t *req)
     char buf[1024];
     int n;
     uint32_t total = 0;
+    uint32_t crc = 0;
 
     httpd_resp_set_type(req, "application/json");
     if (!hex_store_begin(req->content_len))
@@ -965,6 +970,120 @@ static esp_err_t h_api_avr_flash(httpd_req_t *req)
 static esp_err_t h_api_avr_flash_st(httpd_req_t *req)
 {
     return avr_flash_answer(req);
+}
+
+/* ---- OTA прошивки самого шлюза (два слота, окно 1 МБ) ----------
+ * Слоты ota_0@0x20000 и ota_1@0x120000 - на ОДИНАКОВОМ смещении в
+ * своих мегабайтных окнах кэша (правило ESP8266, см. partitions.csv);
+ * один бинарник работает в обоих. Заливка идёт в НЕАКТИВНЫЙ слот:
+ * обрыв связи питания не страшен - активный образ не трогается. */
+
+static const esp_partition_t *sOtaPart;   /* неактивный слот */
+static esp_ota_handle_t sOtaHandle;
+static bool sOtaReady;
+static uint32_t sOtaBytes;
+
+/* POST /api/ota/upload: тело = firmware.bin -> неактивный слот */
+static esp_err_t h_api_ota_upload(httpd_req_t *req)
+{
+    char buf[1024];
+    int n;
+    uint32_t total = 0;
+
+    httpd_resp_set_type(req, "application/json");
+    sOtaReady = false;
+    sOtaPart = esp_ota_get_next_update_partition(NULL);
+    if (!sOtaPart || req->content_len == 0 || req->content_len > sOtaPart->size)
+    {
+        httpd_resp_set_status(req, "400 Bad Request");
+        httpd_resp_send(req, "{\"ok\":false,\"error\":\"слот/размер\"}", 0);
+        return ESP_OK;
+    }
+    /* точный размер: OTA_SIZE_UNKNOWN стёр бы весь слот (896К, ~40с) */
+    DBG("web: ota erase %u B in %s...\n",
+        (unsigned)req->content_len, sOtaPart->label);
+    if (esp_ota_begin(sOtaPart, req->content_len, &sOtaHandle) != ESP_OK)
+    {
+        httpd_resp_set_status(req, "500 Internal Server Error");
+        httpd_resp_send(req, "{\"ok\":false,\"error\":\"ota begin\"}", 0);
+        return ESP_OK;
+    }
+    while ((n = httpd_req_recv(req, buf, sizeof(buf))) > 0)
+    {
+        if (total == 0 && buf[0] != (char)0xE9)
+        {
+            httpd_resp_set_status(req, "400 Bad Request");
+            httpd_resp_send(req, "{\"ok\":false,\"error\":\"не образ ESP\"}", 0);
+            return ESP_OK;
+        }
+        if (esp_ota_write(sOtaHandle, buf, (size_t)n) != ESP_OK)
+        {
+            httpd_resp_set_status(req, "500 Internal Server Error");
+            httpd_resp_send(req, "{\"ok\":false,\"error\":\"ota write\"}", 0);
+            return ESP_OK;
+        }
+        total += (uint32_t)n;
+        esp_task_wdt_reset();
+        if ((total & 0xFFFF) == 0)
+            DBG("web: ota %u B...\n", (unsigned)total);
+    }
+    if (total != req->content_len ||
+        esp_ota_end(sOtaHandle) != ESP_OK)
+    {
+        /* битый/неполный образ: активная прошивка НЕ тронута */
+        httpd_resp_set_status(req, "400 Bad Request");
+        httpd_resp_send(req, "{\"ok\":false,\"error\":\"битый образ\"}", 0);
+        return ESP_OK;
+    }
+    sOtaBytes = total;
+    sOtaReady = true;
+    DBG("web: ota staged %u B -> %s\n", (unsigned)total, sOtaPart->label);
+    {
+        char out[96];
+        snprintf(out, sizeof(out), "{\"ok\":true,\"bytes\":%u}", (unsigned)total);
+        httpd_resp_send(req, out, strlen(out));
+    }
+    return ESP_OK;
+}
+
+/* POST /api/ota/flash: переключить слот и перезагрузиться */
+static esp_err_t h_api_ota_flash(httpd_req_t *req)
+{
+    char out[64];
+
+    httpd_resp_set_type(req, "application/json");
+    if (!sOtaReady)
+    {
+        httpd_resp_set_status(req, "400 Bad Request");
+        httpd_resp_send(req, "{\"ok\":false,\"error\":\"образ не загружен\"}", 0);
+        return ESP_OK;
+    }
+    snprintf(out, sizeof(out), "{\"ok\":true}");
+    httpd_resp_send(req, out, strlen(out));
+    DBG("web: ota switch to %s, reboot\n", sOtaPart->label);
+    if (esp_ota_set_boot_partition(sOtaPart) != ESP_OK)
+    {
+        httpd_resp_set_status(req, "500 Internal Server Error");
+        httpd_resp_send(req, NULL, 0);
+        return ESP_OK;
+    }
+    vTaskDelay(pdMS_TO_TICKS(300)); /* ответ успеет уйти */
+    esp_restart();
+    return ESP_OK;
+}
+
+/* GET /api/ota: состояние образа + активный слот */
+static esp_err_t h_api_ota_status(httpd_req_t *req)
+{
+    char out[96];
+    const esp_partition_t *run = esp_ota_get_running_partition();
+
+    httpd_resp_set_type(req, "application/json");
+    snprintf(out, sizeof(out), "{\"ready\":%s,\"bytes\":%u,\"slot\":\"%s\"}",
+             sOtaReady ? "true" : "false", (unsigned)sOtaBytes,
+             run ? run->label : "?");
+    httpd_resp_send(req, out, strlen(out));
+    return ESP_OK;
 }
 
 /* GET /api/avr: длина загруженного образа */
@@ -1245,6 +1364,15 @@ void web_start(void)
     httpd_register_uri_handler(sServer, &u);
     u = (httpd_uri_t){.uri = "/api/avr", .method = HTTP_GET,
                       .handler = h_api_avr_status};
+    httpd_register_uri_handler(sServer, &u);
+    u = (httpd_uri_t){.uri = "/api/ota/upload", .method = HTTP_POST,
+                      .handler = h_api_ota_upload};
+    httpd_register_uri_handler(sServer, &u);
+    u = (httpd_uri_t){.uri = "/api/ota/flash", .method = HTTP_POST,
+                      .handler = h_api_ota_flash};
+    httpd_register_uri_handler(sServer, &u);
+    u = (httpd_uri_t){.uri = "/api/ota", .method = HTTP_GET,
+                      .handler = h_api_ota_status};
     httpd_register_uri_handler(sServer, &u);
     u = (httpd_uri_t){.uri = "/api/widgets", .method = HTTP_GET,
                       .handler = h_api_widgets_get};

@@ -82,6 +82,9 @@ typedef struct
  *  ответа, чтение таблицы загрузчика. Инфо - urclock_info(). */
 esp_err_t urclock_connect(void);
 
+/** То же на заданной скорости (urboot AUTOBAUD тренируется на sync). */
+esp_err_t urclock_connect_baud(uint32_t baud);
+
 const urboot_info_t *urclock_info(void);
 
 /** Полный цикл: connect -> chip erase -> запись страниц -> верификация ->

@@ -239,6 +239,7 @@ def values(since=0):
 class H(http.server.SimpleHTTPRequestHandler):
     WCFG = {"rev": 0, "cfg": None}   # NVS stand-in, survives page reloads
     AVRFLASH = {"running": False, "ok": False, "written": 0, "skipped": 0, "verify": 0, "bl": "", "ms": 0, "t": 0}
+    OTA = {"ready": False, "bytes": 0}
     NTP = {"on": False, "auto": False, "s1": "pool.ntp.org", "s2": "time.google.com", "tz": 3}
 
     def __init__(self, *a, **kw):
@@ -307,6 +308,9 @@ class H(http.server.SimpleHTTPRequestHandler):
                     st.update({"phase": 2 if dt < 4 else 3,
                                "done": done, "total": 370})
             self._json(st)
+        elif self.path == "/api/ota" and self.command == "GET":
+            self._json({"ready": self.OTA["ready"], "bytes": self.OTA["bytes"],
+                        "slot": "ota_0"})
         elif self.path == "/api/avr" and self.command == "GET":
             self._json({"hex": 348000})
         elif self.path == "/api/ntp":
@@ -360,6 +364,11 @@ class H(http.server.SimpleHTTPRequestHandler):
             if p['o'] and v in p['o']:
                 p['r'] = p['o'].index(v)
             self._json({"ok": True, "value": v})
+        elif self.path == "/api/ota/upload":
+            type(self).OTA.update({"ready": True, "bytes": len(body)})
+            self._json({"ok": True, "bytes": len(body)})
+        elif self.path == "/api/ota/flash":
+            self._json({"ok": self.OTA["ready"]})
         elif self.path == "/api/avr/upload":
             # тело уже вычитано в начале do_POST
             self._json({"ok": True, "bytes": len(body)})

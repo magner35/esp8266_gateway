@@ -4,9 +4,9 @@
  * вечно (повторный uart_driver_install невозможен) - здесь только
  * переключение скорости и вход в загрузчик.
  *
- * Вход в urboot БЕЗ линии сброса: консольная команда BOOT переводит
- * приложение прибора в загрузчик (EXTRF + jmp), после этого UART
- * переключается на 1 Мбауд загрузчика.
+ * Вход в urboot - аппаратный сброс (GPIO5 -> N-MOSFET -> /RESET).
+ * Перед сбросом прибору шлётся PRELOAD: он гасит задачи и показывает
+ * на LCD экран "Обновление ПО".
  */
 #include <string.h>
 
@@ -33,8 +33,8 @@ esp_err_t avr_uart_init(void)
 
 /* Аппаратный сброс: GPIO5 -> N-MOSFET -> /RESET ATmega128.
  * Проверено на железе: достаточно импульса 10 мс. urboot видит
- * EXTRF и остаётся в загрузчике - это штатный вход (в отличие от
- * программного BOOT, который загрузчик игнорирует). */
+ * EXTRF и остаётся в загрузчике. Скорость НЕ трогаем - её задаёт
+ * вызывающий. */
 void avr_reset_pulse(void)
 {
     static bool sGpioReady;
@@ -51,7 +51,6 @@ void avr_reset_pulse(void)
         gpio_config(&io);
         sGpioReady = true;
     }
-    uart_set_baudrate(AVR_UART_NUM, AVR_UART_BAUD);
     uart_flush_input(AVR_UART_NUM);
     gpio_set_level(GPIO_NUM_5, 1);
     vTaskDelay(pdMS_TO_TICKS(10));   /* длительность проверена на железе */
@@ -83,17 +82,14 @@ int avr_recv(uint8_t *buf, size_t len, uint32_t timeout_ms)
         if ((int32_t)left <= 0)
             break;
         /* длинное ожидание (chip erase - до 20с) крошим на куски по
-         * 200 мс с покормкой soft-WDT: единый блок ловил wdt reset */
+         * 200 мс с прямой покормкой WDT: единый блок ловил wdt reset */
         if (chunk > pdMS_TO_TICKS(200))
             chunk = pdMS_TO_TICKS(200);
         n = uart_read_bytes(AVR_UART_NUM, buf + got, len - got, chunk);
         if (n < 0)
             break;
         got += n;
-        /* WDT кормится из IDLE-хука; на случай, если что-то на пути
-         * chip erase душит IDLE - кормим таймер напрямую здесь */
         esp_task_wdt_reset();
-        vTaskDelay(1);
     }
     return (int)got;
 }
@@ -103,11 +99,35 @@ void avr_drain(void)
     uart_flush_input(AVR_UART_NUM);
 }
 
-/* контекст сессии прошивки: обмен с прибором на паузе, UART у нас */
+void avr_uart_set_baud(uint32_t baud)
+{
+    uart_set_baudrate(AVR_UART_NUM, baud);
+    uart_flush_input(AVR_UART_NUM);
+}
+
+/* контекст сессии прошивки: PRELOAD -> пауза обмена -> скорость bl */
 
 void avr_flash_begin(void)
 {
+    char echo[24];
+    int n;
+
     ske02_suspend(true);
+    /* PRELOAD на 115200: прибор гасит задачи и показывает экран
+     * "Обновление ПО" ДО сброса в загрузчик */
+    uart_set_baudrate(AVR_UART_NUM, 115200);
+    uart_flush_input(AVR_UART_NUM);
+    uart_write_bytes(AVR_UART_NUM, "PRELOAD\r", 8);
+    uart_wait_tx_done(AVR_UART_NUM, pdMS_TO_TICKS(200));
+    n = uart_read_bytes(AVR_UART_NUM, (uint8_t *)echo, sizeof(echo) - 1,
+                        pdMS_TO_TICKS(400));
+    if (n > 0)
+    {
+        echo[n] = 0;
+        DBG("%s: preload echo \"%s\"\n", TAG, echo);
+    }
+    else
+        DBG("%s: preload no echo (old meter fw?)\n", TAG);
     uart_set_baudrate(AVR_UART_NUM, AVR_UART_BAUD);
 }
 

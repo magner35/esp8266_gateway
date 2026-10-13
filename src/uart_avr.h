@@ -12,6 +12,7 @@ void avr_reset_pulse(void);   /* вход в загрузчик: BOOT + 1 Мба
 int  avr_send(const uint8_t *data, size_t len);
 int  avr_recv(uint8_t *buf, size_t len, uint32_t timeout_ms);
 void avr_drain(void);
+void avr_uart_set_baud(uint32_t baud); /* смена скорости линии */
 
 void avr_flash_begin(void);   /* пауза обмена + UART программатору */
 void avr_flash_end(void);     /* вернуть 115200 + продолжить обмен */

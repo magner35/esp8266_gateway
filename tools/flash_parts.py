@@ -1,13 +1,18 @@
 """
-Auto-flash the partition table after every `pio run -t upload`.
+Auto-flash the partition table + initial otadata after every
+`pio run -t upload`.
 
 PlatformIO's esp8266-rtos-sdk builder does NOT flash partitions.bin
 (no write_flash in builder/frameworks/esp8266-rtos-sdk.py) - only
-boot+app. With a custom partitions.csv (nvs 64K) this left the device
-running the stock 24K table forever. This post-action writes
-partitions.bin to 0x8000 using the SAME esptool/port/upload-speed
-PlatformIO uses for the app upload. Idempotent: re-flashing an
-identical table is harmless.
+boot+app. With a custom partitions.csv (nvs 64K, two OTA slots) this
+left the device running the stock table forever.
+
+otadata (0x1A000) flashes the INITIAL image: it makes the bootloader
+and esp_ota_get_running_partition() AGREE on ota_0 after a wired
+upload. Without it a stale otadata (from a previous OTA) can point to
+the OTHER slot than the one pio just wrote - and the next OTA would
+erase the slot the device actually boots from: endless
+"Fatal exception (0) call_start_cpu" boot loop.
 """
 
 Import("env")
@@ -27,7 +32,8 @@ def _after_upload(source, target, env):
 
     port = env.subst("$UPLOAD_PORT")
     speed = env.subst("$UPLOAD_SPEED") or "921600"
-    parts = os.path.join(env.subst("$BUILD_DIR"), "partitions.bin")
+    bld = env.subst("$BUILD_DIR")
+    parts = os.path.join(bld, "partitions.bin")
 
     if not os.path.isfile(parts):
         print("!! flash_parts: %s not found (build first)" % parts)
@@ -36,13 +42,17 @@ def _after_upload(source, target, env):
     cmd = [sys.executable, esptool,
            "--port", port, "--baud", str(speed),
            "write_flash", "0x8000", parts]
-    print("== flash_parts: writing partition table ==")
+    otadata = os.path.join(bld, "ota_data_initial.bin")
+    if os.path.isfile(otadata):
+        cmd += ["0x1A000", otadata]
+
+    print("== flash_parts: writing partition table + otadata ==")
     print("   " + " ".join(cmd))
     rc = subprocess.call(cmd)
     if rc != 0:
         print("!! flash_parts: FAILED rc=%d" % rc)
     else:
-        print("== flash_parts: partition table flashed OK ==")
+        print("== flash_parts: partition table + otadata flashed OK ==")
 
 
 env.AddPostAction("upload", _after_upload)
