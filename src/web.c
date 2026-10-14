@@ -797,6 +797,8 @@ static esp_err_t h_api_set(httpd_req_t *req)
     strncpy(r.text, packed, sizeof(r.text) - 1);
     r.text[sizeof(r.text) - 1] = 0;
     ske02_request(&r, 15000);
+    if (r.result == BS_OK)
+        ske02_units_refresh(r.id);   /* единицы прибора могли смениться */
 
     {
         val[0] = 0;

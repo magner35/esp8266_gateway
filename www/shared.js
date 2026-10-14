@@ -83,6 +83,35 @@ const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;'
     const VOLN = { ml: 'мл', l: 'л', m3: 'м³' };
     const PSEC = { s: 1, m: 60, h: 3600 };          /* seconds per period */
     const PERN = { s: 'с', m: 'мин', h: 'ч' };
+
+    /* Пересчёт кадра 'm' из ГОЛЫХ мл на стороне браузера: ml-твины
+     * (rateMLPM, totalml_plus и соседи) всегда честны, а единицы из дерева
+     * (/api/params) свежие сразу после SET - в отличие от кэша единиц
+     * в прошивке шлюза, который ловился на рассинхрон. Вызывается
+     * первым делом в vApply и chartFeed. batch НЕ трогаем: прибор
+     * шлёт его уже в текущих единицах (как уставку). */
+    function frameNorm(d) {
+      if (!d || !d.touched) {
+        if (!d) return d;
+        const rk = VOLU[UNKEY[UN.rate] || 'l'] || 1000;
+        const ok = VOLU[UNKEY[UN.obj] || 'l'] || 1000;
+        const gk = VOLU[UNKEY[UN.ob] || 'l'] || 1000;
+        const ps = PSEC[UNKEY[UN.time] || 'm'] || 60;
+        if (isFinite(d.rateMLPM)) {
+          d.rate = d.rateMLPM * ps / 60 / rk;
+          d.rate_raw = d.rate_fast = d.rate;
+        }
+        if (isFinite(d.totalml_plus)) {
+          d.total_plus = d.totalml_plus / ok;
+          d.total_minus = (isFinite(d.totalml_minus) ? d.totalml_minus : 0) / ok;
+          d.total = d.total_plus - d.total_minus;
+          d.total_sum = d.total_plus + d.total_minus;
+        }
+        if (isFinite(d.gtotalml)) d.gtotal = d.gtotalml / gk;
+        d.touched = true;
+      }
+      return d;
+    }
     /*
      * ── BAR WIDGET MODES ────────────────────────────────────────────
      * value source + the setpoint parameter that marks the 100% level
@@ -245,15 +274,32 @@ const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;'
      * units hint (the device volume unit). Edits go via /api/set.
      */
     const INPS = {
-      dose: { n: 'Доза' },
+      dose: { n: 'Порция' },
       pre: { n: 'Упреждение' },
       over: { n: 'Перелив' }
     };
     let INP = {};   /* src -> {id, v} from the tree */
+    let LIM = Infinity; /* "Лимит" (Дозатор): потолок Порции; Упреждение
+                         * и Перелив прибор дополнительно режет до Порция/2 */
     async function wInpSet(k) {
       const w = widgets.find(x => x.k === k);
       const e = $('wi_' + k);
       if (!w || !e || !INP[w.src]) return;
+      /* прибор режет уставки дозатора (settingsBatcherSetup):
+       * Порция <= Лимит, Упреждение/Перелив <= Порция/2 - делаем то же
+       * на клиенте, чтобы введённое не превращалось тихо в другое */
+      {
+        let v = parseFloat(e.value.replace(',', '.'));
+        if (isFinite(v)) {
+          const cap = w.src === 'dose' ? LIM
+            : (INP.dose && isFinite(INP.dose.v) ? INP.dose.v / 2 : Infinity);
+          if (v > cap) {
+            v = cap;
+            alert(INPS[w.src].n + ': выше лимита, ставлю ' + v);
+          }
+          e.value = v;
+        }
+      }
       try {
         const body = 'id=' + INP[w.src].id + '&v=' + encodeURIComponent(e.value);
         const r = await (await fetch('/api/set', {
@@ -379,6 +425,7 @@ const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;'
     async function chartFeed(d) {
       if (!CHARTS_ON) return;
       if (!widgets) return;
+      frameNorm(d);
       const srcs = new Set();
       for (const w of widgets)
         if (w.t === 'chart' && w.on && CHSRC[w.src] &&
@@ -896,6 +943,9 @@ const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;'
         return '<div class="vcard winp" data-k="' + w.k + '"><div class="vname">' + INPS[w.src].n +
           '<span class="utop" id="iu_' + w.k + '">' + (UN.obj || '') + '</span></div>' +
           '<div class="vrow"><input type="text" inputmode="decimal" id="wi_' + w.k +
+          '" title="макс: ' + (w.src === 'dose'
+            ? (isFinite(LIM) ? LIM : '—')
+            : (INP.dose && isFinite(INP.dose.v) ? (INP.dose.v / 2) : '—')) +
           '" value="' + (INP[w.src] ? INP[w.src].v : '') +
           '" onchange="wInpSet(\'' + w.k + '\')" onfocus="this.select()" onkeydown="if(event.key===\'Enter\')this.blur()"></div></div>';
       /* bar: torn-stripe progress bar clamped to min..max, no value text */
@@ -1154,8 +1204,10 @@ const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;'
             p.o && p.o.includes('Старт')) btnp.mode = p.i;
           if (p.cx && p.n.indexOf('Сброс') === 0 && p.tb === 'Сброс объёма') btnp.reset = p.i;
           /* doser setpoints: Доза / Упреждение / Перелив in Уставки */
+          if (p.t === 0 && p.tb === 'Дозатор' && p.n === 'Лимит')
+            LIM = parseFloat(p.v);   /* потолок Порции (режет прибор) */
           if (p.t === 0 && p.tb === 'Уставки') {
-            if (p.n === 'Доза') inp.dose = { id: p.i, v: parseFloat(p.v) };
+            if (p.n === 'Порция') inp.dose = { id: p.i, v: parseFloat(p.v) };
             if (p.n === 'Упреждение') inp.pre = { id: p.i, v: parseFloat(p.v) };
             if (p.n === 'Перелив') inp.over = { id: p.i, v: parseFloat(p.v) };
             /* нижняя уставка расхода: min фиксированной шкалы графика */

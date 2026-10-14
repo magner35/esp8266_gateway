@@ -121,6 +121,7 @@ document.addEventListener('touchend', () => {
 });
 /* vApply: раз в кадр 'm' обновляет карточки всех типов виджетов */
 function vApply(d) {
+  frameNorm(d);
   const barLo = vApply.lo || (vApply.lo = {}), barHi = vApply.hi || (vApply.hi = {});
   for (const n of VFLOATS) { const e = $('vf_' + n); if (e && d[n] !== undefined) e.textContent = d[n] }
   for (const n of VUINTS) { const e = $('vf_' + n); if (e && d[n] !== undefined) e.textContent = d[n] }

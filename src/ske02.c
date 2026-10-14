@@ -277,21 +277,15 @@ static bool capture_listing(TickType_t timeout)
     /* 'l'/'L' (Настройки) не нужны: это меню не используется,
      * параметров в 1+2+3 достаточно (нумерация едина со старым 'l') */
     static const char *const cmds[] = {"LIST 1", "LIST 2", "LIST 3"};
+    /* буфер СТАТИЧЕСКИЙ: с ростом меню прибора секция "Основные"
+     * доросла до 5.1К, а malloc на фрагментированной куче (после
+     * WiFi/TLS/прошивок) деградировал до 5120 - секция не влезала
+     * на 1 байт, листинг падал и перечитывался бесконечно */
+    static char sListBuf[7 * 1024];
     char line[512];
     bool ok = true;
-    char *buf;
-    size_t bufSz = 8 * 1024;   /* Основные ~5.7КБ в старом дампе: 6К
-                                 * впритык - любая подвижка меню прибора
-                                 * выбивала секцию за край (цикл 1-2-1-2) */
-
-    buf = malloc(bufSz);
-    while (!buf && bufSz > 4096)
-    {
-        bufSz -= 1024;
-        buf = malloc(bufSz);
-    }
-    if (!buf)
-        return false;      /* куча: повтор позже */
+    char *buf = sListBuf;
+    size_t bufSz = sizeof(sListBuf);
 
     proto_listing_begin(&sCtx);
     /*
@@ -373,7 +367,6 @@ static bool capture_listing(TickType_t timeout)
             cmds[c], (unsigned)sCtx.liveCount);
     }
 
-    free(buf);
     xSemaphoreTake(sLock, portMAX_DELAY);
     sCtx.inListing = false;
     xSemaphoreGive(sLock);
@@ -418,6 +411,21 @@ static void units_note(const SkeParam *p)
         sU_totDiv = P3[idx < 4 ? idx : 1];
     else if (!strcmp(p->name, "Общий"))
         sU_gtotDiv = P3[idx < 4 ? idx : 1];
+}
+
+/* мгновенное обновление кэша единиц: зовётся из web после SET
+ * enum-а из "Единицы измерения" - иначе до следующего листинга
+ * (десятки секунд) /api/values конвертировал бы по старым единицам,
+ * а ярлыки на странице уже показывали новые */
+void ske02_units_refresh(uint16_t id)
+{
+    TreeRec rec;
+    if (tree_get(id, &rec))
+    {
+        xSemaphoreTake(sLock, portMAX_DELAY);
+        units_note(&rec.p);
+        xSemaphoreGive(sLock);
+    }
 }
 
 static void vals_derive(ProtoCtx *ctx)
@@ -905,11 +913,17 @@ static void meter_task(void *arg)
                 DBG("ske02: listing done (%u params)\n", (unsigned)sCtx.liveCount);
                 xSemaphoreGive(sLock);
             }
-            else if (++sMisses >= SKE_WAKE_MISS)
+            else
             {
-                sMisses = 0;
-                sState = ST_WAKE;
-                sT = 0;
+                /* пауза между попытками: без неё неудачный листинг
+                 * молотил линию без остановки (веб-запросы висли) */
+                vTaskDelay(pdMS_TO_TICKS(5000));
+                if (++sMisses >= SKE_WAKE_MISS)
+                {
+                    sMisses = 0;
+                    sState = ST_WAKE;
+                    sT = 0;
+                }
             }
             break;
 

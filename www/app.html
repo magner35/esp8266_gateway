@@ -974,6 +974,28 @@ const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;'
     const VOLN = { ml: 'мл', l: 'л', m3: 'м³' };
     const PSEC = { s: 1, m: 60, h: 3600 };          
     const PERN = { s: 'с', m: 'мин', h: 'ч' };
+    function frameNorm(d) {
+      if (!d || !d.touched) {
+        if (!d) return d;
+        const rk = VOLU[UNKEY[UN.rate] || 'l'] || 1000;
+        const ok = VOLU[UNKEY[UN.obj] || 'l'] || 1000;
+        const gk = VOLU[UNKEY[UN.ob] || 'l'] || 1000;
+        const ps = PSEC[UNKEY[UN.time] || 'm'] || 60;
+        if (isFinite(d.rateMLPM)) {
+          d.rate = d.rateMLPM * ps / 60 / rk;
+          d.rate_raw = d.rate_fast = d.rate;
+        }
+        if (isFinite(d.totalml_plus)) {
+          d.total_plus = d.totalml_plus / ok;
+          d.total_minus = (isFinite(d.totalml_minus) ? d.totalml_minus : 0) / ok;
+          d.total = d.total_plus - d.total_minus;
+          d.total_sum = d.total_plus + d.total_minus;
+        }
+        if (isFinite(d.gtotalml)) d.gtotal = d.gtotalml / gk;
+        d.touched = true;
+      }
+      return d;
+    }
     const BARM = {
       qmax: { n: 'Расход (Qmax)', src: 'rate', sp: 'Qmax,л', un: 'rate' },
       rate: { n: 'Расход', src: 'rate', sp: 'Расход+', un: 'rate' },
@@ -1074,15 +1096,28 @@ const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;'
       } catch (e) { }
     }
     const INPS = {
-      dose: { n: 'Доза' },
+      dose: { n: 'Порция' },
       pre: { n: 'Упреждение' },
       over: { n: 'Перелив' }
     };
     let INP = {};   
+    let LIM = Infinity; 
     async function wInpSet(k) {
       const w = widgets.find(x => x.k === k);
       const e = $('wi_' + k);
       if (!w || !e || !INP[w.src]) return;
+      {
+        let v = parseFloat(e.value.replace(',', '.'));
+        if (isFinite(v)) {
+          const cap = w.src === 'dose' ? LIM
+            : (INP.dose && isFinite(INP.dose.v) ? INP.dose.v / 2 : Infinity);
+          if (v > cap) {
+            v = cap;
+            alert(INPS[w.src].n + ': выше лимита, ставлю ' + v);
+          }
+          e.value = v;
+        }
+      }
       try {
         const body = 'id=' + INP[w.src].id + '&v=' + encodeURIComponent(e.value);
         const r = await (await fetch('/api/set', {
@@ -1163,6 +1198,7 @@ const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;'
     async function chartFeed(d) {
       if (!CHARTS_ON) return;
       if (!widgets) return;
+      frameNorm(d);
       const srcs = new Set();
       for (const w of widgets)
         if (w.t === 'chart' && w.on && CHSRC[w.src] &&
@@ -1546,6 +1582,9 @@ const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;'
         return '<div class="vcard winp" data-k="' + w.k + '"><div class="vname">' + INPS[w.src].n +
           '<span class="utop" id="iu_' + w.k + '">' + (UN.obj || '') + '</span></div>' +
           '<div class="vrow"><input type="text" inputmode="decimal" id="wi_' + w.k +
+          '" title="макс: ' + (w.src === 'dose'
+            ? (isFinite(LIM) ? LIM : '—')
+            : (INP.dose && isFinite(INP.dose.v) ? (INP.dose.v / 2) : '—')) +
           '" value="' + (INP[w.src] ? INP[w.src].v : '') +
           '" onchange="wInpSet(\'' + w.k + '\')" onfocus="this.select()" onkeydown="if(event.key===\'Enter\')this.blur()"></div></div>';
       return '<div class="vcard wbar" data-k="' + w.k + '"><div class="vname">' + BARM[w.mode].n +
@@ -1762,8 +1801,10 @@ const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;'
           if (p.t === 11 && p.tb === 'Дозатор' && p.n === 'Режим' &&
             p.o && p.o.includes('Старт')) btnp.mode = p.i;
           if (p.cx && p.n.indexOf('Сброс') === 0 && p.tb === 'Сброс объёма') btnp.reset = p.i;
+          if (p.t === 0 && p.tb === 'Дозатор' && p.n === 'Лимит')
+            LIM = parseFloat(p.v);   
           if (p.t === 0 && p.tb === 'Уставки') {
-            if (p.n === 'Доза') inp.dose = { id: p.i, v: parseFloat(p.v) };
+            if (p.n === 'Порция') inp.dose = { id: p.i, v: parseFloat(p.v) };
             if (p.n === 'Упреждение') inp.pre = { id: p.i, v: parseFloat(p.v) };
             if (p.n === 'Перелив') inp.over = { id: p.i, v: parseFloat(p.v) };
             if (p.n === 'Расход-') SP['rate-'] = parseFloat(p.v);
@@ -1914,6 +1955,7 @@ document.addEventListener('touchend', () => {
   touchDrag = null;
 });
 function vApply(d) {
+  frameNorm(d);
   const barLo = vApply.lo || (vApply.lo = {}), barHi = vApply.hi || (vApply.hi = {});
   for (const n of VFLOATS) { const e = $('vf_' + n); if (e && d[n] !== undefined) e.textContent = d[n] }
   for (const n of VUINTS) { const e = $('vf_' + n); if (e && d[n] !== undefined) e.textContent = d[n] }
