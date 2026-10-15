@@ -1,3 +1,4 @@
+import base64
 import http.server, json, math, os, time, random, pathlib, re, urllib.parse, socket, threading, collections
 
 ROOT = pathlib.Path(__file__).parent.parent
@@ -164,16 +165,89 @@ def per_sec():
     return {'Секунда': 1.0, 'Минута': 60.0, 'Час': 3600.0}.get(
         _enum_val(53, 'Минута'), 60.0)
 
-CHART_HIST = collections.deque(maxlen=512)   # (t_ms, rate) как chartbuf на ESP
+CHART_DT_MS = 200
+CHART_WARMUP = 5
+CHART_SLOTS_N = 2
+# семантика chartbuf.c: слот с автомасштабом по первым 5 значениям
+CHART_SLOTS = [{"src": "", "first5": [], "lo": 0.0, "hi": 0.0,
+                "ring": collections.deque(maxlen=1024),  # int8
+                "total": 0, "last_ms": 0} for _ in range(CHART_SLOTS_N)]
 
-def _chart_sampler():
-    """1 Гц независимо от браузера — как meter_task на ESP."""
-    while True:
-        t = time.time() - STATE["t0"]
-        # то же число, что values() кладёт в "rate"
-        CHART_HIST.append((int(time.time() * 1000),
-                           rate_now(t) * (1000.0 / unit_ml(54)) * per_sec() / 60.0))
-        time.sleep(1.0)
+_SRC_FIELD = {"rate": "rate", "total": "total", "tplus": "total_plus",
+              "tminus": "total_minus", "tsum": "total_sum",
+              "gtotal": "gtotal", "batch": "batch", "kf": "kf_value",
+              "freq": "frequency", "pulses": "pulses"}
+
+def _rescale(sl, f):
+    lo, hi = min(sl["lo"], f), max(sl["hi"], f)
+    pad = (hi - lo) * 0.05
+    lo, hi = lo - pad, hi + pad
+    if lo < 0:
+        lo = 0.0
+    def req(v):
+        val = sl["lo"] + (v + 128) / 255.0 * (sl["hi"] - sl["lo"])
+        q = int((val - lo) / (hi - lo) * 255.0) - 128
+        return max(-128, min(127, q))
+    sl["ring"] = collections.deque((req(v) for v in sl["ring"]), maxlen=1024)
+    sl["lo"], sl["hi"] = lo, hi
+
+def chart_cfg(slot, src, lo=0.0, hi=0.0):
+    sl = CHART_SLOTS[slot]
+    fixed = hi > lo
+    # авто-запрос (hi<=lo) шкалу НЕ трогает: прогретая шкала не
+    # равна (0,0) и сравнение сбрасывало кольцо каждый опрос
+    if (sl["src"] != src or
+            (fixed and (not sl.get("fixed") or sl["lo"] != lo or sl["hi"] != hi)) or
+            (not fixed and sl.get("fixed"))):
+        sl.update(src=src, fixed=fixed, first5=[], lo=lo, hi=hi,
+                  ring=collections.deque(maxlen=1024), total=0, last_ms=0)
+
+def chart_push(snap, t_ms):
+    """вызывается из 5-Гц сэмплера: как chart_push() в задаче Meter"""
+    for sl in CHART_SLOTS:
+        if not sl["src"]:
+            continue
+        f = snap.get(_SRC_FIELD.get(sl["src"], ""), None)
+        if f is None or not math.isfinite(f):
+            continue
+        if sl["src"] == "price":
+            kf = snap.get("kf_value", 0)
+            f = 1.0 / kf if kf > 0 else 0.0
+        if not sl.get("fixed") and not (sl["hi"] > sl["lo"]):
+            sl["first5"].append(f)
+            if len(sl["first5"]) < CHART_WARMUP:
+                continue
+            lo, hi = min(sl["first5"]), max(sl["first5"])
+            if hi - lo < 1e-9:
+                lo, hi = lo - 0.5, hi + 0.5
+            pad = (hi - lo) * 0.05
+            lo, hi = lo - pad, hi + pad
+            if lo < 0:
+                lo = 0.0
+            sl["lo"], sl["hi"] = lo, hi
+        if (not sl.get("fixed")) and (f > sl["hi"] or f < sl["lo"]):
+            _rescale(sl, f)
+        q = int((f - sl["lo"]) / (sl["hi"] - sl["lo"]) * 255.0) - 128
+        q = max(-128, min(127, q))
+        sl["ring"].append(q)
+        sl["total"] += 1
+        sl["last_ms"] = t_ms
+
+def chart_take(slot, since, maxn=128):
+    sl = CHART_SLOTS[slot]
+    out = {"n": 0, "f": 0, "total": sl["total"], "t0": 0,
+           "dt": CHART_DT_MS, "lo": sl["lo"], "hi": sl["hi"]}
+    if not sl["src"] or not (sl["hi"] > sl["lo"]) or since >= sl["total"]:
+        return out
+    oldest = max(0, sl["total"] - len(sl["ring"]))
+    first = max(since, oldest)
+    have = min(maxn, sl["total"] - first)
+    out["n"] = have
+    out["f"] = first
+    out["t0"] = sl["last_ms"] - (sl["total"] - 1 - first) * CHART_DT_MS
+    raw = bytes((v & 0xFF) for v in list(sl["ring"])[first - oldest:first - oldest + have])
+    out["b64"] = base64.b64encode(raw).decode()
+    return out
 
 VAL_RING = collections.deque(maxlen=8)   # кольцо снимков, как ske02_valring
 
@@ -216,9 +290,10 @@ def _values_sampler():
             "setpoint": flag_byte(t, "setpoint"),
             "isr": flag_byte(t, "isr"),
         })
+        chart_push(VAL_RING[-1], int((now - STATE["t0"]) * 1000))
         time.sleep(0.2)
 
-def values(since=0):
+def values(since=0, chart_q=None):
     now = time.time()
     ap = bool(os.environ.get("MOCK_AP"))
     seq = [x for x in VAL_RING if x["t"] > since]
@@ -233,6 +308,17 @@ def values(since=0):
         "ssid": "ske02setup-TEST" if ap else "mock",
         "seq": seq,
     }
+    if chart_q is not None:
+        d["chart"] = []
+        for i in range(CHART_SLOTS_N):
+            skey, ckey = "s%d" % i, "c%d" % i
+            if skey in chart_q:
+                lo = float(chart_q.get("l%d" % i, ["0"])[0])
+                hi = float(chart_q.get("h%d" % i, ["0"])[0])
+                chart_cfg(i, chart_q[skey][0][:8], lo, hi)
+            if ckey in chart_q:
+                d["chart"].append(dict(i=i, **chart_take(
+                    i, int(chart_q[ckey][0]))))
     return d
 # ------------------------------------------------------------------------
 
@@ -267,7 +353,7 @@ class H(http.server.SimpleHTTPRequestHandler):
         self._path = urllib.parse.urlparse(self.path).path
         if self._path == "/api/values":
             qs = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
-            self._json(values(since=int(qs.get("since", ["0"])[0])))
+            self._json(values(since=int(qs.get("since", ["0"])[0]), chart_q=qs))
         elif self._path == "/api/info":
             ap = bool(os.environ.get("MOCK_AP"))
             self._json({"link": True, "fw": "SKE02/3425", "count": COUNT,
@@ -361,6 +447,11 @@ class H(http.server.SimpleHTTPRequestHandler):
             v = f.get('v', '')
             p['v'] = v
             STATE["cfg_rev"] = STATE.get("cfg_rev", 1) + 1
+            # меню меняли: график с чистого листа (как chart_wipe()
+            # на шлюзе после перечитывания дерева)
+            for sl in CHART_SLOTS:
+                sl.update(src="", fixed=False, first5=[], lo=0.0, hi=0.0,
+                          ring=collections.deque(maxlen=1024), total=0, last_ms=0)
             if p['o'] and v in p['o']:
                 p['r'] = p['o'].index(v)
             self._json({"ok": True, "value": v})
@@ -427,7 +518,6 @@ RELOAD_JS = ("<script>setInterval(async()=>{try{const r=await"
              "(await fetch('/stamp')).json();if(window.__st&&r.t!==window.__st)"
              "location.reload();window.__st=r.t}catch(e){}},1000)</script>")
 
-print(f"mock: {COUNT} params, {len(SECTIONS)} sections, on :8099", flush=True)
 def lan_ips():
     """все IPv4 машины; первым - адрес основного маршрута (для телефона)"""
     ips = []
@@ -456,5 +546,4 @@ for ip in lan_ips():
     print(f"  http://{ip}:{PORT}{tag}", flush=True)
 # 0.0.0.0: мок доступен и с телефона в той же Wi-Fi сети
 threading.Thread(target=_values_sampler, daemon=True).start()
-threading.Thread(target=_chart_sampler, daemon=True).start()
 http.server.ThreadingHTTPServer(("0.0.0.0", PORT), H).serve_forever()

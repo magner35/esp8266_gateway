@@ -18,6 +18,7 @@
 
 #include "debug.h"
 #include "pages.h"
+#include "chartbuf.h"
 #define PAGE_APP_GZ_LEN ((int)sizeof(PAGE_APP_GZ))
 #include "protocol.h"
 #include "ske02.h"
@@ -365,6 +366,41 @@ static esp_err_t h_api_info(httpd_req_t *req)
     return ESP_OK;
 }
 
+static void b64enc(const int8_t *in, int n, char *out)
+{
+    static const char T[] =
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    int i, o = 0;
+    for (i = 0; i + 2 < n; i += 3)
+    {
+        unsigned v = ((unsigned char)in[i] << 16) |
+                     ((unsigned char)in[i + 1] << 8) |
+                     (unsigned char)in[i + 2];
+        out[o++] = T[(v >> 18) & 63];
+        out[o++] = T[(v >> 12) & 63];
+        out[o++] = T[(v >> 6) & 63];
+        out[o++] = T[v & 63];
+    }
+    if (i < n)
+    {
+        unsigned v = (unsigned char)in[i] << 16;
+        out[o++] = T[(v >> 18) & 63];
+        if (i + 1 < n)
+        {
+            v |= (unsigned char)in[i + 1] << 8;
+            out[o++] = T[(v >> 12) & 63];
+            out[o++] = T[(v >> 6) & 63];
+        }
+        else
+        {
+            out[o++] = T[(v >> 12) & 63];
+            out[o++] = '=';
+        }
+        out[o++] = '=';
+    }
+    out[o] = 0;
+}
+
 static esp_err_t h_api_values(httpd_req_t *req)
 {
     char out[640];
@@ -478,7 +514,82 @@ static esp_err_t h_api_values(httpd_req_t *req)
             if (httpd_resp_send_chunk(req, out, off) != ESP_OK)
                 return ESP_FAIL;
         }
-        httpd_resp_send_chunk(req, "]}", 2);
+        /* графики ЕДУТ ТЕМ ЖЕ ОТВЕТОМ - отдельных запросов нет.
+         * s0/s1 = источники слотов (назначение идемпотентно),
+         * c0/c1 = курсоры: страницы сэмплов ПО ПОРЯДКУ от курсора,
+         * backlog вычитается за несколько опросов. Буферы в статике
+         * (httpd однопоточна): на стеке рядом с vsnprintf не лезут */
+        {
+            static int8_t csmp[128];
+            static char cb64[176];
+            static char centry[320];
+            char qv[24];
+            const char *q = strchr(req->uri, '?');
+            bool any = false;
+            for (int sl = 0; sl < CHART_SLOTS; sl++)
+            {
+                char skey[8], ckey[8];
+                uint32_t cursor = 0;
+                bool has = false;
+                if (!q)
+                    break;
+                skey[0] = 's'; ckey[0] = 'c';
+                skey[1] = ckey[1] = (char)('0' + sl);
+                skey[2] = ckey[2] = 0;
+                if (httpd_query_key_value(q + 1, skey, qv, sizeof(qv)) == ESP_OK)
+                {
+                    char lk[8], hk[8], lv[16], hv[16];
+                    float lo = 0, hi = 0;
+                    lk[0] = 'l'; hk[0] = 'h';
+                    lk[1] = hk[1] = (char)('0' + sl);
+                    lk[2] = hk[2] = 0;
+                    /* фиксированная шкала = уставки параметра ("туло"):
+                     * фронт знает их из дерева и шлёт тем же запросом */
+                    if (httpd_query_key_value(q + 1, lk, lv, sizeof(lv)) == ESP_OK &&
+                        httpd_query_key_value(q + 1, hk, hv, sizeof(hv)) == ESP_OK)
+                    {
+                        lo = strtof(lv, NULL);
+                        hi = strtof(hv, NULL);
+                    }
+                    chart_cfg(sl, qv, lo, hi);   /* no-op при том же src+шкале */
+                }
+                if (httpd_query_key_value(q + 1, ckey, qv, sizeof(qv)) == ESP_OK)
+                {
+                    cursor = (uint32_t)strtoul(qv, NULL, 10);
+                    has = true;
+                }
+                if (!has)
+                    continue;
+                {
+                    uint32_t total = 0, first = 0, t0 = 0;
+                    float lo = 0, hi = 0;
+                    int cn = chart_take(sl, cursor, csmp, 128, &total, &first,
+                                        &t0, &lo, &hi);
+                    b64enc(csmp, cn, cb64);
+                    off = snprintf(centry, sizeof(centry),
+                                   "%s{\"i\":%d,\"n\":%d,\"f\":%lu,"
+                                   "\"total\":%lu,\"t0\":%lu,\"dt\":%d,"
+                                   "\"lo\":%f,\"hi\":%f,\"b64\":\"%s\"}",
+                                   any ? "," : "", sl, cn,
+                                   (unsigned long)first, (unsigned long)total,
+                                   (unsigned long)t0, (int)CHART_DT_MS,
+                                   (double)lo, (double)hi, cb64);
+                    if (!any)
+                    {
+                        if (httpd_resp_send_chunk(req, "],\"chart\":[", 11) != ESP_OK)
+                            return ESP_FAIL;
+                        any = true;
+                    }
+                    if (httpd_resp_send_chunk(req, centry, off) != ESP_OK)
+                        return ESP_FAIL;
+                }
+            }
+            if (!any && httpd_resp_send_chunk(req, "]", 1) != ESP_OK)
+                return ESP_FAIL;
+            else if (any && httpd_resp_send_chunk(req, "]", 1) != ESP_OK)
+                return ESP_FAIL;
+        }
+        httpd_resp_send_chunk(req, "}", 1);
         httpd_resp_send_chunk(req, NULL, 0);   /* конец chunked */
     }
     return ESP_OK;
@@ -1283,7 +1394,8 @@ static const char *const sCaptiveProbes[] = {
 void web_start(void)
 {
     httpd_config_t cfg = HTTPD_DEFAULT_CONFIG();
-    cfg.max_uri_handlers = 36;   /* 32 needed: 19 api/pages + 11 captive + запас */
+    cfg.max_uri_handlers = 36;
+    chart_init();   /* кольцо графиков: питается задачей Meter */   /* 32 needed: 19 api/pages + 11 captive + запас */
     /* ВАЖНО: не меньше 8 КБ — h_scan держит на стеке ~2.7 КБ буферов
      * + кадры; на 6 КБ стек переполнялся и затаптывал кучу (куча
      * "уменьшалась", страница портала со сканом ломалась) */

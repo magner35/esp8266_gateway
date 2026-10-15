@@ -122,6 +122,13 @@ document.addEventListener('touchend', () => {
 /* vApply: раз в кадр 'm' обновляет карточки всех типов виджетов */
 function vApply(d) {
   frameNorm(d);
+  /* живые значения источников графиков: для цифры на канвасе */
+  if (CHARTS_ON && widgets)
+    for (const w of widgets)
+      if (w.t === 'chart' && w.on && CHSRC[w.src]) {
+        const v = parValue({ ...w, auto: true }, d);
+        if (v !== undefined && isFinite(v)) CHLIVE[w.src] = v;
+      }
   const barLo = vApply.lo || (vApply.lo = {}), barHi = vApply.hi || (vApply.hi = {});
   for (const n of VFLOATS) { const e = $('vf_' + n); if (e && d[n] !== undefined) e.textContent = d[n] }
   for (const n of VUINTS) { const e = $('vf_' + n); if (e && d[n] !== undefined) e.textContent = d[n] }
@@ -281,18 +288,9 @@ function replaySeq(seq, off) {
       if (!vBuilt) vBuild();
       vApply(sv);
       lastSeqT = sv.t;
-      /* график питается теми же снимками: 5 точек/с без запросов.
-       * Значение — через parValue (как у виджетов-параметров): он
-       * умеет к-фактор/цену импульса из множителя прибора и прочие
-       * производные; авто=true = всегда в единицах прибора */
-      if (CHARTS_ON && widgets)
-        for (const w of widgets)
-          if (w.t === 'chart' && w.on && CHSRC[w.src]) {
-            const val = parValue({ ...w, auto: true }, sv);
-            if (val !== undefined && isFinite(val))
-              chartAppend(w.src, val,
-                          sv.t ? sv.t + off : undefined);
-          }
+      /* график здесь НЕ питается: кривая строится только из
+       * серверного кольца (поле chart в ответе /api/values) -
+       * потерянные кадры дыр не оставляют */
     }, i * step));
   });
 }
@@ -303,8 +301,18 @@ async function pollLoop() {
   try {
     const ctl = new AbortController();
     const to = setTimeout(() => ctl.abort(), 5000);
-    const d = await (await fetch('/api/values?since=' + lastSeqT,
-                                  { signal: ctl.signal })).json();
+    /* s0/s1 = источники слотов кольца, c0/c1 = курсоры: сэмплы
+     * графиков приезжают ТЕМ ЖЕ запросом, отдельных нет */
+    let url = '/api/values?since=' + lastSeqT;
+    if (CHARTS_ON && widgets)
+      chartSlots().forEach((w, i) => {
+        const b = chartLive[w.src];
+        const sc = chartSpScale(w);
+        url += '&s' + i + '=' + w.src + '&c' + i + '=' + (b ? (b.srv || 0) : 0);
+        if (sc)
+          url += '&l' + i + '=' + sc.lo + '&h' + i + '=' + sc.hi;
+      });
+    const d = await (await fetch(url, { signal: ctl.signal })).json();
     clearTimeout(to);
     ok = !!d.ok;
     sLastResp = 'ok:' + (d.ok ? 1 : 0) +
@@ -312,7 +320,8 @@ async function pollLoop() {
       (d.seq && d.seq.length
         ? ' rate:' + (d.seq[d.seq.length - 1].rate !== undefined
             ? d.seq[d.seq.length - 1].rate : 'НЕТ')
-        : '');
+        : '') +
+      (d.chart ? ' chart:' + d.chart.map(c => c.n).join(',') : '');
     if (d.link !== undefined) {
       $('link').textContent = d.link ? 'ONLINE' : 'OFFLINE';
       $('link').className = 'tag ' + (d.link ? 'ok' : 'bad');
@@ -326,6 +335,7 @@ async function pollLoop() {
       lastCfg = d.cfg;
     }
     if (d.ok) replaySeq(d.seq, Date.now() - (d.now || Date.now()));
+    if (d.chart && d.chart.length) chartConsume(d.chart);
   } catch (e) { }
   pollRtt = Date.now() - t0;
   pollFails = ok ? 0 : pollFails + 1;

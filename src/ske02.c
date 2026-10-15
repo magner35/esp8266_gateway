@@ -25,6 +25,8 @@
 
 #include "debug.h"
 #include "protocol.h"
+#include "chartbuf.h"
+#include "storage.h"
 #include "tree_store.h"
 
 #define SKE_UART_NUM      UART_NUM_0
@@ -613,6 +615,9 @@ static bool ske_query_values(void)
     {
         ske02_valring_push(
             (uint32_t)(xTaskGetTickCount() * portTICK_PERIOD_MS), &snap);
+        /* серверное кольцо графиков питается ЗДЕСЬ, из задачи Meter,
+         * независимо от WiFi/httpd: обрыв связи браузера дыр не даёт */
+        chart_push(&snap, (uint32_t)(xTaskGetTickCount() * portTICK_PERIOD_MS));
         sLastOk = xTaskGetTickCount();
     }
     return ok;
@@ -764,6 +769,19 @@ static void push_time_if_needed(void)
 
     if (sEverPushed && now - sLastPush < pdMS_TO_TICKS(12UL * 3600 * 1000))
         return;
+    /* ВТОРОЙ гейт по настенным часам в NVS: static-переменные живут
+     * только до рестарта, и тихие ребуты снова и снова слали TIME */
+    {
+        time_t nowE = time(NULL);
+        uint32_t lastE = storage_timepush_get();
+        if (nowE > 1600000000UL && lastE > 1600000000UL &&
+            (uint32_t)nowE - lastE < 12UL * 3600UL)
+        {
+            sLastPush = now;      /* синхронизируем и тиковый гейт */
+            sEverPushed = true;
+            return;
+        }
+    }
     memset(&r, 0, sizeof(r));
     if (!time_text(r.text, sizeof(r.text)))
         return;
@@ -774,6 +792,11 @@ static void push_time_if_needed(void)
     {
         sLastPush = now;
         sEverPushed = true;
+        {
+            time_t nowE = time(NULL);
+            if (nowE > 1600000000UL)
+                storage_timepush_set((uint32_t)nowE);
+        }
     }
 }
 
@@ -995,6 +1018,10 @@ static void meter_task(void *arg)
                 /* liveCount = реально разобрано из секций 1/2/3;
                  * count из 'i' считает ВСЕ меню (вкл. Настройки) и
                  * только путает в логе */
+                /* настройки перечитаны (их меняли): единицы/уставки
+                 * могли смениться, старые сэмплы несовместимы -
+                 * график начинается с чистого листа */
+                chart_wipe();
                 DBG("ske02: listing done (%u params)\n", (unsigned)sCtx.liveCount);
                 xSemaphoreGive(sLock);
             }

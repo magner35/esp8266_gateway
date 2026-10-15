@@ -2,12 +2,15 @@
  * Серверная история графиков: по слоту int8[1024] на виджет (максимум
  * два виджета графика). Кадр 'm' приходит 5 раз в секунду - каждое
  * значение нормируется в шкалу слота (lo..hi -> -128..127) и пишется
- * в кольцо. Фронт раз в секунду забирает НОВЫЕ сэмплы (с since),
- * декодирует и докладывает в свой график: дыры при перезагрузке
- * страницы закрываются всеми 5 Гц точками, а не 1 Гц огрызками.
+ * в кольцо. Шкала НЕ приходит от клиента: она фиксируется по ПЕРВЫМ
+ * ПЯТИ значениям источника (min/max + 15% запаса) - так кривая
+ * всегда занимает весь динамический диапазон int8, а клиенту шкала
+ * отдаётся вместе с сэмплами.
  *
- * Смена шкалы (chart_cfg) сбрасывает кольцо слота: старые int8
- * нормированы по другой шкале и несовместимы.
+ * Сэмплы не запрашиваются отдельно: /api/values возвращает их тем же
+ * ответом (параметры s0/s1 = источники слотов, c0/c1 = курсоры),
+ * последовательными страницами от курсора - backlog после обрыва
+ * связи вычитывается за несколько опросов без лишних запросов.
  */
 #include <string.h>
 #include <math.h>
@@ -24,11 +27,15 @@ static SemaphoreHandle_t sLock;
 typedef struct
 {
     char src[8];        /* ключ CHSRC ("" = слот свободен) */
-    float lo, hi;       /* шкала нормировки */
+    float lo, hi;       /* шкала: фиксируется по первым 5 значениям */
     int8_t buf[CHART_LEN];
     uint16_t head;      /* следующая позиция записи */
     uint32_t total;     /* всего записано (индекс следующего сэмпла) */
     uint32_t last_ms;   /* время последнего сэмпла */
+    bool fixed;          /* шкала задана уставками параметра */
+    float first5[CHART_WARMUP];
+    uint32_t first5_ms[CHART_WARMUP];
+    uint8_t n5;         /* сколько из первых значений накоплено */
 } chart_slot_t;
 
 static chart_slot_t sSlots[CHART_SLOTS];
@@ -55,18 +62,95 @@ static float src_value(const char *src, const SkeValues *v)
     return NAN;
 }
 
+static int8_t quantize(float f, float lo, float hi)
+{
+    int q = (int)((f - lo) / (hi - lo) * 255.0f) - 128;
+    if (q < -128)
+        q = -128;
+    if (q > 127)
+        q = 127;
+    return (int8_t)q;
+}
+
+/* значение вышло за шкалу (первые 5 значений не могли знать размах
+ * медленно гуляющего сигнала): расширияем границы и ПЕРЕРАЗМЕТКА
+ * кольца под новую шкалу - старые int8 читаются по старым lo/hi и
+ * пишутся по новым. Расширение с запасом - редкое событие, не дрожит */
+static void slot_rescale(chart_slot_t *s, float f)
+{
+    float lo = s->lo, hi = s->hi;
+    float pad;
+    int i;
+    if (f > hi) hi = f;
+    if (f < lo) lo = f;
+    pad = (hi - lo) * 0.05f;
+    lo -= pad;
+    hi += pad;
+    if (lo < 0)   /* источники неотрицательные: низ всегда 0 */
+        lo = 0;
+    for (i = 0; i < CHART_LEN; i++)
+    {
+        float v = s->lo + ((float)s->buf[i] + 128.0f) / 255.0f * (s->hi - s->lo);
+        s->buf[i] = quantize(v, lo, hi);
+    }
+    s->lo = lo;
+    s->hi = hi;
+}
+
+static void slot_write(chart_slot_t *s, float f, uint32_t t_ms)
+{
+    /* фиксированная шкала - ТУПО клиппим (уставки параметра);
+     * авто-шкала - расширяем при выходе за границы */
+    if (!s->fixed && (f > s->hi || f < s->lo))
+        slot_rescale(s, f);
+    s->buf[s->head] = quantize(f, s->lo, s->hi);
+    if (++s->head >= CHART_LEN)
+        s->head = 0;
+    s->total++;
+    s->last_ms = t_ms;
+}
+
+/* назначение слота: src совпадает = no-op (каждый /api/values шлёт
+ * s0/s1 повторно); смена источника сбрасывает счётчики и шкалу */
 void chart_cfg(int slot, const char *src, float lo, float hi)
 {
     chart_slot_t *s;
-    if (slot < 0 || slot >= CHART_SLOTS || !(hi > lo))
+    if (slot < 0 || slot >= CHART_SLOTS || !src || !src[0])
         return;
     s = &sSlots[slot];
     xSemaphoreTake(sLock, portMAX_DELAY);
-    memset(s, 0, sizeof(*s));
-    snprintf(s->src, sizeof(s->src), "%s", src);
-    s->lo = lo;
-    s->hi = hi;
+    /* авто-запрос (hi<=lo) шкалу НЕ трогает: прогретая шкала слота
+     * не равна (0,0) и сравнение сбрасывало кольцо КАЖДЫЙ опрос */
+    if (strcmp(s->src, src) != 0 ||
+        (hi > lo && (!s->fixed || s->lo != lo || s->hi != hi)) ||
+        (hi <= lo && s->fixed))
+    {
+        memset(s, 0, sizeof(*s));
+        snprintf(s->src, sizeof(s->src), "%s", src);
+        if (hi > lo)
+        {
+            s->lo = lo;
+            s->hi = hi;
+            s->fixed = true;
+        }
+    }
     xSemaphoreGive(sLock);
+}
+
+void chart_wipe(void)
+{
+    int i;
+    if (!sLock)
+        return;
+    xSemaphoreTake(sLock, portMAX_DELAY);
+    for (i = 0; i < CHART_SLOTS; i++)
+        memset(&sSlots[i], 0, sizeof(sSlots[i]));
+    xSemaphoreGive(sLock);
+}
+
+bool chart_ready(int slot)
+{
+    return slot >= 0 && slot < CHART_SLOTS && sSlots[slot].hi > sSlots[slot].lo;
 }
 
 void chart_push(const SkeValues *v, uint32_t t_ms)
@@ -79,40 +163,68 @@ void chart_push(const SkeValues *v, uint32_t t_ms)
     {
         chart_slot_t *s = &sSlots[i];
         float f;
-        int q;
         if (!s->src[0])
             continue;
         f = src_value(s->src, v);
         if (!isfinite(f))
+            continue;   /* нет поля в кадре: кольцо держит разрыв */
+        if (!s->fixed && !(s->hi > s->lo))
         {
-            /* прибора-нет-кадра для источника: пишем край шкалы? нет -
-             * пропускаем сэмпл, кольцо держит разрыв времени */
+            /* прогрев: копим первые значения для выбора шкалы */
+            if (s->n5 < CHART_WARMUP)
+            {
+                s->first5[s->n5] = f;
+                s->first5_ms[s->n5] = t_ms;
+                s->n5++;
+            }
+            if (s->n5 < CHART_WARMUP)
+                continue;
+            {
+                float lo = s->first5[0], hi = s->first5[0];
+                int k;
+                float pad;
+                for (k = 1; k < CHART_WARMUP; k++)
+                {
+                    if (s->first5[k] < lo) lo = s->first5[k];
+                    if (s->first5[k] > hi) hi = s->first5[k];
+                }
+                if (hi - lo < 1e-9f)
+                {
+                    lo -= 0.5f;
+                    hi += 0.5f;
+                }
+                pad = (hi - lo) * 0.05f;
+                lo -= pad;
+                hi += pad;
+                /* все источники неотрицательные: низ шкалы всегда 0
+                 * (минусовой запас рисовал ось ниже нуля при нуле
+                 * расхода) */
+                if (lo < 0)
+                    lo = 0;
+                s->lo = lo;
+                s->hi = hi;
+                /* накопленные значения вписываем в кольцо задним числом */
+                for (k = 0; k < CHART_WARMUP; k++)
+                    slot_write(s, s->first5[k], s->first5_ms[k]);
+            }
             continue;
         }
-        q = (int)((f - s->lo) / (s->hi - s->lo) * 255.0f) - 128;
-        if (q < -128)
-            q = -128;
-        if (q > 127)
-            q = 127;
-        s->buf[s->head++] = (int8_t)q;
-        if (s->head >= CHART_LEN)
-            s->head = 0;
-        s->total++;
-        s->last_ms = t_ms;
+        slot_write(s, f, t_ms);
     }
     xSemaphoreGive(sLock);
 }
 
-/* Новые сэмплы с индекса since: копируются по порядку возрастания.
- * Возврат: число сэмплов (0 = ничего нового); out_total/last_ms/src/
- * lo/hi заполняются всегда (для фронтенда). since=0 и кольцо уже
- * перезаписано -> отдаём всё кольцо (фронт сам сбросится по total). */
-int chart_fetch(int slot, uint32_t since, uint32_t upto, int8_t *out,
-                int max, uint32_t *out_total, uint32_t *out_last, char *src,
-                size_t srccap, float *lo, float *hi)
+/* Страница сэмплов ПО ПОРЯДКУ от курсора since (последовательное
+ * вычитывание: несколько опросов разбирают любой backlog). Дыры нет:
+ * если since уже перезаписан кольцом, стартуем с самого старого
+ * живого сэмпла. t0 = время первого отданного сэмпла (мс от старта),
+ * шаг сэмплов постоянен CHART_DT_MS. */
+int chart_take(int slot, uint32_t since, int8_t *out, int max,
+               uint32_t *out_total, uint32_t *out_first, uint32_t *out_t0,
+               float *lo, float *hi)
 {
     chart_slot_t *s;
-    uint32_t have, n = 0;
+    uint32_t first = 0, have, n = 0;
 
     if (slot < 0 || slot >= CHART_SLOTS)
         return 0;
@@ -120,39 +232,27 @@ int chart_fetch(int slot, uint32_t since, uint32_t upto, int8_t *out,
     xSemaphoreTake(sLock, portMAX_DELAY);
     if (out_total)
         *out_total = s->total;
-    if (out_last)
-        *out_last = s->last_ms;
-    if (src && srccap)
-        snprintf(src, srccap, "%s", s->src);
     if (lo)
         *lo = s->lo;
     if (hi)
         *hi = s->hi;
-    /* верх диапазона: upto=0 -> до последнего (total) */
+    if (s->src[0] && s->hi > s->lo && since < s->total)
     {
-        uint32_t end = s->total;
-        if (upto && upto < end)
-            end = upto;
-        if (s->src[0] && since < end)
-        {
         uint32_t oldest = s->total > CHART_LEN ? s->total - CHART_LEN : 0;
-        uint32_t first = since > oldest ? since : oldest;
-        have = end - first;
-        /* просили больше максимума: отдаём НЕ САМЫЕ СТАРЫЕ, а окно
-         * в конец (новейшие max сэмплов) - при since=0 (свежая
-         * страница/сворачивание) это то, что рисуется сразу */
+        first = since > oldest ? since : oldest;
+        have = s->total - first;
         if (have > (uint32_t)max)
-        {
-            first += have - (uint32_t)max;
             have = (uint32_t)max;
-        }
         while (n < have)
         {
-            uint32_t idx = (first + n) % CHART_LEN;
-            out[n] = s->buf[idx];
+            out[n] = s->buf[(first + n) % CHART_LEN];
             n++;
         }
-        }
+        if (out_t0)
+            *out_t0 = s->last_ms -
+                      (s->total - 1 - first) * CHART_DT_MS;
+        if (out_first)
+            *out_first = first;
     }
     xSemaphoreGive(sLock);
     return (int)n;

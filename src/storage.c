@@ -64,6 +64,29 @@ const gw_settings_t *storage_get(void)
     return &sSettings;
 }
 
+uint32_t storage_timepush_get(void)
+{
+    nvs_handle_t h;
+    uint32_t v = 0;
+    if (nvs_open(NVS_NAMESPACE, NVS_READONLY, &h) == ESP_OK)
+    {
+        nvs_get_u32(h, "tpush", &v);
+        nvs_close(h);
+    }
+    return v;
+}
+
+void storage_timepush_set(uint32_t epoch)
+{
+    nvs_handle_t h;
+    if (nvs_open(NVS_NAMESPACE, NVS_READWRITE, &h) == ESP_OK)
+    {
+        nvs_set_u32(h, "tpush", epoch);
+        nvs_commit(h);
+        nvs_close(h);
+    }
+}
+
 void storage_set_wifi(const char *ssid, const char *pass)
 {
     strncpy(sSettings.ssid, ssid, sizeof(sSettings.ssid) - 1);

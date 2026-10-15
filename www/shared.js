@@ -88,7 +88,7 @@ const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;'
      * (rateMLPM, totalml_plus и соседи) всегда честны, а единицы из дерева
      * (/api/params) свежие сразу после SET - в отличие от кэша единиц
      * в прошивке шлюза, который ловился на рассинхрон. Вызывается
-     * первым делом в vApply и chartFeed. batch НЕ трогаем: прибор
+     * первым делом в vApply. batch НЕ трогаем: прибор
      * шлёт его уже в текущих единицах (как уставку). */
     function frameNorm(d) {
       if (!d || !d.touched) {
@@ -374,6 +374,27 @@ const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;'
      * (для этого нужен ринг на ESP, +2-4КБ). */
     const CHARTS_ON = true;
     const CHSCALE = {};                 /* w.k -> {lo, hi} стабильный автоскейл */
+    /* первые два включённых графика = слоты серверного кольца */
+    const chartSlots = () => (widgets || [])
+      .filter(w => w.t === 'chart' && w.on && CHSRC[w.src])
+      .slice(0, 2);
+    /* шкала кольца ТУПО по уставкам параметра (как у ручного режима):
+     * расход = Расход-..Qmax, объёмы = 0..уставка. Без уставки
+     * (kf/цена/частота/импульсы) - null, шлюз сам прогреется по 5 */
+    const CHLIVE = {};    /* src -> живое значение: цифра на графике
+                           * должна совпадать с виджетом ДО ТОЧНОСТИ,
+                           * не через int8-квантование кольца */
+    function chartSpScale(w) {
+      if (CHART_AUTO_ONLY.includes(w.src)) return null;
+      if (CHSRC[w.src].un === 'rate') {
+        if (!(SP.rate > 0) || SP.rate >= 999999) return null;
+        const lo = SP['rate-'] > 0 && SP['rate-'] < SP.rate ? SP['rate-'] : 0;
+        return { lo, hi: SP.rate };
+      }
+      const hi = SP[CHSRC[w.src].sp];
+      if (!(hi > 0) || hi >= 999999) return null;
+      return { lo: 0, hi };
+    }
     /* "красивый" шаг сетки: 1/2/5·10^n */
     function niceStep(x) {
       if (!(x > 0) || !isFinite(x)) return 1;
@@ -395,51 +416,36 @@ const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;'
      * целиком из live-данных — плавный, без серверных ступенек.
      */
     /*
-     * Backfill из серверного буфера ESP: после загрузки страницы и
-     * после дыр (обрыв связи) забираем недостающие точки с реальными
-     * таймштампами (/api/chart?since=N). Часы сервера — от старта,
-     * клиентские — эпоха: смещение берём из "now" в каждом ответе.
-     * Точки строже последней клиентской пропускаются (монотонность).
+     * ЕДИНСТВЕННЫЙ кормитель графиков — серверное кольцо шлюза.
+     * Сэмплы приезжают в ответе /api/values (поле chart, pollLoop
+     * шлёт s0/s1 = источники слотов и c0/c1 = курсоры): отдельных
+     * запросов нет вообще. Страницы сэмплов ПО ПОРЯДКУ от курсора -
+     * backlog после обрыва связи вычитается за несколько опросов.
+     * Шкалу шлюз выбирает сам (первые 5 значений) и отдаёт с данными.
      */
-    async function chartBackfill(src) {
-      try {
-        let buf = chartLive[src];
-        if (!buf) buf = chartLive[src] = { vals: [], ts: [], srv: 0 };
-        const d = await (await fetch('/api/chart?since=' + (buf.srv || 0))).json();
-        if (!d.t || !d.t.length) return;
-        const off = Date.now() - d.now;
-        for (let i = 0; i < d.t.length; i++) {
-          const t = d.t[i] + off;
-          if (buf.ts.length && t <= buf.ts[buf.ts.length - 1]) continue;
-          buf.vals.push(d.v[i]);
-          buf.ts.push(t);
-          buf.srv = d.t[i];
+    function chartConsume(entries) {
+      for (const e of entries) {
+        const w = chartSlots()[e.i];
+        if (!w || !e.n || !e.b64) continue;
+        let buf = chartLive[w.src];
+        if (!buf) buf = chartLive[w.src] = { vals: [], ts: [], srv: 0 };
+        /* курсор перескочил (кольцо перезаписано / слот перезапущен):
+         * старые точки несовместимы - начинаем с окна сервера */
+        if (e.f > buf.srv || e.f + e.n < buf.srv) {
+          buf.vals = []; buf.ts = []; buf.toff = 0;
         }
-      } catch (e) { }
-    }
-    /*
-     * Кормление графиков из valuesTick: при пустом буфере или дыре —
-     * сначала backfill (дыра закроется реальными точками), затем
-     * текущая live-точка. Дыра >60с — сброс и полная история заново.
-     */
-    async function chartFeed(d) {
-      if (!CHARTS_ON) return;
-      if (!widgets) return;
-      frameNorm(d);
-      const srcs = new Set();
-      for (const w of widgets)
-        if (w.t === 'chart' && w.on && CHSRC[w.src] &&
-            d[CHSRC[w.src].src] !== undefined)
-          srcs.add(w.src);
-      for (const src of srcs) {
-        const buf = chartLive[src];
-        const gap = buf && buf.ts.length ?
-            Date.now() - buf.ts[buf.ts.length - 1] : Infinity;
-        if (gap > CHART_HARD_RESET_MS)
-          chartLive[src] = { vals: [], ts: [], srv: 0 };
-        if (!isFinite(gap) || gap > CHART_GAP_MS)
-          await chartBackfill(src);
-        chartAppend(src, d[CHSRC[src].src]);
+        if (!buf.toff)
+          /* серверные часы от старта шлюза: единое смещение на буфер */
+          buf.toff = Date.now() - (e.t0 + (e.n - 1) * e.dt);
+        const bin = atob(e.b64);
+        for (let k = 0; k < e.n; k++) {
+          const b = bin.charCodeAt(k);
+          const q = b < 128 ? b : b - 256;
+          chartAppend(w.src,
+                      e.lo + (q + 128) / 255 * (e.hi - e.lo),
+                      e.t0 + k * e.dt + buf.toff);
+        }
+        buf.srv = e.f + e.n;
       }
     }
     /* пороги устаревания данных */
@@ -728,7 +734,11 @@ const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;'
         g.fill();
       }
       g.fillStyle = '#d8dee9'; g.font = '12px ui-monospace,Consolas,monospace';
-      g.fillText(pts[n - 1].v.toFixed(3), 8, 12);
+      {
+        /* цифра = ЖИВОЕ значение (как в виджете), не int8-декод */
+        const lv = CHLIVE[w.src];
+        g.fillText((isFinite(lv) ? lv : pts[n - 1].v).toFixed(3), 8, 12);
+      }
       g.fillStyle = '#8b94a7';
       /* max/min = ГРАНИЦЫ ШКАЛЫ: в авто это экстремумы данных,
        * при фиксированной — уставки прибора */
