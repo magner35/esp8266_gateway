@@ -46,6 +46,7 @@ enum
 };
 
 static ProtoCtx sCtx;
+static char *sListBuf;   /* арена: строки LIST + кольца графиков */
 static SemaphoreHandle_t sLock;
 static uint8_t sState;
 static TickType_t sT;
@@ -283,9 +284,11 @@ static bool capture_listing(TickType_t timeout)
      * ЗАГОЛОВКАМИ (без рекурсии) + параметры уровня (глоб. id).
      * Шлюз идёт очередью: каждый дочерний заголовок в ответе
      * порождает команду уровнем глубже. Ответ уровня < 1.5К - буфер
-     * 3К в куче, выделяется ОДИН РАЗ (старт, куча девственна).
+     * 2.3К в куче, выделяется ОДИН РАЗ (старт, куча девственна).
+     * Хвост той же арены - кольца графиков (chartbuf.c): листинг
+     * трогает только первые SKE_LIST_BYTES, при перечитывании меню
+     * график всё равно начинается с чистого листа (chart_wipe).
      */
-    static char *sListBuf;
     char queue[40][14];
     int qt = 0;
     int chunks = 0;
@@ -294,7 +297,7 @@ static bool capture_listing(TickType_t timeout)
 
     if (!sListBuf)
     {
-        sListBuf = malloc(3 * 1024);
+        sListBuf = malloc(ske02_list_buf_len());
         if (!sListBuf)
         {
             DBG("ske02: listing buffer alloc failed\n");
@@ -303,6 +306,9 @@ static bool capture_listing(TickType_t timeout)
     }
 
     proto_listing_begin(&sCtx);
+    /* арена сейчас будет затёрта строками LIST: кольца графиков
+     * живут в ней же - обнуляем ДО, чтобы отдача не видела мусор */
+    chart_wipe();
     xSemaphoreTake(sLock, portMAX_DELAY);
     sCtx.inListing = true;
     sCtx.curSection = 0;
@@ -365,7 +371,7 @@ static bool capture_listing(TickType_t timeout)
             if (rc == 2)
             {
                 size_t n = strlen(line);
-                if (llen + n + 1 >= 3 * 1024)
+                if (llen + n + 1 >= SKE_LIST_BYTES)
                     overflow = true;
                 else
                 {
@@ -546,6 +552,17 @@ static SemaphoreHandle_t sVLock;
 void ske02_valring_init(void)
 {
     sVLock = xSemaphoreCreateMutex();
+}
+
+/* арена листинга: строки LIST + хвост под кольца графиков */
+char *ske02_list_buf(void)
+{
+    return sListBuf;
+}
+
+size_t ske02_list_buf_len(void)
+{
+    return SKE_LIST_BYTES;
 }
 
 void ske02_valring_push(uint32_t t_ms, const SkeValues *v)
@@ -1136,7 +1153,7 @@ void ske02_start(void)
     sReqMutex = xSemaphoreCreateMutex();
     sReqDone = xSemaphoreCreateBinary();
     sQueue = xQueueCreate(2, sizeof(ske_req_t *));
-    xTaskCreate(meter_task, "meter", 4096, NULL, 5, NULL);
+    xTaskCreate(meter_task, "meter", 3072, NULL, 5, NULL);
 }
 
 bool ske02_request(const ske_req_t *req, uint32_t timeout_ms)

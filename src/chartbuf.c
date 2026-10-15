@@ -28,7 +28,8 @@ typedef struct
 {
     char src[8];        /* ключ CHSRC ("" = слот свободен) */
     float lo, hi;       /* шкала: фиксируется по первым 5 значениям */
-    int8_t buf[CHART_LEN];
+    int8_t *buf;        /* данные - в ХВОСТЕ арены листинга (ske02.c):
+                         * листинг трогает только первые SKE_LIST_BYTES */
     uint16_t head;      /* следующая позиция записи */
     uint32_t total;     /* всего записано (индекс следующего сэмпла) */
     uint32_t last_ms;   /* время последнего сэмпла */
@@ -40,9 +41,18 @@ typedef struct
 
 static chart_slot_t sSlots[CHART_SLOTS];
 
+/* кольца живут В ТОЙ ЖЕ памяти, что и строки листинга (одна арена
+ * SKE_LIST_BYTES): листинг затирает их, листинг всегда начинается с
+ * chart_wipe() - счётчики обнуляются и пустое кольцо не отдаётся */
 void chart_init(void)
 {
+    char *arena = ske02_list_buf();
+    int i;
     sLock = xSemaphoreCreateMutex();
+    for (i = 0; i < CHART_SLOTS; i++)
+        sSlots[i].buf = arena
+            ? (int8_t *)(arena + i * CHART_LEN)
+            : NULL;
 }
 
 /* значение источника из кадра (ключи = CHSRC на странице) */
@@ -125,7 +135,9 @@ void chart_cfg(int slot, const char *src, float lo, float hi)
         (hi > lo && (!s->fixed || s->lo != lo || s->hi != hi)) ||
         (hi <= lo && s->fixed))
     {
+        int8_t *keep = s->buf;   /* указатель на арену живёт в chart_init */
         memset(s, 0, sizeof(*s));
+        s->buf = keep;
         snprintf(s->src, sizeof(s->src), "%s", src);
         if (hi > lo)
         {
@@ -144,7 +156,11 @@ void chart_wipe(void)
         return;
     xSemaphoreTake(sLock, portMAX_DELAY);
     for (i = 0; i < CHART_SLOTS; i++)
+    {
+        int8_t *keep = sSlots[i].buf;
         memset(&sSlots[i], 0, sizeof(sSlots[i]));
+        sSlots[i].buf = keep;
+    }
     xSemaphoreGive(sLock);
 }
 
@@ -163,7 +179,7 @@ void chart_push(const SkeValues *v, uint32_t t_ms)
     {
         chart_slot_t *s = &sSlots[i];
         float f;
-        if (!s->src[0])
+        if (!s->src[0] || !s->buf)
             continue;
         f = src_value(s->src, v);
         if (!isfinite(f))
@@ -236,7 +252,7 @@ int chart_take(int slot, uint32_t since, int8_t *out, int max,
         *lo = s->lo;
     if (hi)
         *hi = s->hi;
-    if (s->src[0] && s->hi > s->lo && since < s->total)
+    if (s->src[0] && s->buf && s->hi > s->lo && since < s->total)
     {
         uint32_t oldest = s->total > CHART_LEN ? s->total - CHART_LEN : 0;
         first = since > oldest ? since : oldest;
