@@ -538,8 +538,17 @@ static esp_err_t h_api_params(httpd_req_t *req)
 
     /* секции: имена записей дерева, в порядке первого появления */
     count = tree_count();
-    static char menus[SKE_MAX_MENUS * SKE_MENU_LEN];
-    tree_menus_load(menus, sizeof(menus));
+    /* menus-blob в КУЧЕ на время запроса (1760Б статики долой);
+     * httpd однопоточна, malloc/free одного размера переиспользует
+     * один и тот же блок - фрагментации нет */
+    char *menus = malloc(SKE_MAX_MENUS * SKE_MENU_LEN);
+    if (!menus)
+    {
+        httpd_resp_set_status(req, "500 Internal Server Error");
+        httpd_resp_send(req, NULL, 0);
+        return ESP_OK;
+    }
+    tree_menus_load(menus, SKE_MAX_MENUS * SKE_MENU_LEN);
     {
         for (id = 0; id < count && secNum < SKE_MAX_SECTIONS; id++)
         {
@@ -628,6 +637,7 @@ static esp_err_t h_api_params(httpd_req_t *req)
 
     httpd_resp_send_chunk(req, "]}", 2);
     httpd_resp_send_chunk(req, NULL, 0); /* end chunked */
+    free(menus);
     return ESP_OK;
 }
 
