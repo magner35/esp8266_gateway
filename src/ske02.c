@@ -274,25 +274,33 @@ static bool ske_info(void)
  */
 static bool capture_listing(TickType_t timeout)
 {
-    /* 'l'/'L' (Настройки) не нужны: это меню не используется,
-     * параметров в 1+2+3 достаточно (нумерация едина со старым 'l') */
-    static const char *const cmds[] = {"LIST 1", "LIST 2", "LIST 3"};
-    /* буфер СТАТИЧЕСКИЙ: с ростом меню прибора секция "Основные"
-     * доросла до 5.1К, а malloc на фрагментированной куче (после
-     * WiFi/TLS/прошивок) деградировал до 5120 - секция не влезала
-     * на 1 байт, листинг падал и перечитывался бесконечно */
-    static char sListBuf[7 * 1024];
-    char line[512];
-    bool ok = true;
-    char *buf = sListBuf;
-    size_t bufSz = sizeof(sListBuf);
+    /*
+     * ПОУРОВНЕВЫЙ листинг (синтаксис прибора): LIST s (0..2) - один
+     * уровень вниз от секции; LIST s m - уровень от m-го подменю;
+     * LIST s m n - ещё глубже. Ответ = заголовок цели + подменю
+     * ЗАГОЛОВКАМИ (без рекурсии) + параметры уровня (глоб. id).
+     * Шлюз идёт очередью: каждый дочерний заголовок в ответе
+     * порождает команду уровнем глубже. Ответ уровня < 1.5К - буфер
+     * 3К в куче, выделяется ОДИН РАЗ (старт, куча девственна).
+     */
+    static char *sListBuf;
+    char queue[40][14];
+    int qt = 0;
+    int chunks = 0;
+    int len;
+    int s;
+
+    if (!sListBuf)
+    {
+        sListBuf = malloc(3 * 1024);
+        if (!sListBuf)
+        {
+            DBG("ske02: listing buffer alloc failed\n");
+            return false;
+        }
+    }
 
     proto_listing_begin(&sCtx);
-    /*
-     * inListing обязан быть взведён ДО парсинга: раньше это делал
-     * text_start, после его удаления парсер считал строки листинга
-     * ответами 's' - on_param не звался, дерево оставалось пустым.
-     */
     xSemaphoreTake(sLock, portMAX_DELAY);
     sCtx.inListing = true;
     sCtx.curSection = 0;
@@ -301,88 +309,155 @@ static bool capture_listing(TickType_t timeout)
     xSemaphoreGive(sLock);
     tree_begin();
 
-    for (int c = 0; c < 3 && ok; c++)
+    for (s = 0; s < 3; s++)
     {
-        size_t len = 0;
-        bool secOk = false;
-        bool overflow = false;   /* строка не влезла - секция неполна */
+        queue[qt][0]='L';queue[qt][1]='I';queue[qt][2]='S';queue[qt][3]='T';
+        queue[qt][4]=' ';queue[qt][5]=(char)('0'+s);queue[qt][6]=0;
+        qt++;
+    }
+
+    /* DFS (стек): дочерние команды кладутся НА ВЕРШИНУ стека и
+     * выполняются СРАЗУ за родителем - L3-подменю идут за своими
+     * L2, а не все скопом в конце (BFS). Снятие = qt-- (БЕЗ qh:
+     * старый qh++ догонял qt и цикл умирал после 2 кусков) */
+    while (qt > 0 && chunks < 40)
+    {
+        char parentCmd[14];
+        qt--;   /* снимаем с вершины стека */
+        /* СТЁК: родитель лежит в ТОЙ ЖЕ ячейке, куда запишутся дети
+         * (первый ребёнок затирал родителя, второй строил команду от
+         * уже перезаписанного -> " 07 07"). Копируем до разбора. */
+        snprintf(parentCmd, sizeof(parentCmd), "%s", queue[qt]);
+        char *pp, *pe;
+        int child = 0;
+        int nArgs = 1;
+        const char *q;
+        bool prompt = false;
+        bool overflow = false;
+        size_t llen = 0;
+
+        /* самопроверка очереди: только A-Z/0-9/пробел и разумная
+         * длина; мусор = очередь побита, лучше упасть с логом */
+        {
+            const char *v;
+            for (v = parentCmd; *v; v++)
+                if (!((*v >= 'A' && *v <= 'Z') || (*v >= '0' && *v <= '9') ||
+                      *v == ' '))
+                    break;
+            if (*v || v - parentCmd > 13 || parentCmd[0] != 'L')
+            {
+                DBG("ske02: queue[%d] CORRUPT: %s\n", qt, parentCmd);
+                goto fail;
+            }
+        }
 
         uart_flush_rx();
-        uart_send_line(cmds[c]);
+        uart_send_line(parentCmd);
         proto_prompt_reset(&sCtx);
-
-        /* фаза 1: секция целиком в буфер, БЕЗ парсинга/NVS */
         for (;;)
         {
+            char line[512];
             int rc = read_line_until_prompt(line, sizeof(line), timeout);
             if (rc == 0)
-                break;         /* таймаут */
+                break; /* таймаут */
             if (rc == 2)
             {
                 size_t n = strlen(line);
-                if (len + n + 2 <= bufSz)
-                {
-                    memcpy(buf + len, line, n);
-                    len += n;
-                    buf[len++] = '\n';
-                }
-                else
+                if (llen + n + 1 >= 3 * 1024)
                     overflow = true;
+                else
+                {
+                    memcpy(sListBuf + llen, line, n + 1);
+                    llen += n + 1;
+                }
             }
             if (rc == 1)
             {
-                /* промпт есть, но буфер мал - секция неполна: провал */
-                secOk = !overflow;
+                prompt = true;
                 break;
             }
         }
+        if (overflow || !prompt)
+        {
+            /* таймаут посередине = частичный захват: НЕ успех */
+            DBG("ske02: '%s' failed (%s)\n", parentCmd,
+                overflow ? "overflow" : "timeout");
+            goto fail;
+        }
 
-        /* фаза 2: парсинг секции + NVS - UART молчит */
-        if (secOk)
+        for (q = parentCmd; *q; q++)
+            if (*q == ' ')
+                nArgs++;
+
+        pp = sListBuf;
+        pe = sListBuf + llen;
+        while (pp < pe)
         {
-            char *pp = buf;
-            char *pe = buf + len;
-            while (pp < pe)
+            char lbuf[512];
+            size_t ln;
+            char *nul = memchr(pp, 0, (size_t)(pe - pp));
+            ln = nul ? (size_t)(nul - pp) : (size_t)(pe - pp);
+            if (ln >= sizeof(lbuf))
+                ln = sizeof(lbuf) - 1;
+            memcpy(lbuf, pp, ln);
+            lbuf[ln] = 0;
+            /* ГЛАВНОЕ: разбор из КОПИИ. line_to_parser русифицирует
+             * строку С РАСШИРЕНИЕМ (гомоглиф 1Б -> кириллица 2Б) -
+             * на месте он затирал начало СЛЕДУЮЩЕЙ строки в буфере
+             * захвата: заголовки детей умирали до сканирования,
+             * строки слипались, дерево теряло куски */
+            if (lbuf[0] == '[' && lbuf[1] == 'L')
             {
-                char *nl = memchr(pp, '\n', (size_t)(pe - pp));
-                size_t n = nl ? (size_t)(nl - pp) : (size_t)(pe - pp);
-                if (n >= sizeof(line))
-                    n = sizeof(line) - 1;
-                memcpy(line, pp, n);
-                line[n] = 0;
-                line_to_parser(line);
-                pp = nl ? nl + 1 : pe;
+                /* первый заголовок ответа - сама цель; остальные -
+                 * дети: команда на уровень глубже (макс. 3 числа) */
+                /* nArgs = слова команды с 'LIST': 2='LIST s', 3='LIST s m',
+                 * 4='LIST s m n' (максимум прибора). off-by-one: '< 3'
+                 * блокировало ВСЕ L3-запросы - 93 параметра вместо 188 */
+                if (child > 0 && nArgs < 4 && qt < 40 && child <= 100)
+                {
+                    /* ручная сборка: snprintf в буфер 14Б с %s%d
+                     * давал -Werror=format-truncation */
+                    char *w = queue[qt];
+                    const char *r = parentCmd;
+                    while (*r && w < queue[qt] + 11)
+                        *w++ = *r++;
+                    *w++ = ' ';
+                    *w++ = (char)('0' + (child - 1) / 10);
+                    *w++ = (char)('0' + (child - 1) % 10);
+                    *w = 0;
+
+                    qt++;
+                }
+                child++;
             }
+            else if (!strncmp(lbuf, "ERR", 3))
+            {
+                /* прибор не понял команду: дальше не идём */
+            DBG("ske02: '%s' -> %s\n", parentCmd, lbuf);
+                goto fail;
+            }
+            line_to_parser(lbuf);
+            pp = nul ? nul + 1 : pe;
         }
-        else
-        {
-            DBG("ske02: sec '%s' failed (%s, len %u, buf %u)\n",
-                cmds[c],
-                overflow ? "buffer small" : "timeout",
-                (unsigned)len, (unsigned)bufSz);
-            ok = false;
-        }
-        /* диагностика: уникальных id после этой секции */
-        DBG("ske02: sec '%s' -> liveCount %u\n",
-            cmds[c], (unsigned)sCtx.liveCount);
+        chunks++;
     }
 
+    DBG("ske02: listing done (%d chunks, %u params)\n",
+        chunks, (unsigned)sCtx.liveCount);
     xSemaphoreTake(sLock, portMAX_DELAY);
     sCtx.inListing = false;
     xSemaphoreGive(sLock);
-    /*
-     * Полнота гарантируется ПРОМПТОМ: каждая секция заканчивается
-     * "SKE02> "; все три дошли = набор полный, счётчик 'i' не нужен.
-     * Меняется число параметров в приборе - ничего не правим.
-     */
-    if (ok)
-    {
-        tree_commit(&sCtx, sCtx.liveCount);
-        sLastOk = xTaskGetTickCount();
-    }
-    else
-        tree_abort();
-    return ok;
+    /* полнота = каждый кусок дошёл до промпта */
+    tree_commit(&sCtx, sCtx.liveCount);
+    sLastOk = xTaskGetTickCount();
+    return true;
+
+fail:
+    xSemaphoreTake(sLock, portMAX_DELAY);
+    sCtx.inListing = false;
+    xSemaphoreGive(sLock);
+    tree_abort();
+    return false;
 }
 
 /*
@@ -885,8 +960,18 @@ static void meter_task(void *arg)
                     DBG("ske02: %s, %u params\n", sCtx.version,
                         (unsigned)sCtx.count);
                     xSemaphoreGive(sLock);
-                    sState = ST_LIST;   /* capture шлёт L/1/2/3 сам */
+                    /* дерево УЖЕ прочитано этой загрузкой (обрыв связи
+                     * не стирает NVS): перечитывать нечего - скачем
+                     * в опрос значений. Реальные изменения прибора
+                     * поймает cfg_rev в ST_IDLE. Без этого каждый
+                     * wifi-обрыв рвёт DATA -> полный wake-обмен
+                     * с двойным листингом. */
+                    /* sReady (а НЕ tree_count - тот читает старое
+                     * дерево из NVS и на ПЕРВОМ wake хватал ST_IDLE
+                     * без листинга - sReady не ставился, wifi ждал 180с) */
+                    sState = sReady ? ST_IDLE : ST_LIST;
                     sMisses = 0;
+                    sT = xTaskGetTickCount();
                 }
                 else if (++wakeFails >= 30)
                 {

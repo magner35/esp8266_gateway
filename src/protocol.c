@@ -626,6 +626,31 @@ void proto_parse_line(ProtoCtx *ctx, char *s)
                     last = pp + 1;
         }
         ctx->curGroup = add_named(ctx, last);
+        /*
+         * hdrName ВСЕХ уровней 1..lvl восстанавливаем из компонентов
+         * пути. Поуровневый листинг присылает куски очередью (все L2,
+         * потом L3): hdrName[2] от прошлого куска протухал, и
+         * параметры L3 уезжали на чужую вкладку (tab2).
+         */
+        {
+            char *comp = path;
+            uint8_t li = 0;   /* КОРЕНЬ = L0: "Настройки" - 1-й компонент */
+            while (comp < last && li < sizeof(ctx->hdrName))
+            {
+                char *slash = strchr(comp, '/');
+                size_t clen = (slash && slash < last)
+                                  ? (size_t)(slash - comp) : (size_t)(last - comp);
+                char save = comp[clen];
+                uint8_t id;
+                comp[clen] = 0;
+                id = add_named(ctx, comp);
+                comp[clen] = save;
+                ctx->hdrName[li++] = id;
+                if (!slash || slash >= last)
+                    break;
+                comp = slash + 1;
+            }
+        }
         if (lvl < sizeof(ctx->hdrName))
             ctx->hdrName[lvl] = ctx->curGroup;
 

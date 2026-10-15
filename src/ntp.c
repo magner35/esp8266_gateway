@@ -13,7 +13,6 @@
 #include "freertos/task.h"
 
 #include "lwip/apps/sntp.h"
-#include "esp_http_client.h"
 #include "lwip/sockets.h"
 #include "lwip/netdb.h"
 
@@ -107,48 +106,6 @@ static bool tz_http_plain(char *buf, size_t cap, const char *host,
     return len > 0 && strstr(buf, "200");
 }
 
-/* HTTPS-провайдер (ipapi.co) через esp_http_client: буфер в стеке
- * задачи; сертификат не проверяется (SKIP_SERVER_CERT_VERIFY) */
-static bool tz_http_get(const char *url, char *buf, size_t cap)
-{
-    esp_http_client_config_t cfg = {
-        .url = url,
-        .timeout_ms = 8000,
-        .method = HTTP_METHOD_GET,
-    };
-    esp_http_client_handle_t h = esp_http_client_init(&cfg);
-    esp_err_t er;
-    int rd, code;
-    size_t len = 0;
-    bool ok = false;
-
-    if (!h)
-    {
-        DBG("ntp: tz client init fail\n");
-        return false;
-    }
-    er = esp_http_client_open(h, 0);
-    if (er == ESP_OK)
-    {
-        esp_http_client_fetch_headers(h);
-        code = esp_http_client_get_status_code(h);
-        while (len < cap - 1)
-        {
-            rd = esp_http_client_read(h, buf + len, (int)(cap - 1 - len));
-            if (rd <= 0)
-                break;
-            len += (size_t)rd;
-        }
-        buf[len] = 0;
-        DBG("ntp: tz %s http %d, %u bytes\n", url, code, (unsigned)len);
-        ok = (code == 200 && len > 0);
-    }
-    else
-        DBG("ntp: tz open fail %s, err %d\n", url, (int)er);
-    esp_http_client_cleanup(h);
-    return ok;
-}
-
 /* ip-api.com: {"offset":10800} секунды */
 static bool tz_try_ipapi_com(char *buf, int8_t *out)
 {
@@ -168,20 +125,19 @@ static bool tz_try_ipapi_com(char *buf, int8_t *out)
     return true;
 }
 
-/* ipapi.co: "utc_offset":"+0300" (пробел после ключа, БЕЗ двоеточия;
- * worldtimeapi-формат "+03:00" тоже принимаем) */
-static bool tz_try_ipapi_co(char *buf, int8_t *out)
+/* ipwho.is (HTTP): "utc":"+03:00" в объекте timezone */
+static bool tz_try_ipwho(char *buf, int8_t *out)
 {
     char *o;
     int hh = 0, mm = 0;
     char sign = '+';
     int8_t h;
-    if (!tz_http_get("https://ipapi.co/json/", buf, 512))
+    if (!tz_http_plain(buf, 512, "ipwho.is", "/"))
         return false;
-    o = strstr(buf, "\"utc_offset\"");
+    o = strstr(buf, "\"utc\"");
     if (!o)
         return false;
-    o = strchr(o + 12, '"'); /* открывающая кавычка значения */
+    o = strchr(o + 5, '"');
     if (!o)
         return false;
     if (sscanf(o + 1, "%c%2d:%2d", &sign, &hh, &mm) != 3 &&
@@ -210,7 +166,7 @@ static void tz_fetch_task(void *arg)
         if (tz_try_ipapi_com(buf, &h))
             break;
         vTaskDelay(pdMS_TO_TICKS(2000));
-        if (tz_try_ipapi_co(buf, &h))
+        if (tz_try_ipwho(buf, &h))
             break;
         vTaskDelay(pdMS_TO_TICKS(3000));
     }

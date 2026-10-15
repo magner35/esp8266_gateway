@@ -17,6 +17,7 @@
 #include "modbus_tcp.h"
 #include "ske02.h"
 #include "storage.h"
+#include "tree_store.h"
 #include "ntp.h"
 #include "hex_store.h"
 #include "web.h"
@@ -36,9 +37,17 @@ static void boot_task(void *arg)
      * WiFi поднимется всё равно, листинг догонит в фоне.
      */
     ske02_start();
+    /*
+     * ПРИБОР ПЕРВЫМ, СТРОГО: WiFi не поднимаем, пока листинг ЭТОЙ
+     * загрузки не дошёл до конца (ske02_ready). tree_count() не
+     * годится: он читает СТАРОЕ дерево из NVS и всегда > 0 - wifi
+     * стартовал мгновенно, его выхлоп на UART0 рвал команды
+     * ("I (68..)" для консоли прибора = мусор -> ERR syntax).
+     * Страховка от отсутствия прибора - 180с.
+     */
     {
         int waited = 0;
-        while (!ske02_ready() && waited < 25000)
+        while (!ske02_ready() && waited < 180000)
         {
             vTaskDelay(pdMS_TO_TICKS(100));
             waited += 100;
@@ -46,6 +55,7 @@ static void boot_task(void *arg)
         DBG("gateway: tree %s at boot (%d ms)\n",
             ske02_ready() ? "ready" : "pending", waited);
     }
+    DBG("gateway: settings fully loaded, starting WiFi\n");
     wifi_start();
     /* the wifi task needs a moment to bring an interface up */
     vTaskDelay(pdMS_TO_TICKS(2000));

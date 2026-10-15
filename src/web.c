@@ -880,7 +880,6 @@ static esp_err_t h_api_avr_upload(httpd_req_t *req)
     char buf[1024];
     int n;
     uint32_t total = 0;
-    uint32_t crc = 0;
 
     httpd_resp_set_type(req, "application/json");
     if (!hex_store_begin(req->content_len))

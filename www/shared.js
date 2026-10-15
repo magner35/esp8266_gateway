@@ -122,7 +122,7 @@ const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;'
       rate: { n: 'Расход', src: 'rate', sp: 'Расход+', un: 'rate' },
       total: { n: 'Объём', src: 'total', sp: 'Объём', un: 'obj' },
       gtotal: { n: 'Общий', src: 'gtotal', sp: 'Общий', un: 'ob' },
-      dose: { n: 'Доза', src: 'batch', sp: 'Доза', un: 'obj' }
+      dose: { n: 'Доза', src: 'batch', sp: 'Порция', un: 'obj' }
     };
     let SP = {};   /* mode -> setpoint 100% value, refreshed with the tree */
     /*
