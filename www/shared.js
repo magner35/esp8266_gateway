@@ -320,6 +320,7 @@ const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;'
      */
     const CHSRC = {
       rate: { n: 'Расход', src: 'rate', sp: 'rate', un: 'rate' },
+      qmax: { n: 'Расход (Qmax)', src: 'rate', sp: 'qmax', un: 'qmax' },
       total: { n: 'Объём', src: 'total', sp: 'total', un: 'obj' },
       tplus: { n: 'Объём +', src: 'total_plus', sp: 'total', un: 'obj' },
       tminus: { n: 'Объём −', src: 'total_minus', sp: 'total', un: 'obj' },
@@ -338,6 +339,7 @@ const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;'
     function chUnit(s) {
       const un = CHSRC[s].un;
       if (un === 'hz') return 'Гц';
+      if (un === 'qmax') return 'л/мин';  /* уставка Qmax в л/мин */
       if (un === 'kf') return MULU ? 'имп/' + MULU : '';
       if (un === 'price') return MULU ? MULU + '/имп' : '';
       const u = UN[un];
@@ -347,6 +349,11 @@ const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;'
     /* источники графика, для которых масштаб всегда авто
      * (уставок в приборе для них нет) */
     const CHART_AUTO_ONLY = ['kf', 'price', 'freq', 'pulses'];
+    /* источники, доступные ВИДЖЕТУ "график": множитель/импульсы
+     * убраны (не физическая величина); "Расход (Qmax)" - как у
+     * барграфа: всегда л/мин, при не-авто верх = уставка Qmax */
+    const CHART_SRCS = ['rate', 'qmax', 'total', 'tplus', 'tminus',
+      'tsum', 'gtotal', 'batch', 'freq'];
     const CHPER = {
       60: '1 мин', 300: '5 мин', 600: '10 мин', 1800: '30 мин',
       3600: '60 мин', 86400: '24 ч'
@@ -378,14 +385,18 @@ const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;'
     const chartSlots = () => (widgets || [])
       .filter(w => w.t === 'chart' && w.on && CHSRC[w.src])
       .slice(0, 2);
-    /* шкала кольца ТУПО по уставкам параметра (как у ручного режима):
-     * расход = Расход-..Qmax, объёмы = 0..уставка. Без уставки
-     * (kf/цена/частота/импульсы) - null, шлюз сам прогреется по 5 */
+    /* шкала кольца: только при НЕ-авто (авто: шлюз прогревается по 5).
+     * Расход - всегда л/мин, верх = уставка Qmax из настроек */
     const CHLIVE = {};    /* src -> живое значение: цифра на графике
                            * должна совпадать с виджетом ДО ТОЧНОСТИ,
                            * не через int8-квантование кольца */
     function chartSpScale(w) {
-      if (CHART_AUTO_ONLY.includes(w.src)) return null;
+      if (w.auto !== false) return null;
+      if (w.src === 'qmax') {
+        /* "Расход (Qmax)": всегда л/мин, верх = уставка Qmax */
+        if (!(SP.qmax > 0) || SP.qmax >= 999999) return null;
+        return { lo: 0, hi: SP.qmax };
+      }
       if (CHSRC[w.src].un === 'rate') {
         if (!(SP.rate > 0) || SP.rate >= 999999) return null;
         const lo = SP['rate-'] > 0 && SP['rate-'] < SP.rate ? SP['rate-'] : 0;
@@ -601,7 +612,12 @@ const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;'
          * графики — своя уставка сверху (BARM sp), снизу 0.
          * Защита: если уставки не заданы/мусор (hi<=lo) — автоскейл.
          */
-        if (CHSRC[w.src].un === 'rate') {
+        if (w.src === 'qmax') {
+          /* "Расход (Qmax)": верх = уставка Qmax, всегда л/мин */
+          hi = SP.qmax > 0 && SP.qmax < 999999 ? SP.qmax : 0;
+          lo = 0;
+          if (!(hi > lo)) { hi = maxV || 1; lo = 0; }
+        } else if (CHSRC[w.src].un === 'rate') {
           hi = SP.rate;
           lo = SP['rate-'] || 0;
           if (!(hi > lo)) { hi = maxV || 1; lo = 0; }
@@ -867,10 +883,11 @@ const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;'
       for (const w of widgets)
         if (w.t === 'bit' && (!(w.src in FLAGS) || !(w.b >= 0 && w.b < FLAGS[w.src].length))) { w.src = 'setpoint'; w.b = 0 }
       for (const w of widgets) if (w.t === 'bit' && !/^#[0-9a-fA-F]{6}$/.test(w.col || '')) w.col = BITCOL[0];
-      /* chart field sanity (old configs had none of src/per/col/auto) */
+      /* chart field sanity (old configs had none of src/per/col/auto);
+       * kf/цена/импульсы из старых конфигов -> расход */
       for (const w of widgets)
         if (w.t === 'chart') {
-          if (!CHSRC[w.src]) w.src = 'rate';
+          if (!CHART_SRCS.includes(w.src)) w.src = 'rate';
           if (!CHPER[w.per]) w.per = 600;
           if (!CHCOL.some(x => x.c === w.col)) w.col = CHCOL[5].c;
           if (w.auto === undefined) w.auto = true;
@@ -1000,7 +1017,9 @@ const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;'
         /* ── ПАРАМЕТР ('par'): источник + единицы + авто (настройки СКЭ) ── */
         if (w.t === 'par') {
           let ss = '<select onchange="wPar(' + i + ',\'src\',this.value)">';
-          for (const s in CHSRC) ss += '<option value="' + s + '"' + (w.src === s ? ' selected' : '') + '>' + CHSRC[s].n + '</option>';
+          for (const s in CHSRC)
+            if (s !== 'qmax')   /* источник только для графика/барграфа */
+              ss += '<option value="' + s + '"' + (w.src === s ? ' selected' : '') + '>' + CHSRC[s].n + '</option>';
           /* единицы объёма: активны для объёмов и множителя (без "авто");
            * частота (Гц) и импульсы единиц не имеют вовсе */
           const noVol = ['hz', 'none'].includes(CHSRC[w.src].un);
@@ -1022,7 +1041,7 @@ const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;'
         /* ── ГРАФИК ('chart'): источник + окно + цвет + автомасштаб ── */
         if (w.t === 'chart') {
           let ss = '<select onchange="wChart(' + i + ',\'src\',this.value)">';
-          for (const s in CHSRC) ss += '<option value="' + s + '"' + (w.src === s ? ' selected' : '') + '>' + CHSRC[s].n + '</option>';
+          for (const s of CHART_SRCS) ss += '<option value="' + s + '"' + (w.src === s ? ' selected' : '') + '>' + CHSRC[s].n + '</option>';
           let sp = '<select onchange="wChart(' + i + ',\'per\',this.value)">';
           for (const p in CHPER) sp += '<option value="' + p + '"' + (w.per == p ? ' selected' : '') + '>' + CHPER[p] + '</option>';
           let sc = '<select onchange="wChart(' + i + ',\'col\',this.value)">';
@@ -1047,7 +1066,7 @@ const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;'
         ' <label class="autolbl"><input id="ncAuto" type="checkbox" checked> авто</label>' +
         '<button class="sq" onclick="wAddChart()">&#43;</button></div><div class="r2">' +
         '<select id="ncSrc">';
-      for (const s in CHSRC) h += '<option value="' + s + '"' + (s === 'rate' ? ' selected' : '') + '>' + CHSRC[s].n + '</option>';
+      for (const s of CHART_SRCS) h += '<option value="' + s + '"' + (s === 'rate' ? ' selected' : '') + '>' + CHSRC[s].n + '</option>';
       h += '</select> <select id="ncPer">';
       for (const p in CHPER) h += '<option value="' + p + '"' + (p == 600 ? ' selected' : '') + '>' + CHPER[p] + '</option>';
       h += '</select> <select id="ncCol">';
@@ -1061,7 +1080,9 @@ const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;'
         ' <label class="autolbl"><input id="npAuto" type="checkbox" checked> авто</label>' +
         '<button class="sq" onclick="wAddPar()">&#43;</button></div>' +
         '<div class="r2"><select id="npSrc">';
-      for (const s in CHSRC) h += '<option value="' + s + '"' + (s === 'rate' ? ' selected' : '') + '>' + CHSRC[s].n + '</option>';
+      for (const s in CHSRC)
+        if (s !== 'qmax')   /* источник только для графика/барграфа */
+          h += '<option value="' + s + '"' + (s === 'rate' ? ' selected' : '') + '>' + CHSRC[s].n + '</option>';
       h += '</select> <select id="npVol" disabled><option value="ml">мл</option><option value="l">л</option><option value="m3">м³</option></select>' +
         ' <select id="npTime" disabled><option value="s">с</option><option value="m">мин</option><option value="h">ч</option></select></div></div>';
       h += '<div class="wrow"><div class="r1"><span>＋ Индикатор</span><button class="sq" onclick="wAddBit()">&#43;</button></div>' +

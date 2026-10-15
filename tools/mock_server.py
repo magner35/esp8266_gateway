@@ -207,12 +207,19 @@ def chart_push(snap, t_ms):
     for sl in CHART_SLOTS:
         if not sl["src"]:
             continue
-        f = snap.get(_SRC_FIELD.get(sl["src"], ""), None)
-        if f is None or not math.isfinite(f):
-            continue
-        if sl["src"] == "price":
-            kf = snap.get("kf_value", 0)
-            f = 1.0 / kf if kf > 0 else 0.0
+        if sl["src"] == "qmax":
+            # "Расход (Qmax)" - всегда л/мин (как chartbuf.c на шлюзе)
+            mlpm = snap.get("rateMLPM")
+            if mlpm is None:
+                continue
+            f = mlpm / 1000.0
+        else:
+            f = snap.get(_SRC_FIELD.get(sl["src"], ""), None)
+            if f is None or not math.isfinite(f):
+                continue
+            if sl["src"] == "price":
+                kf = snap.get("kf_value", 0)
+                f = 1.0 / kf if kf > 0 else 0.0
         if not sl.get("fixed") and not (sl["hi"] > sl["lo"]):
             sl["first5"].append(f)
             if len(sl["first5"]) < CHART_WARMUP:

@@ -59,6 +59,9 @@ void chart_init(void)
 static float src_value(const char *src, const SkeValues *v)
 {
     if (!strcmp(src, "rate")) return v->rate;
+    /* "Расход (Qmax)" - всегда л/мин, как у барграфа: уставка Qmax
+     * задана в л/мин, а кадр 'm' приходит в единицах прибора */
+    if (!strcmp(src, "qmax")) return v->rateMLPM / 1000.0f;
     if (!strcmp(src, "total")) return v->total;
     if (!strcmp(src, "tplus")) return v->total_plus;
     if (!strcmp(src, "tminus")) return v->total_minus;

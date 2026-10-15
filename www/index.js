@@ -126,7 +126,11 @@ function vApply(d) {
   if (CHARTS_ON && widgets)
     for (const w of widgets)
       if (w.t === 'chart' && w.on && CHSRC[w.src]) {
-        const v = parValue({ ...w, auto: true }, d);
+        /* "Расход (Qmax)" - ВСЕГДА л/мин (уставка Qmax в них и задана),
+         * обычный "Расход" - в единицах прибора, как виджет-параметр */
+        const v = w.src === 'qmax' && isFinite(d.rateMLPM)
+          ? d.rateMLPM / 1000
+          : parValue({ ...w, auto: true }, d);
         if (v !== undefined && isFinite(v)) CHLIVE[w.src] = v;
       }
   const barLo = vApply.lo || (vApply.lo = {}), barHi = vApply.hi || (vApply.hi = {});
