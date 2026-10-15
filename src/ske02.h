@@ -37,12 +37,6 @@ typedef struct
 
 void ske02_start(void);            /* create the task (from app_main) */
 
-/* ЕДИНАЯ арена 2300 Б в куче: во время листинга тут строки LIST,
- * между листингами - кольца графиков (chartbuf.c). Листинг затирает
- * кольца, поэтому listing начинается с chart_wipe() */
-#define SKE_LIST_BYTES 2300
-char *ske02_list_buf(void);        /* NULL, пока арена не выделена */
-size_t ske02_list_buf_len(void);   /* = SKE_LIST_BYTES (для malloc) */
 #include <stddef.h>
 bool ske02_time_push(char *err, size_t errcap); /* отправить NTP-время в прибор (err: причина отказа) */
 void ske02_suspend(bool on);  /* пауза обмена (сессия прошивки AVR) */

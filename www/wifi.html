@@ -5,6 +5,9 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width,initial-scale=1">
     <style>
+    /* пароли БЕЗ type="password": браузеры не предлагают сохранение.
+     * Маскируем точками силами CSS (Chrome/Safari/Android WebView) */
+    .pwmask { -webkit-text-security: disc; }
         /* --- 1. общие ---------------------------------------------------- */
         body {
             font: 14px/1.45 system-ui, sans-serif;
@@ -121,8 +124,8 @@
     <form method="POST" action="/save">
         <label>SSID сети</label><input name="ssid" id="ssid" maxlength="32" autocapitalize="off" autocorrect="off"
             spellcheck="false" required>
-        <label>Пароль (для открытой сети оставьте пустым)</label><input name="pass" type="password" maxlength="64"
-            autocapitalize="off" autocorrect="off">
+        <label>Пароль (для открытой сети оставьте пустым)</label><input name="pass" type="text" class="pwmask" autocomplete="off" maxlength="64"
+            autocapitalize="off" autocorrect="off" spellcheck="false">
         <!-- «Подключиться» и «Забыть сети» на одной строке:
          * слева действие, справа — разрушительное -->
         <div class="btnrow">

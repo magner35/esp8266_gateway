@@ -5,8 +5,10 @@
 #include <stdbool.h>
 #include <stddef.h>
 
-/* серверная история графиков: 2 слота x 1024 int8, 5 Гц кадры */
-#define CHART_SLOTS 2
+/* серверная история графика: 1 слот x 1024 int8, 5 Гц кадры.
+ * Память кольца - ОТДЕЛЬНЫЙ malloc при первом появлении графика
+ * на панели (арену листинга больше не делим, меню график не стирает) */
+#define CHART_SLOTS 1
 #define CHART_LEN   1024
 #define CHART_WARMUP 5      /* шкала фиксируется по первым 5 значениям */
 #define CHART_DT_MS 200     /* период сэмплов (5 Гц опрос прибора) */
@@ -19,7 +21,6 @@ void chart_init(void);
 void chart_cfg(int slot, const char *src, float lo, float hi);
 bool chart_ready(int slot);                  /* шкала готова (5 значений) */
 void chart_push(const SkeValues *v, uint32_t t_ms);
-void chart_wipe(void);  /* меню меняли: график с чистого листа */
 int chart_take(int slot, uint32_t since, int8_t *out, int max,
                uint32_t *out_total, uint32_t *out_first, uint32_t *out_t0,
                float *lo, float *hi);

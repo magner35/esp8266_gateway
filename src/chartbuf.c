@@ -28,8 +28,8 @@ typedef struct
 {
     char src[8];        /* ключ CHSRC ("" = слот свободен) */
     float lo, hi;       /* шкала: фиксируется по первым 5 значениям */
-    int8_t *buf;        /* данные - в ХВОСТЕ арены листинга (ske02.c):
-                         * листинг трогает только первые SKE_LIST_BYTES */
+    int8_t *buf;        /* данные - ОТДЕЛЬНЫЙ malloc(CHART_LEN) при
+                         * первом появлении графика на панели */
     uint16_t head;      /* следующая позиция записи */
     uint32_t total;     /* всего записано (индекс следующего сэмпла) */
     uint32_t last_ms;   /* время последнего сэмпла */
@@ -41,18 +41,19 @@ typedef struct
 
 static chart_slot_t sSlots[CHART_SLOTS];
 
-/* кольца живут В ТОЙ ЖЕ памяти, что и строки листинга (одна арена
- * SKE_LIST_BYTES): листинг затирает их, листинг всегда начинается с
- * chart_wipe() - счётчики обнуляются и пустое кольцо не отдаётся */
+/* Кольцо живёт в СВОЕЙ памяти (malloc при первом назначении слота):
+ * листинг меню его не затирает, при смене настроек график живёт дальше */
+static int8_t *sRingAlloc(void)
+{
+    static int8_t *ring;
+    if (!ring)
+        ring = malloc(CHART_LEN);   /* 1К, только когда график есть */
+    return ring;
+}
+
 void chart_init(void)
 {
-    char *arena = ske02_list_buf();
-    int i;
     sLock = xSemaphoreCreateMutex();
-    for (i = 0; i < CHART_SLOTS; i++)
-        sSlots[i].buf = arena
-            ? (int8_t *)(arena + i * CHART_LEN)
-            : NULL;
 }
 
 /* значение источника из кадра (ключи = CHSRC на странице) */
@@ -123,8 +124,28 @@ static void slot_write(chart_slot_t *s, float f, uint32_t t_ms)
     s->last_ms = t_ms;
 }
 
+/* смена шкалы ПРИ ЖИВОМ кольце (авто->фикс после загрузки уставок,
+ * правка уставки): НЕ сбрасываем - переразмечаем int8 по новой
+ * шкале, история сохраняется (вне диапазона - клиппится) */
+static void slot_remap(chart_slot_t *s, float lo, float hi)
+{
+    int i;
+    if (!(hi > lo))
+        return;
+    if (s->buf && s->hi > s->lo && s->total)
+        for (i = 0; i < CHART_LEN; i++)
+        {
+            float v = s->lo +
+                ((float)s->buf[i] + 128.0f) / 255.0f * (s->hi - s->lo);
+            s->buf[i] = quantize(v, lo, hi);
+        }
+    s->lo = lo;
+    s->hi = hi;
+    s->fixed = true;
+}
+
 /* назначение слота: src совпадает = no-op (каждый /api/values шлёт
- * s0/s1 повторно); смена источника сбрасывает счётчики и шкалу */
+ * s0 повторно); смена ИСТОЧНИКА сбрасывает счётчики и шкалу */
 void chart_cfg(int slot, const char *src, float lo, float hi)
 {
     chart_slot_t *s;
@@ -132,38 +153,24 @@ void chart_cfg(int slot, const char *src, float lo, float hi)
         return;
     s = &sSlots[slot];
     xSemaphoreTake(sLock, portMAX_DELAY);
-    /* авто-запрос (hi<=lo) шкалу НЕ трогает: прогретая шкала слота
-     * не равна (0,0) и сравнение сбрасывало кольцо КАЖДЫЙ опрос */
-    if (strcmp(s->src, src) != 0 ||
-        (hi > lo && (!s->fixed || s->lo != lo || s->hi != hi)) ||
-        (hi <= lo && s->fixed))
+    if (strcmp(s->src, src) != 0)
     {
-        int8_t *keep = s->buf;   /* указатель на арену живёт в chart_init */
         memset(s, 0, sizeof(*s));
-        s->buf = keep;
-        snprintf(s->src, sizeof(s->src), "%s", src);
-        if (hi > lo)
+        if (!sRingAlloc())
         {
-            s->lo = lo;
-            s->hi = hi;
-            s->fixed = true;
+            xSemaphoreGive(sLock);
+            return;   /* кучи нет - графика нет */
         }
+        s->buf = sRingAlloc();
+        snprintf(s->src, sizeof(s->src), "%s", src);
     }
-    xSemaphoreGive(sLock);
-}
-
-void chart_wipe(void)
-{
-    int i;
-    if (!sLock)
-        return;
-    xSemaphoreTake(sLock, portMAX_DELAY);
-    for (i = 0; i < CHART_SLOTS; i++)
-    {
-        int8_t *keep = sSlots[i].buf;
-        memset(&sSlots[i], 0, sizeof(sSlots[i]));
-        sSlots[i].buf = keep;
-    }
+    /* авто-запрос (hi<=lo) шкалу НЕ трогает: прогретая шкала слота
+     * не равна (0,0) и сравнение сбрасывало кольцо КАЖДЫЙ опрос.
+     * Фиксированная шкала: ПЕРЕМАСШТАБИРУЕМ кольцо, не сбрасываем */
+    if (hi > lo && (!s->fixed || s->lo != lo || s->hi != hi))
+        slot_remap(s, lo, hi);
+    else if (hi <= lo && s->fixed)
+        s->fixed = false;   /* авто: значения остаются в текущей шкале */
     xSemaphoreGive(sLock);
 }
 

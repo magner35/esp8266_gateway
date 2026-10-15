@@ -46,7 +46,8 @@ enum
 };
 
 static ProtoCtx sCtx;
-static char *sListBuf;   /* арена: строки LIST + кольца графиков */
+#define SKE_LIST_BYTES 2300
+static char *sListBuf;   /* строки LIST одного уровня */
 static SemaphoreHandle_t sLock;
 static uint8_t sState;
 static TickType_t sT;
@@ -285,9 +286,6 @@ static bool capture_listing(TickType_t timeout)
      * Шлюз идёт очередью: каждый дочерний заголовок в ответе
      * порождает команду уровнем глубже. Ответ уровня < 1.5К - буфер
      * 2.3К в куче, выделяется ОДИН РАЗ (старт, куча девственна).
-     * Хвост той же арены - кольца графиков (chartbuf.c): листинг
-     * трогает только первые SKE_LIST_BYTES, при перечитывании меню
-     * график всё равно начинается с чистого листа (chart_wipe).
      */
     char queue[40][14];
     int qt = 0;
@@ -297,7 +295,7 @@ static bool capture_listing(TickType_t timeout)
 
     if (!sListBuf)
     {
-        sListBuf = malloc(ske02_list_buf_len());
+        sListBuf = malloc(2300);   /* строки LIST одного уровня */
         if (!sListBuf)
         {
             DBG("ske02: listing buffer alloc failed\n");
@@ -306,9 +304,6 @@ static bool capture_listing(TickType_t timeout)
     }
 
     proto_listing_begin(&sCtx);
-    /* арена сейчас будет затёрта строками LIST: кольца графиков
-     * живут в ней же - обнуляем ДО, чтобы отдача не видела мусор */
-    chart_wipe();
     xSemaphoreTake(sLock, portMAX_DELAY);
     sCtx.inListing = true;
     sCtx.curSection = 0;
@@ -552,17 +547,6 @@ static SemaphoreHandle_t sVLock;
 void ske02_valring_init(void)
 {
     sVLock = xSemaphoreCreateMutex();
-}
-
-/* арена листинга: строки LIST + хвост под кольца графиков */
-char *ske02_list_buf(void)
-{
-    return sListBuf;
-}
-
-size_t ske02_list_buf_len(void)
-{
-    return SKE_LIST_BYTES;
 }
 
 void ske02_valring_push(uint32_t t_ms, const SkeValues *v)
@@ -1035,10 +1019,6 @@ static void meter_task(void *arg)
                 /* liveCount = реально разобрано из секций 1/2/3;
                  * count из 'i' считает ВСЕ меню (вкл. Настройки) и
                  * только путает в логе */
-                /* настройки перечитаны (их меняли): единицы/уставки
-                 * могли смениться, старые сэмплы несовместимы -
-                 * график начинается с чистого листа */
-                chart_wipe();
                 DBG("ske02: listing done (%u params)\n", (unsigned)sCtx.liveCount);
                 xSemaphoreGive(sLock);
             }

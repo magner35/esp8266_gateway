@@ -167,7 +167,7 @@ def per_sec():
 
 CHART_DT_MS = 200
 CHART_WARMUP = 5
-CHART_SLOTS_N = 2
+CHART_SLOTS_N = 1
 # семантика chartbuf.c: слот с автомасштабом по первым 5 значениям
 CHART_SLOTS = [{"src": "", "first5": [], "lo": 0.0, "hi": 0.0,
                 "ring": collections.deque(maxlen=1024),  # int8
@@ -193,14 +193,22 @@ def _rescale(sl, f):
 
 def chart_cfg(slot, src, lo=0.0, hi=0.0):
     sl = CHART_SLOTS[slot]
-    fixed = hi > lo
-    # авто-запрос (hi<=lo) шкалу НЕ трогает: прогретая шкала не
-    # равна (0,0) и сравнение сбрасывало кольцо каждый опрос
-    if (sl["src"] != src or
-            (fixed and (not sl.get("fixed") or sl["lo"] != lo or sl["hi"] != hi)) or
-            (not fixed and sl.get("fixed"))):
-        sl.update(src=src, fixed=fixed, first5=[], lo=lo, hi=hi,
+    if sl["src"] != src:
+        # смена ИСТОЧНИКА: кольцо с нуля
+        sl.update(src=src, fixed=False, first5=[], lo=0.0, hi=0.0,
                   ring=collections.deque(maxlen=1024), total=0, last_ms=0)
+    elif hi > lo and (not sl["fixed"] or sl["lo"] != lo or sl["hi"] != hi):
+        # смена шкалы при живом кольце: ПЕРЕМАСШТАБИРУЕМ, не сбрасываем
+        if sl["hi"] > sl["lo"] and sl["total"]:
+            def remap(v):
+                val = sl["lo"] + (v + 128) / 255.0 * (sl["hi"] - sl["lo"])
+                q = int((val - lo) / (hi - lo) * 255.0) - 128
+                return max(-128, min(127, q))
+            sl["ring"] = collections.deque(
+                (remap(v) for v in sl["ring"]), maxlen=1024)
+        sl["lo"], sl["hi"], sl["fixed"] = lo, hi, True
+    elif hi <= lo and sl["fixed"]:
+        sl["fixed"] = False
 
 def chart_push(snap, t_ms):
     """вызывается из 5-Гц сэмплера: как chart_push() в задаче Meter"""
@@ -454,11 +462,6 @@ class H(http.server.SimpleHTTPRequestHandler):
             v = f.get('v', '')
             p['v'] = v
             STATE["cfg_rev"] = STATE.get("cfg_rev", 1) + 1
-            # меню меняли: график с чистого листа (как chart_wipe()
-            # на шлюзе после перечитывания дерева)
-            for sl in CHART_SLOTS:
-                sl.update(src="", fixed=False, first5=[], lo=0.0, hi=0.0,
-                          ring=collections.deque(maxlen=1024), total=0, last_ms=0)
             if p['o'] and v in p['o']:
                 p['r'] = p['o'].index(v)
             self._json({"ok": True, "value": v})

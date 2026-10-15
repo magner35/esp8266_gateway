@@ -60,7 +60,7 @@
         q.o.forEach((s, k) => h += '<option value="' + esc(s) + '"' + (String(k) === String(q.r) ? ' selected' : '') + '>' + esc(s) + '</option>');
         return '<div class="set">' + h + '</select></div>';
       }
-      if (q.m) return '<div class="set"><input id="w' + i + '" type="password" maxlength="6" inputmode="numeric" placeholder="******"' + m + '></div>';
+      if (q.m) return '<div class="set"><input id="w' + i + '" type="text" class="pwmask" autocomplete="off" maxlength="6" inputmode="numeric" placeholder="******"' + m + '></div>';
       if (q.t === 0) return '<div class="set"><input id="w' + i + '" type="text" class="fnum" inputmode="decimal" maxlength="12" title="' + esc((q.lo || '?') + ' .. ' + (q.hi || '?')) + '" value="' + esc(q.v) + '"' + m + '></div>';
       if (q.t === 1) return '<div class="set"><input id="w' + i + '" type="text" maxlength="6" inputmode="numeric" title="' + esc((q.lo || '?') + ' .. ' + (q.hi || '?')) + '" value="' + esc(q.v) + '"' + m + '></div>';
       if (q.t === 2 || q.t === 3) {

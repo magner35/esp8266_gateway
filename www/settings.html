@@ -5,6 +5,9 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <style>
+    /* пароли БЕЗ type="password": браузеры не предлагают сохранение.
+     * Маскируем точками силами CSS (Chrome/Safari/Android WebView) */
+    .pwmask { -webkit-text-security: disc; }
     /* ==================================================================
      * STYLE MAP (settings.html - страница настроек параметров прибора)
      *   1. общие: body, header, .tag/.ok/.bad, button, input/select
@@ -281,7 +284,7 @@
   <div id="tabs"></div>
   <div id="subtabs"></div>
   <div id="actions">
-    <input id="secPw" type="password" inputmode="numeric" maxlength="6" placeholder="пароль" oninput="pwInput()">
+    <input id="secPw" type="text" class="pwmask" autocomplete="off" inputmode="numeric" maxlength="6" placeholder="пароль" oninput="pwInput()">
     <button id="btnApply" onclick="applyAll()">Применить</button>
     <button id="btnRefresh" onclick="refreshAll()">Обновить</button>
     <span id="applyMsg" class="flash"></span>

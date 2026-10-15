@@ -384,7 +384,7 @@ const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;'
     /* первые два включённых графика = слоты серверного кольца */
     const chartSlots = () => (widgets || [])
       .filter(w => w.t === 'chart' && w.on && CHSRC[w.src])
-      .slice(0, 2);
+      .slice(0, 1);
     /* шкала кольца: только при НЕ-авто (авто: шлюз прогревается по 5).
      * Расход - всегда л/мин, верх = уставка Qmax из настроек */
     const CHLIVE = {};    /* src -> живое значение: цифра на графике
@@ -437,9 +437,16 @@ const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;'
     function chartConsume(entries) {
       for (const e of entries) {
         const w = chartSlots()[e.i];
-        if (!w || !e.n || !e.b64) continue;
+        if (!w) continue;
         let buf = chartLive[w.src];
         if (!buf) buf = chartLive[w.src] = { vals: [], ts: [], srv: 0 };
+        /* серверное кольцо МЛАДШЕ курсора (рестарт шлюза/мока, смена
+         * шкалы): n=0 при since>=total - без сброса курсор висел
+         * вечно и график оставался пустым */
+        if (e.total <= buf.srv) {
+          buf.vals = []; buf.ts = []; buf.toff = 0; buf.srv = 0;
+        }
+        if (!e.n || !e.b64) continue;
         /* курсор перескочил (кольцо перезаписано / слот перезапущен):
          * старые точки несовместимы - начинаем с окна сервера */
         if (e.f > buf.srv || e.f + e.n < buf.srv) {
@@ -884,7 +891,11 @@ const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;'
         if (w.t === 'bit' && (!(w.src in FLAGS) || !(w.b >= 0 && w.b < FLAGS[w.src].length))) { w.src = 'setpoint'; w.b = 0 }
       for (const w of widgets) if (w.t === 'bit' && !/^#[0-9a-fA-F]{6}$/.test(w.col || '')) w.col = BITCOL[0];
       /* chart field sanity (old configs had none of src/per/col/auto);
-       * kf/цена/импульсы из старых конфигов -> расход */
+       * kf/цена/импульсы из старых конфигов -> расход; второй график
+       * (старые конфиги при лимите 2-3) отключаем - сервер один */
+      for (const w of widgets)
+        if (w.t === 'chart' && widgets.filter(x => x.t === 'chart' && x.on).indexOf(w) > 0)
+          w.on = false;
       for (const w of widgets)
         if (w.t === 'chart') {
           if (!CHART_SRCS.includes(w.src)) w.src = 'rate';
@@ -1062,16 +1073,20 @@ const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;'
     function renderAddView(p) {
       let h = '<div class="wrow"><div class="r1"><button onclick="wView=\'list\';renderPanel()">&lt;</button>' +
         '<span>Добавление виджетов</span></div></div>';
-      h += '<div class="wrow"><div class="r1"><span>＋ График</span>' +
-        ' <label class="autolbl"><input id="ncAuto" type="checkbox" checked> авто</label>' +
-        '<button class="sq" onclick="wAddChart()">&#43;</button></div><div class="r2">' +
-        '<select id="ncSrc">';
-      for (const s of CHART_SRCS) h += '<option value="' + s + '"' + (s === 'rate' ? ' selected' : '') + '>' + CHSRC[s].n + '</option>';
-      h += '</select> <select id="ncPer">';
-      for (const p in CHPER) h += '<option value="' + p + '"' + (p == 600 ? ' selected' : '') + '>' + CHPER[p] + '</option>';
-      h += '</select> <select id="ncCol">';
-      for (const c of CHCOL) h += '<option value="' + c.c + '"' + (c.c === CHCOL[5].c ? ' selected' : '') + ' style="color:' + c.c + '">' + c.n + '</option>';
-      h += '</select></div></div>';
+      /* график в списке доступных, только если его ещё нет:
+       * максимум один, серверный ring-буфер один */
+      if (!(widgets || []).some(w => w.t === 'chart')) {
+        h += '<div class="wrow"><div class="r1"><span>＋ График</span>' +
+          ' <label class="autolbl"><input id="ncAuto" type="checkbox" checked> авто</label>' +
+          '<button class="sq" onclick="wAddChart()">&#43;</button></div><div class="r2">' +
+          '<select id="ncSrc">';
+        for (const s of CHART_SRCS) h += '<option value="' + s + '"' + (s === 'rate' ? ' selected' : '') + '>' + CHSRC[s].n + '</option>';
+        h += '</select> <select id="ncPer">';
+        for (const p in CHPER) h += '<option value="' + p + '"' + (p == 600 ? ' selected' : '') + '>' + CHPER[p] + '</option>';
+        h += '</select> <select id="ncCol">';
+        for (const c of CHCOL) h += '<option value="' + c.c + '"' + (c.c === CHCOL[5].c ? ' selected' : '') + ' style="color:' + c.c + '">' + c.n + '</option>';
+        h += '</select></div></div>';
+      }
       h += '<div class="wrow"><div class="r1"><span>＋ Барграф</span><button class="sq" onclick="wAddBar()">&#43;</button></div>' +
         '<div class="r2"><select id="nbMode">';
       for (const m in BARM) h += '<option value="' + m + '"' + (m === 'qmax' ? ' selected' : '') + '>' + BARM[m].n + '</option>';
@@ -1155,7 +1170,7 @@ const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;'
       saveWidgets(); pageRender();
     }
     /* создатели новых виджетов, по одному на тип */
-    const CHART_LIMIT = 3;         /* сервер имеет 3 ring-буфера */
+    const CHART_LIMIT = 1;         /* серверный ring-буфер один */
     function wAddChart() {         /* 'chart' — график (макс. 3) */
       if (widgets.filter(w => w.t === 'chart').length >= CHART_LIMIT) {
         alert('Максимум ' + CHART_LIMIT + ' графиков');
