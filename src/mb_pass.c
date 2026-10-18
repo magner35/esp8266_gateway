@@ -26,6 +26,13 @@
 #define MBP_TRANSACT_MS  800
 
 static volatile int sClients; /* подключено прямо сейчас */
+static volatile bool sEnabled = true; /* фича «Wi-Fi gateway: Modbus» */
+
+void mb_pass_enable(bool on)
+{
+    sEnabled = on;
+    DBG("mbp: %s\n", on ? "enabled" : "disabled (feature off)");
+}
 
 static uint16_t mb_crc16(const uint8_t *p, uint16_t n)
 {
@@ -148,6 +155,11 @@ static void mb_pass_task(void *arg)
 
     for (;;)
     {
+        if (!sEnabled)
+        {
+            vTaskDelay(pdMS_TO_TICKS(200)); /* фича выключена: не жжём CPU */
+            continue;
+        }
         int fd = accept(ls, NULL, NULL);
         if (fd < 0)
             continue;

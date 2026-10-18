@@ -13,6 +13,8 @@
  */
 #include "ske02.h"
 #include "ntp.h"
+#include "web.h"
+#include "mb_pass.h"
 #include <ctype.h>
 
 #include <stdio.h>
@@ -47,8 +49,14 @@ enum
 };
 
 static ProtoCtx sCtx;
-#define SKE_LIST_BYTES 2300
 static char *sListBuf;   /* строки LIST одного уровня */
+static uint8_t sLocalSets;
+static char sParseBuf[512];  /* буфер разбора ответов GET/SET: rusify
+                              * расширяет in-place, локальные 512Б
+                              * переполняли стек meter (canary) */  /* наши успешные SET: их cfg_rev ловим
+                             * БЕЗ перечита - NVS уже обновлён точечно
+                             * (tree_set_value из OK-строки SET) */
+#define SKE_LIST_BYTES 2300
 static SemaphoreHandle_t sLock;
 static uint8_t sState;
 static TickType_t sT;
@@ -664,12 +672,154 @@ static void reply_cb(char *line, void *user)
     }
 }
 
+/* ответ "G <id>": БЕЗ "OK", строка параметра приходит сама */
+/* копия value_line в общий буфер (rusify расширяет in-place) */
+static char *sParseBuf_filled(reply_ctx_t *rc_)
+{
+    snprintf(sParseBuf, sizeof(sParseBuf), "%s", rc_->value_line);
+    return sParseBuf;
+}
+
+static void get_cb(char *line, void *user)
+{
+    reply_ctx_t *rc_ = (reply_ctx_t *)user;
+    if (!strncmp(line, "ERR", 3))
+    {
+        if (!rc_->status)
+            rc_->status = BS_BAD_ID;
+        return;
+    }
+    if (!rc_->seen_ok && line[0])
+    {
+        rc_->seen_ok = true;
+        strncpy(rc_->value_line, line, sizeof(rc_->value_line) - 1);
+        rc_->value_line[sizeof(rc_->value_line) - 1] = 0;
+    }
+}
+
+/*
+ * ТОЧЕЧНЫЙ ОБХОД ЗНАЧЕНИЙ (fallback, когда маркер правки прыжком
+ * больше 1 или его нет): G <id> по каждой известной записи дерева,
+ * NVS обновляет только изменившиеся (tree_set_value). Структуру не
+ * трогаем - с клавиатуры/консоли SET изменить имена/типы/опции нельзя.
+ * false = транспорт лёг (rev НЕ принят, обход повторится).
+ */
+static void gw_features_find(void);
+static void gw_feature_apply(uint16_t id);
+static void gw_features_apply_all(void);
+
+static bool sweep_values(void)
+{
+    static TreeRec rec;   /* ~755Б на стеке + NVS-цепь tree_set_value
+                           * при разборе - канарейка meter; meter-only */
+    uint16_t id;
+    for (id = 0; id <= sCtx.maxId && sCtx.maxId; id++)
+    {
+        char cmd[16];
+        reply_ctx_t rc_;
+        if (!tree_get(id, &rec) || !rec.p.present)
+            continue;
+        if (rec.p.type == SKT_CMD)
+            continue;   /* команды значения не имеют */
+        snprintf(cmd, sizeof(cmd), "GET %u", (unsigned)id);
+        memset(&rc_, 0, sizeof(rc_));
+        if (!txt_command(cmd, get_cb, &rc_, SKE_CMD_TIMEOUT))
+            return false;
+        if (rc_.seen_ok && rc_.value_line[0])
+            line_to_parser(sParseBuf_filled(&rc_));
+    }
+    /* кэш единиц (sU_*): enum-ы "Единицы измерения" могли смениться
+     * с клавиатуры, листинга-обновления больше нет */
+    for (id = 0; sCtx.maxId && id <= sCtx.maxId; id++)
+        if (tree_get(id, &rec) && rec.p.present)
+        {
+            xSemaphoreTake(sLock, portMAX_DELAY);
+            units_note(&rec.p);
+            xSemaphoreGive(sLock);
+        }
+    /* id фич могли смениться (relist после ребута прибора) */
+    gw_features_find();
+    gw_features_apply_all();
+    return true;
+}
+
+/* ---- фичи шлюза из дерева прибора --------------------------------
+ * «Wi-Fi gateway» в меню прибора: WEB panel / Modbus TCP/IP / OTA.
+ * Обычные параметры дерева: прибор хранит, шлюз применяет. Поиск id
+ * по латинским токенам в имени (WEB/Modbus/OTA - одинаковы в обоих
+ * языках прибора). Отсутствуют (старая прошивка) - всё включено. */
+static uint16_t sFwWeb = 0xFFFF, sFwMb = 0xFFFF, sFwOta = 0xFFFF;
+
+static void gw_features_find(void)
+{
+    static TreeRec rec;   /* ~755Б: только задача meter, как в sweep */
+    uint16_t id;
+    sFwWeb = sFwMb = sFwOta = 0xFFFF;
+    for (id = 0; sCtx.maxId && id <= sCtx.maxId; id++)
+        if (tree_get(id, &rec) && rec.p.present && rec.p.name[0])
+        {
+            if (strstr(rec.p.name, "WEB"))
+                sFwWeb = id;
+            else if (strstr(rec.p.name, "Modbus"))
+                sFwMb = id;
+            else if (strstr(rec.p.name, "OTA"))
+                sFwOta = id;
+        }
+}
+
+static void gw_feature_apply(uint16_t id)
+{
+    TreeRec rec;
+    bool on;
+    if (id == 0xFFFF || !tree_get(id, &rec) || !rec.p.present)
+        return;
+    on = rec.p.value != 0;
+    if (id == sFwWeb)
+        web_httpd_enable(on);
+    else if (id == sFwMb)
+        mb_pass_enable(on);
+    else if (id == sFwOta)
+        web_ota_enable(on);
+}
+
+static void gw_features_apply_all(void)
+{
+    gw_feature_apply(sFwWeb);
+    gw_feature_apply(sFwMb);
+    gw_feature_apply(sFwOta);
+}
+
+/* синхронизация ОДНОГО пункта: G <id> -> строка -> tree_set_value.
+ * Так ловится правка с клавиатуры прибора: маркер (edit_id/cnt)
+ * приезжает в кадре 'm', одна команда вместо обхода/листинга */
+static void one_param_sync(uint16_t id)
+{
+    static TreeRec rec;   /* ~755Б: на стеке + второй такой же в
+                           * ske02_units_refresh рвали канарейку meter */
+    char cmd[16];
+    reply_ctx_t rc_;
+
+    if (!tree_get(id, &rec) || !rec.p.present || rec.p.type == SKT_CMD)
+        return;
+    snprintf(cmd, sizeof(cmd), "GET %u", (unsigned)id);
+    memset(&rc_, 0, sizeof(rc_));
+    if (txt_command(cmd, get_cb, &rc_, SKE_CMD_TIMEOUT) &&
+        rc_.seen_ok && rc_.value_line[0])
+        line_to_parser(sParseBuf_filled(&rc_));
+    /* кэш единиц: rec уже прочитан - БЕЗ повторного tree_get+NVS
+     * (ske02_units_refresh заводил второй TreeRec и всю NVS-цепь) */
+    xSemaphoreTake(sLock, portMAX_DELAY);
+    units_note(&rec.p);
+    xSemaphoreGive(sLock);
+    /* «Wi-Fi gateway»: включение/выключение фич шлюза */
+    gw_feature_apply(id);
+}
+
 static void unlock_cb(char *line, void *user)
 {
     reply_ctx_t *rc_ = (reply_ctx_t *)user;
     if (!strncmp(line, "access:", 7))
-    {
-        /*
+    {        /*
          * "access: menu ..." = уровни разблокированы - успех.
          * "access: none (lockout ~48s)" = пароль ВЕРНЫЙ не был принят
          * (или введён во время блокировки): честно ждём, "ok" нельзя.
@@ -846,11 +996,16 @@ static void exec_request(ske_req_t *req)
             break;
         }
         if (rc_.seen_ok && rc_.value_line[0])
-            line_to_parser(rc_.value_line); /* sync the cache */
+            line_to_parser(sParseBuf_filled(&rc_));
+        /* OK-строка -> on_value -> tree_set_value: NVS уже
+         * обновлён ТОЧЕЧНО, перечит всего дерева не нужен */
         req->result = rc_.seen_ok ? BS_OK
                                   : (rc_.status ? rc_.status : BS_BAD_TYPE);
         if (req->result == BS_OK)
+        {
+            sLocalSets++;   /* ближайший скачок cfg_rev - наш: не листить */
             sLastOk = xTaskGetTickCount();
+        }
         break;
 
     case SKEQ_RUN:
@@ -1077,6 +1232,10 @@ static void meter_task(void *arg)
                  * только путает в логе */
                 DBG("ske02: listing done (%u params)\n", (unsigned)sCtx.liveCount);
                 xSemaphoreGive(sLock);
+                /* дерево свежее: найти и применить фичи «Wi-Fi
+                 * gateway» (веб/modbus/OTA) из дерева прибора */
+                gw_features_find();
+                gw_features_apply_all();
             }
             else
             {
@@ -1099,39 +1258,66 @@ static void meter_task(void *arg)
                 if (ske_query_values())
                 {
                     static TickType_t lastBeat;
-                    static uint16_t sCfgRev;
+                    static uint8_t sEditCnt;   /* прошлый маркер правки */
+                    static bool sEditInit;
                     static TickType_t sLastRelist;
                     sMisses = 0;
-                    /* смена версии настроек в кадре 'm' => параметры
-                     * меняли (консоль 'S' или меню панели) - перечиты-
-                     * ваем листинг. ДЕБАУНС 10с: перечитывание на 1-2с
-                     * замораживает опрос значений и грузит CPU - при
-                     * частых правках это тормозило шлюз; пропущенные
-                     * версии догоняются следующим изменением */
-                    if (sCtx.vals.cfg_rev &&
-                        sCtx.vals.cfg_rev != sCfgRev)
+                    /* МАРКЕР ПРАВКИ (7-8 поля кадра 'm'; cfg_rev убран):
+                     * правка прибора = скачок счётчика. НАЗАД = ребут
+                     * прибора - структура меню могла смениться после
+                     * перепрошивки, честный полный relist */
+                    if (sCtx.vals.edit_cnt != sEditCnt)
                     {
-                        if (sCfgRev == 0)
+                        if (!sEditInit)
                         {
-                            /* первое наблюдение после загрузки: просто
-                             * принимаем версию, БЕЗ перечитывания -
-                             * дерево только что прочитано при старте */
-                            sCfgRev = sCtx.vals.cfg_rev;
-                            break;
+                            /* первое наблюдение: дерево прочитано при
+                             * старте/листинге, маркер принимаем молча */
+                            sEditInit = true;
+                            sEditCnt = sCtx.vals.edit_cnt;
                         }
-                        TickType_t nowT = xTaskGetTickCount();
-                        sCfgRev = sCtx.vals.cfg_rev;
-                        if (sLastRelist == 0 ||
-                            nowT - sLastRelist >= pdMS_TO_TICKS(10000))
+                        else if (sCtx.vals.edit_cnt < sEditCnt)
                         {
-                            sLastRelist = nowT;
-                            DBG("ske02: cfg rev %u -> relisting\n",
-                                (unsigned)sCtx.vals.cfg_rev);
+                            sEditCnt = sCtx.vals.edit_cnt;
+                            DBG("ske02: edit cnt back -> device reboot, "
+                                "relisting\n");
                             sState = ST_LIST;
-                            break;
                         }
-                        DBG("ske02: cfg rev %u (debounced)\n",
-                            (unsigned)sCtx.vals.cfg_rev);
+                        else
+                        {
+                            uint8_t delta = (uint8_t)(sCtx.vals.edit_cnt -
+                                                      sEditCnt);
+                            sEditCnt = sCtx.vals.edit_cnt;
+                            if (sLocalSets)
+                            {
+                                /* наш SET: OK-строка уже обновила NVS,
+                                 * GET не нужен; фичи - применить */
+                                sLocalSets = 0;
+                                gw_feature_apply(sCtx.vals.edit_id);
+                                DBG("ske02: own set, no resync\n");
+                            }
+                            else if (delta == 1 &&
+                                     sCtx.vals.edit_id != 0xFFFF)
+                            {
+                                one_param_sync(sCtx.vals.edit_id);
+                                DBG("ske02: edit %u synced (marker)\n",
+                                    (unsigned)sCtx.vals.edit_id);
+                            }
+                            else
+                            {
+                                /* несколько правок между опросами */
+                                TickType_t nowT = xTaskGetTickCount();
+                                if (sLastRelist == 0 ||
+                                    nowT - sLastRelist >=
+                                        pdMS_TO_TICKS(10000))
+                                {
+                                    sLastRelist = nowT;
+                                    if (sweep_values())
+                                        DBG("ske02: values swept\n");
+                                    else
+                                        DBG("ske02: sweep broken, retry\n");
+                                }
+                            }
+                        }
                     }
                     push_time_if_needed();
                     if (sLastOk - lastBeat >= pdMS_TO_TICKS(10000))
@@ -1189,7 +1375,7 @@ void ske02_start(void)
     sReqMutex = xSemaphoreCreateMutex();
     sReqDone = xSemaphoreCreateBinary();
     sQueue = xQueueCreate(2, sizeof(ske_req_t *));
-    xTaskCreate(meter_task, "meter", 3072, NULL, 5, NULL);
+    xTaskCreate(meter_task, "meter", 3584, NULL, 5, NULL);
 }
 
 bool ske02_request(const ske_req_t *req, uint32_t timeout_ms)

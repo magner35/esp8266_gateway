@@ -35,6 +35,8 @@
 #include "wifi.h"
 
 static httpd_handle_t sServer;
+static bool sHttpdCfg = true;   /* фича «Wi-Fi gateway: WEB panel» */
+static bool sOtaCfg = true;     /* фича «Wi-Fi gateway: OTA update» */
 
 /* ------------------------------------------------------------------ */
 /* helpers                                                             */
@@ -483,7 +485,7 @@ static esp_err_t h_api_values(httpd_req_t *req)
                                         v->updated) / 1000),
                        link, ready,
                        (unsigned long)(xTaskGetTickCount() * portTICK_PERIOD_MS),
-                       (unsigned)v->cfg_rev,
+                       (unsigned)(v->edit_cnt ^ v->edit_id),
                        portal ? 1 : 0,
                        portal ? "192.168.4.1" : "",
                        portal ? wifi_ap_ssid() : st->ssid);
@@ -1113,6 +1115,12 @@ static esp_err_t h_api_ota_upload(httpd_req_t *req)
     uint32_t total = 0;
 
     httpd_resp_set_type(req, "application/json");
+    if (!sOtaCfg)
+    {
+        httpd_resp_set_status(req, "403 Forbidden");
+        httpd_resp_send(req, "{\"ok\":false,\"error\":\"OTA выключен\"}", 0);
+        return ESP_OK;
+    }
     sOtaReady = false;
     sOtaPart = esp_ota_get_next_update_partition(NULL);
     if (!sOtaPart || req->content_len == 0 || req->content_len > sOtaPart->size)
@@ -1391,9 +1399,34 @@ static const char *const sCaptiveProbes[] = {
 
 /* ------------------------------------------------------------------ */
 
+/* фича из дерева прибора: httpd поднять/погасить. Вызов до web_start
+ * работает преднастройкой (сервер не поднимется), после - рестарт */
+void web_httpd_enable(bool on)
+{
+    if (on == sHttpdCfg)
+        return;
+    sHttpdCfg = on;
+    if (!on && sServer)
+    {
+        DBG("web: http server stopped (feature off)\n");
+        httpd_stop(sServer);
+        sServer = NULL;
+    }
+    else if (on && !sServer)
+        web_start();
+}
+
+void web_ota_enable(bool on)
+{
+    sOtaCfg = on;
+    DBG("web: ota %s\n", on ? "allowed" : "denied");
+}
+
 void web_start(void)
 {
     httpd_config_t cfg = HTTPD_DEFAULT_CONFIG();
+    if (sServer || !sHttpdCfg)
+        return;   /* уже поднят или выключен фичей из дерева прибора */
     cfg.max_uri_handlers = 36;
     chart_init();   /* кольцо графиков: питается задачей Meter */   /* 32 needed: 19 api/pages + 11 captive + запас */
     /* ВАЖНО: не меньше 8 КБ — h_scan держит на стеке ~2.7 КБ буферов

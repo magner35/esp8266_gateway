@@ -226,6 +226,8 @@ void tree_set_value(uint16_t id, uint32_t raw)
     if (nvs_get_blob(sNvs, key, sBlob, &len) != ESP_OK || len < sizeof(h))
         return;
     memcpy(&h, sBlob, sizeof(h));
+    if (h.value == raw)
+        return;   /* не изменилось: обход G не трогает flash вовсе */
     h.value = raw;
     memcpy(sBlob, &h, sizeof(h));
     nvs_set_blob(sNvs, key, sBlob, len);

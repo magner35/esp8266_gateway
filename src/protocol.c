@@ -943,7 +943,10 @@ void proto_values_line(ProtoCtx *ctx, char *line)
         v->status = (uint8_t)vals_ulong(&p, f, sizeof(f), 16);
         v->setpoint = (uint8_t)vals_ulong(&p, f, sizeof(f), 16);
         v->isr = (uint8_t)vals_ulong(&p, f, sizeof(f), 16);
-        v->cfg_rev = (uint16_t)vals_ulong(&p, f, sizeof(f), 10);
+        /* 7-8 поля = маркер правки (cfg_rev из кадра убран прибором);
+         * отсутствующие поля -> 0: маркерный путь отключён */
+        v->edit_id = (uint16_t)(vals_ulong(&p, f, sizeof(f), 10) & 0xFFFF);
+        v->edit_cnt = (uint8_t)vals_ulong(&p, f, sizeof(f), 10);
         ctx->valsLine = 2; /* frame complete */
         v->updated = ctx->nowMs;
         break;

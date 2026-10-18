@@ -10,4 +10,8 @@
 
 void mb_pass_start(void);
 
+/* фича из дерева прибора («Wi-Fi gateway»): false = всем новым
+ * соединениям отказ (листенер жив, клиентов нет) */
+void mb_pass_enable(bool on);
+
 #endif /* GW_MB_PASS_H */

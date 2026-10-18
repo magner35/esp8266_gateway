@@ -84,7 +84,12 @@ typedef struct
     float kf_value, batch;
     uint32_t pulses_packet, pulses;
     uint8_t status, setpoint, isr;
-    uint16_t cfg_rev;  /* версия настроек прибора (7-е поле кадра 'm') */
+    /* 7-8 поля кадра 'm': МАРКЕР ПРАВКИ - id последнего изменённого
+     * параметра + счётчик правок (прибор пишет в storePropertyValue).
+     * Счётчик УШЁЛ НАЗАД = ребут прибора (шлюз делает relist).
+     * edit_cnt==0 - полей нет (старая прошивка прибора) */
+    uint16_t edit_id;
+    uint8_t edit_cnt;
     uint32_t updated; /* 0 = no frame yet */
 } SkeValues;
 
