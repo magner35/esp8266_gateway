@@ -21,7 +21,8 @@ typedef enum
     SKEQ_REFRESH,  /* full 'l' listing (the "Обновить" button) */
     SKEQ_RESCAN,   /* wipe the cache + full rediscovery */
     SKEQ_REBOOT,   /* r */
-    SKEQ_SETTIME   /* TIME hhmmss ddmmyy: толкнуть NTP-время в DS1307 */
+    SKEQ_SETTIME,  /* TIME hhmmss ddmmyy: толкнуть NTP-время в DS1307 */
+    SKEQ_MODBUS    /* MB <hex>: прозрачная транзакция Modbus (мост :502) */
 } ske_cmd_t;
 
 typedef struct
@@ -33,6 +34,11 @@ typedef struct
     char err[64];    /* human message, empty on success */
     uint16_t wait_s; /* lockout remainder, s (BS_WAIT) */
     SemaphoreHandle_t done; /* posted when result is ready */
+    /* SKEQ_MODBUS: буферы принадлежат вызывающей задаче */
+    const uint8_t *mb_req;  /* addr+pdu, без CRC */
+    uint16_t mb_reqlen;
+    uint8_t *mb_resp;       /* addr+pdu+CRC ответа */
+    uint16_t *mb_rlen;      /* 0 при неудаче */
 } ske_req_t;
 
 void ske02_start(void);            /* create the task (from app_main) */
@@ -44,6 +50,11 @@ void ske02_units_refresh(uint16_t id); /* кэш единиц после SET enu
 
 /* async command API: queues the request and waits (timeout ms) for it */
 bool ske02_request(const ske_req_t *req, uint32_t timeout_ms);
+
+/* прозрачная транзакция Modbus через консоль (MB/MBR): тот же путь,
+ * что ske02_request - UART трогает только задача meter */
+bool ske02_modbus(const uint8_t *req, uint16_t reqlen, uint8_t *resp,
+                  uint16_t *rlen, uint32_t timeout_ms);
 
 /* cache access - take the lock, copy what you need, release */
 SemaphoreHandle_t ske02_lock(void);

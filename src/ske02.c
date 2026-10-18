@@ -13,6 +13,7 @@
  */
 #include "ske02.h"
 #include "ntp.h"
+#include <ctype.h>
 
 #include <stdio.h>
 #include <stdlib.h>   /* atoi: lockout seconds */
@@ -928,6 +929,61 @@ static void exec_request(ske_req_t *req)
         sReady = false;
         break;
 
+    case SKEQ_MODBUS:
+        {
+            /* MB <hex>: прибор дописывает CRC сам, ответ "MBR <hex>".
+             * Кадр до 253 байт -> 506 hex-символов: статические буферы,
+             * очередь ske02 гарантирует одну транзакцию в момент. */
+            static char mbout[2 * 253 + 8];
+            static char mbline[2 * 255 + 8];
+            uint16_t i;
+            int o = snprintf(mbout, sizeof(mbout), "MB ");
+            for (i = 0; i < req->mb_reqlen; i++)
+                o += snprintf(mbout + o, sizeof(mbout) - o, "%02X",
+                              req->mb_req[i]);
+            uart_flush_rx();
+            uart_write_bytes(SKE_UART_NUM, mbout, strlen(mbout));
+            uart_write_bytes(SKE_UART_NUM, "\r", 1);
+
+            *req->mb_rlen = 0;
+            req->result = SKE_ERR_TRANSPORT;
+            TickType_t tmo = pdMS_TO_TICKS(SKE_CMD_TIMEOUT);
+            for (;;)
+            {
+                int rc = read_line_until_prompt(mbline, sizeof(mbline), tmo);
+                if (rc == 0)
+                    break; /* таймаут: прибор молчит */
+                if (rc == 1)
+                    break; /* приглашение без MBR - не должно случаться */
+                if (!strncmp(mbline, "MBR ", 4))
+                {
+                    const char *h = mbline + 4;
+                    uint16_t n = 0;
+                    while (isxdigit((unsigned char)h[0]) &&
+                           isxdigit((unsigned char)h[1]) && n < 255)
+                    {
+                        int hi = (h[0] <= '9') ? h[0] - '0'
+                                               : (h[0] | 0x20) - 'a' + 10;
+                        int lo = (h[1] <= '9') ? h[1] - '0'
+                                               : (h[1] | 0x20) - 'a' + 10;
+                        req->mb_resp[n++] = (uint8_t)((hi << 4) | lo);
+                        h += 2;
+                    }
+                    *req->mb_rlen = n;
+                    req->result = BS_OK;
+                    break;
+                }
+                if (!strncmp(mbline, "MBE", 3))
+                {
+                    /* прибор ответил ошибкой: для мастера это "нет
+                     * ответа" - пусть повторяет/разбирается сам */
+                    break;
+                }
+                /* прочие строки игнорируем (мусор линии) */
+            }
+        }
+        break;
+
     default:
         req->result = BS_BAD_TYPE;
         break;
@@ -1165,6 +1221,20 @@ bool ske02_request(const ske_req_t *req, uint32_t timeout_ms)
     }
     xSemaphoreGive(sReqMutex);
     return ok;
+}
+
+bool ske02_modbus(const uint8_t *req, uint16_t reqlen, uint8_t *resp,
+                  uint16_t *rlen, uint32_t timeout_ms)
+{
+    ske_req_t r;
+    memset(&r, 0, sizeof(r));
+    r.cmd = SKEQ_MODBUS;
+    r.mb_req = req;
+    r.mb_reqlen = reqlen;
+    r.mb_resp = resp;
+    r.mb_rlen = rlen;
+    *rlen = 0;
+    return ske02_request(&r, timeout_ms);
 }
 
 SemaphoreHandle_t ske02_lock(void) { return sLock; }

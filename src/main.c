@@ -15,6 +15,7 @@
 #include "debug.h"
 #include "dns.h"
 #include "modbus_tcp.h"
+#include "mb_pass.h"
 #include "ske02.h"
 #include "storage.h"
 #include "tree_store.h"
@@ -62,6 +63,7 @@ static void boot_task(void *arg)
     web_start();
     dns_start();
     modbus_start();
+    mb_pass_start();
     vTaskDelete(NULL);
 }
 

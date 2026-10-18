@@ -26,7 +26,9 @@
 #include "wifi.h"
 #include "ske02.h"
 
-#define MB_PORT       502
+/* Служебная карта шлюза переехала на 503: стандартный 502 теперь занимает
+ * прозрачный мост к регистрам самого прибора (mb_pass.c). */
+#define MB_PORT       503
 #define MB_MAX_CONN   2
 #define MB_RXBUF      300
 #define MB_IDLE_MS    10000
