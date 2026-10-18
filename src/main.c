@@ -14,7 +14,6 @@
 
 #include "debug.h"
 #include "dns.h"
-#include "modbus_tcp.h"
 #include "mb_pass.h"
 #include "ske02.h"
 #include "storage.h"
@@ -62,8 +61,7 @@ static void boot_task(void *arg)
     vTaskDelay(pdMS_TO_TICKS(2000));
     web_start();
     dns_start();
-    modbus_start();
-    mb_pass_start();
+    mb_pass_start(); /* единственный Modbus TCP сервер: прозрачный мост :502 */
     vTaskDelete(NULL);
 }
 

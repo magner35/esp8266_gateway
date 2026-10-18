@@ -21,9 +21,11 @@
  */
 
 #define MBP_PORT         502
-#define MBP_MAX_CONN     2
+#define MBP_MAX_CONN     2   /* лимит ОДНОВРЕМЕННЫХ клиентов: +1 = ~3.2К кучи */
 #define MBP_RXBUF        300
 #define MBP_TRANSACT_MS  800
+
+static volatile int sClients; /* подключено прямо сейчас */
 
 static uint16_t mb_crc16(const uint8_t *p, uint16_t n)
 {
@@ -114,6 +116,7 @@ static void mb_pass_client_task(void *arg)
     }
 out:
     close(fd);
+    sClients--;
     vTaskDelete(NULL);
 }
 
@@ -148,10 +151,20 @@ static void mb_pass_task(void *arg)
         int fd = accept(ls, NULL, NULL);
         if (fd < 0)
             continue;
+        /* каждое ПОДКЛЮЧЁННОЕ соединение стоит ~3.2К кучи (стек задачи),
+         * поэтому лимит явный: сверх MBP_MAX_CONN - отказ подключения */
+        if (sClients >= MBP_MAX_CONN)
+        {
+            DBG("mbp: client refused (limit %d)\n", MBP_MAX_CONN);
+            close(fd);
+            continue;
+        }
+        sClients++;
         if (xTaskCreate(mb_pass_client_task, "mbp", 3072, (void *)(intptr_t)fd,
                         3, NULL) != pdPASS)
         {
             DBG("mbp: client oom\n");
+            sClients--;
             close(fd);
         }
     }
