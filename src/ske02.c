@@ -774,6 +774,9 @@ static void gw_feature_apply(uint16_t id)
     if (id == 0xFFFF || !tree_get(id, &rec) || !rec.p.present)
         return;
     on = rec.p.value != 0;
+    DBG("gw: feature id=%u on=%d (web=%u mb=%u ota=%u)\n",
+        (unsigned)id, (int)on,
+        (unsigned)sFwWeb, (unsigned)sFwMb, (unsigned)sFwOta);
     if (id == sFwWeb)
         web_httpd_enable(on);
     else if (id == sFwMb)
@@ -806,6 +809,12 @@ static void one_param_sync(uint16_t id)
     if (txt_command(cmd, get_cb, &rc_, SKE_CMD_TIMEOUT) &&
         rc_.seen_ok && rc_.value_line[0])
         line_to_parser(sParseBuf_filled(&rc_));
+    {
+        TreeRec after;
+        if (tree_get(id, &after))
+            DBG("ske02: sync %u -> raw=%lu\n", (unsigned)id,
+                (unsigned long)after.p.value);
+    }
     /* кэш единиц: rec уже прочитан - БЕЗ повторного tree_get+NVS
      * (ske02_units_refresh заводил второй TreeRec и всю NVS-цепь) */
     xSemaphoreTake(sLock, portMAX_DELAY);
@@ -1266,16 +1275,23 @@ static void meter_task(void *arg)
                      * правка прибора = скачок счётчика. НАЗАД = ребут
                      * прибора - структура меню могла смениться после
                      * перепрошивки, честный полный relist */
-                    if (sCtx.vals.edit_cnt != sEditCnt)
+                    if (!sEditInit)
                     {
-                        if (!sEditInit)
+                        /* ПЕРВЫЙ кадр (а не первая правка!): принимаем
+                         * маркер; если прибор уже правилили ПОСЛЕ
+                         * листинга - один обход значений догоняет */
+                        sEditInit = true;
+                        sEditCnt = sCtx.vals.edit_cnt;
+                        if (sCtx.vals.edit_cnt)
                         {
-                            /* первое наблюдение: дерево прочитано при
-                             * старте/листинге, маркер принимаем молча */
-                            sEditInit = true;
-                            sEditCnt = sCtx.vals.edit_cnt;
+                            DBG("ske02: edits during listing, sweeping\n");
+                            sweep_values();
                         }
-                        else if (sCtx.vals.edit_cnt < sEditCnt)
+                    }
+                    else if (sCtx.vals.edit_cnt != sEditCnt)
+                    {
+                        /* счётчик НАЗАД = ребут прибора */
+                        if (sCtx.vals.edit_cnt < sEditCnt)
                         {
                             sEditCnt = sCtx.vals.edit_cnt;
                             DBG("ske02: edit cnt back -> device reboot, "
@@ -1287,6 +1303,10 @@ static void meter_task(void *arg)
                             uint8_t delta = (uint8_t)(sCtx.vals.edit_cnt -
                                                       sEditCnt);
                             sEditCnt = sCtx.vals.edit_cnt;
+                            DBG("ske02: marker cnt=%u delta=%u id=%u\n",
+                                (unsigned)sCtx.vals.edit_cnt,
+                                (unsigned)delta,
+                                (unsigned)sCtx.vals.edit_id);
                             if (sLocalSets)
                             {
                                 /* наш SET: OK-строка уже обновила NVS,

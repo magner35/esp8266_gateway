@@ -100,6 +100,11 @@ static void mb_pass_client_task(void *arg)
 
     for (;;)
     {
+        /* фича выключена прямо посреди соединения: не обслуживаем
+         * дальше и рвём связь - мастер с keep-alive иначе работал бы
+         * бесконечно (гейт был только на новых accept-ах) */
+        if (!sEnabled)
+            break;
         int n = recv(fd, buf + got, MBP_RXBUF - got, 0);
         if (n <= 0)
             break;
@@ -157,12 +162,23 @@ static void mb_pass_task(void *arg)
     {
         if (!sEnabled)
         {
-            vTaskDelay(pdMS_TO_TICKS(200)); /* фича выключена: не жжём CPU */
+            if (sClients)
+                DBG("mbp: %d client(s) alive, feature off\n",
+                    (int)sClients);
+            vTaskDelay(pdMS_TO_TICKS(500));
             continue;
         }
         int fd = accept(ls, NULL, NULL);
         if (fd < 0)
             continue;
+        /* фича могла выключиться, пока мы блокировали в accept:
+         * подключившемуся сразу отказ */
+        if (!sEnabled)
+        {
+            DBG("mbp: connect refused (feature off)\n");
+            close(fd);
+            continue;
+        }
         /* каждое ПОДКЛЮЧЁННОЕ соединение стоит ~3.2К кучи (стек задачи),
          * поэтому лимит явный: сверх MBP_MAX_CONN - отказ подключения */
         if (sClients >= MBP_MAX_CONN)
