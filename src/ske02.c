@@ -33,7 +33,7 @@
 #include "tree_store.h"
 
 #define SKE_UART_NUM      UART_NUM_0
-#define SKE_UART_BAUD     115200
+#define SKE_UART_BAUD     250000 /* обмен с прибором: 250 кбит, выше рвало приём (FIFO ESP) */
 #define SKE_UART_RX_BUF   4096  /* стирание flash подвешивает CPU при NVS-записях листинга */
 #define SKE_CMD_TIMEOUT   pdMS_TO_TICKS(1200)
 #define SKE_LIST_TIMEOUT  pdMS_TO_TICKS(15000)

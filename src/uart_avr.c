@@ -113,9 +113,10 @@ void avr_flash_begin(void)
     int n;
 
     ske02_suspend(true);
-    /* PRELOAD на 115200: прибор гасит задачи и показывает экран
-     * "Обновление ПО" ДО сброса в загрузчик */
-    uart_set_baudrate(AVR_UART_NUM, 115200);
+    /* PRELOAD на скорости консольного канала (1 Мбит): прибор гасит
+     * задачи и показывает экран "Обновление ПО" ДО сброса в загрузчик;
+     * затем скорость загрузчика (AVR_UART_BAUD) для urclock */
+    uart_set_baudrate(AVR_UART_NUM, AVR_CONSOLE_BAUD);
     uart_flush_input(AVR_UART_NUM);
     uart_write_bytes(AVR_UART_NUM, "PRELOAD\r", 8);
     uart_wait_tx_done(AVR_UART_NUM, pdMS_TO_TICKS(200));
@@ -133,7 +134,7 @@ void avr_flash_begin(void)
 
 void avr_flash_end(void)
 {
-    uart_set_baudrate(AVR_UART_NUM, 115200);
+    uart_set_baudrate(AVR_UART_NUM, AVR_CONSOLE_BAUD);
     uart_flush_input(AVR_UART_NUM);
     ske02_suspend(false);
 }
