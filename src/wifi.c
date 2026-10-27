@@ -11,6 +11,7 @@
 #include "tcpip_adapter.h"
 
 #include "debug.h"
+#include "dns.h"
 #include "storage.h"
 #include "ntp.h"
 
@@ -143,6 +144,8 @@ static void start_portal(void)
     esp_wifi_start();
     esp_wifi_set_ps(WIFI_PS_NONE);   /* явно: PS + softAP = wdt */
     sPortalMode = true;
+    dns_start(); /* captive-redirect: существует только в портале,
+                  * в STA-режиме задачи DNS нет вовсе */
     DBG("wifi: portal %s open ip 192.168.4.1\n", sApSsid);
 }
 

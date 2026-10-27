@@ -11,9 +11,11 @@ CONFIG_ESPTOOLPY_FLASHFREQ_40M=y
 # (esp_log_level_set — no-op без CONFIG_LOG_SET_LEVEL). Свои DBG — на UART1.
 CONFIG_LOG_DEFAULT_LEVEL_NONE=y
 
-# окно отправки TCP = 1 сегмент: пиковая память pbuf на соединение
-# вдвое меньше (куча ESP мала), скорости в локальной сети хватает
-CONFIG_LWIP_TCP_SND_BUF_DEFAULT=1440
+# ретрансмиссий до разрыва: мёртвый пир с недоставленными данными
+# закрывается за ~1.5 мин вместо ~9 (дефолт 12) - анти-фриз.
+# Окно отправки TCP не ужимаем: lwIP sanity-check требует
+# TCP_SND_BUF >= 2*MSS = 2880, меньше - ошибка сборки
+CONFIG_LWIP_TCP_MAXRTX=6
 
 # дерево параметров прибора живёт в NVS: раздел 64К (partitions.csv)
 CONFIG_PARTITION_TABLE_CUSTOM=y

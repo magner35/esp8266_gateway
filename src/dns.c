@@ -1,7 +1,8 @@
 /*
  * Captive-portal DNS (udp/53): every A query resolves to 192.168.4.1 so
  * that any http attempt of a freshly joined phone lands on the setup
- * page. Runs only while the AP portal is up.
+ * page. Created by start_portal() only - in STA mode this task does
+ * not exist at all.
  */
 #include <string.h>
 
@@ -10,7 +11,6 @@
 #include "lwip/sockets.h"
 
 #include "debug.h"
-#include "wifi.h"
 
 #define DNS_PORT 53
 
@@ -20,21 +20,6 @@ static void dns_task(void *arg)
     struct sockaddr_in bindAddr;
     uint8_t buf[128];
     (void)arg;
-
-    /* the wifi task may still be trying STA: serve only in the portal */
-    /* ждём портал максимум 120 с: в домашней сети captive-DNS не
-     * нужен, таск самоудаляется и освобождает свой стек (2 КБ) */
-    {
-        int waits = 0;
-        while (!wifi_ap_ssid() && waits++ < 120 * 4)
-            vTaskDelay(pdMS_TO_TICKS(250));
-        if (!wifi_ap_ssid())
-        {
-            DBG("dns: sta mode, captive off\n");
-            vTaskDelete(NULL);
-            return;
-        }
-    }
 
     fd = socket(AF_INET, SOCK_DGRAM, IPPROTO_IP);
     if (fd < 0)
@@ -114,7 +99,7 @@ static void dns_task(void *arg)
 
 void dns_start(void)
 {
-    /* the task itself waits for the portal mode, so it is safe to
-     * start unconditionally at boot */
+    /* вызывается только из start_portal(): задача captive-DNS живёт
+     * исключительно в режиме портала (AP) */
     xTaskCreate(dns_task, "dns", 2048, NULL, 3, NULL);
 }

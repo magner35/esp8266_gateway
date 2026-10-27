@@ -179,6 +179,21 @@ static void mb_pass_task(void *arg)
             close(fd);
             continue;
         }
+        /* Анти-фриз: мастер, потерявший WiFi без FIN, держал слот и стек
+         * задачи навсегда - idle-соединение lwIP сам не закрывает (нет
+         * данных - нет ретрансмиссий - нет таймаута). Тишина 30 с =
+         * клиент мёртв: recv вернёт таймаут, задача закроет сокет.
+         * Keepalive (15с зонд / 5с интервал / 3 попытки) - страховка
+         * от "жив, но молчит" и от полуоткрытых соединений. */
+        {
+            struct timeval tv = {.tv_sec = 30, .tv_usec = 0};
+            int one = 1, idle = 15, intv = 5, cnt = 3;
+            setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+            setsockopt(fd, SOL_SOCKET, SO_KEEPALIVE, &one, sizeof(one));
+            setsockopt(fd, IPPROTO_TCP, TCP_KEEPIDLE, &idle, sizeof(idle));
+            setsockopt(fd, IPPROTO_TCP, TCP_KEEPINTVL, &intv, sizeof(intv));
+            setsockopt(fd, IPPROTO_TCP, TCP_KEEPCNT, &cnt, sizeof(cnt));
+        }
         /* каждое ПОДКЛЮЧЁННОЕ соединение стоит ~3.2К кучи (стек задачи),
          * поэтому лимит явный: сверх MBP_MAX_CONN - отказ подключения */
         if (sClients >= MBP_MAX_CONN)

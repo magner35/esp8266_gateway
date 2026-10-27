@@ -13,7 +13,6 @@
 #include "lwip/ip4_addr.h"
 
 #include "debug.h"
-#include "dns.h"
 #include "mb_pass.h"
 #include "ske02.h"
 #include "storage.h"
@@ -45,7 +44,8 @@ static void boot_task(void *arg)
     wifi_start();
     vTaskDelay(pdMS_TO_TICKS(2000));
     web_start(); /* портал нуждается в httpd всегда */
-    dns_start(); /* captive-redirect тоже */
+    /* captive-DNS стартует из start_portal(): в STA-режиме задачи
+     * DNS не существует вовсе - ни стека, ни строки в логе */
     /*
      * AP-режим (портал): экономим кучу — Modbus TCP мост не нужен
      * (SCADA не придёт на портал), heap-стек не нужен (диагностика).

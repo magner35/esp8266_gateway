@@ -1527,10 +1527,15 @@ void web_start(void)
     /*
      * Socket exhaustion fix: the browser polls /api/values at 5 Hz and
      * opens a new connection for POST /api/set on "Применить". Without
-     * LRU purge the 7-socket limit is hit (accept errno=23 EMFILE) and
+     * LRU purge the socket limit is hit (accept errno=23 EMFILE) and
      * the request is dropped. Purge closes the oldest idle connection.
      */
     cfg.lru_purge_enable = true;
+    /* слотов всего 3 (дефолт 7): браузерные keep-alive, потерявшие WiFi
+     * без FIN, висят минутами - при обрыве связи 7 полумёртвых сессий
+     * съедали ~10К кучи и фризили всё. 3 хватает на страницу+опрос;
+     * lru_purge выкидывает старейшую при переполнении */
+    cfg.max_open_sockets = 3;
     /*
      * Таймауты сокета (в СЕКУНДАХ, поля ..._wait_timeout — не
      * ..._wait_ms, как в IDF v4): зависший send/recv не должен
