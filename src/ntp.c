@@ -14,9 +14,11 @@
 
 #include "lwip/apps/sntp.h"
 #include "lwip/sockets.h"
+#include "esp_system.h" /* esp_get_free_heap_size */
 #include "lwip/netdb.h"
 
 #include "debug.h"
+#include "wifi.h" /* wifi_ap_ssid: проверка режима портала */
 #include "ntp.h"
 #include "storage.h"
 
@@ -193,6 +195,15 @@ void ntp_tz_auto_fetch(void)
         return;
     if ((int32_t)(xTaskGetTickCount() - sTzRetryAfter) < 0)
         return; /* бэкофф после неудачи */
+    /* авто-TZ (HTTP к ip-api.com) - 4К стек задачи + DNS + TCP:
+     * при дефиците кучи пропускаем, timezone можно задать вручную */
+    if (esp_get_free_heap_size() < 12000)
+    {
+        DBG("ntp: tz auto skip (heap %u low)\n",
+            (unsigned)esp_get_free_heap_size());
+        sTzRetryAfter = xTaskGetTickCount() + pdMS_TO_TICKS(60000);
+        return;
+    }
     sTzBusy = true;
     if (xTaskCreate(tz_fetch_task, "tzq", 4096, NULL, 3, NULL) != pdPASS)
         sTzBusy = false;
@@ -204,6 +215,13 @@ void ntp_apply(void)
     sSynced = false;
     if (!sCfg.on || !sCfg.s1[0])
         return;
+    /* AP-режим (портал): НИКАКИХ сетевых сервисов времени -
+     * даже если STA получил IP, портал жрёт кучу и это не штатный режим */
+    if (wifi_ap_ssid())
+    {
+        DBG("ntp: skip in portal mode\n");
+        return;
+    }
     /* второй сервер не обязателен: один тоже валиден */
     sntp_setoperatingmode(SNTP_OPMODE_POLL);
     sntp_setservername(0, sCfg.s1);

@@ -167,6 +167,7 @@ static esp_err_t h_app(httpd_req_t *req)
  */
 static esp_err_t h_api_forgetwifi(httpd_req_t *req)
 {
+    storage_net_delall();
     storage_set_wifi("", "");
     storage_save(storage_get());
     DBG("web: wifi credentials erased, rebooting to portal\n");
@@ -176,6 +177,50 @@ static esp_err_t h_api_forgetwifi(httpd_req_t *req)
     vTaskDelay(pdMS_TO_TICKS(800));
     esp_restart();
     return ESP_OK; /* not reached */
+}
+
+/* GET /api/wifilist - список сохранённых сетей + текущая */
+static esp_err_t h_api_wifilist(httpd_req_t *req)
+{
+    static char out[512];
+    wifi_net_t net;
+    uint8_t n = storage_net_count();
+    size_t off = 0;
+    off += snprintf(out + off, sizeof(out) - off, "{\"nets\":[");
+    for (uint8_t i = 0; i < n && off < sizeof(out) - 80; i++)
+    {
+        if (storage_net_get(i, &net))
+            off += snprintf(out + off, sizeof(out) - off,
+                            "%s{\"i\":%u,\"s\":\"%s\"}",
+                            i ? "," : "", (unsigned)i, net.ssid);
+    }
+    off += snprintf(out + off, sizeof(out) - off, "]}");
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_send(req, out, off);
+    return ESP_OK;
+}
+
+/* POST /api/wifidel?i=N - удалить сеть N (без ребута) */
+static esp_err_t h_api_wifidel(httpd_req_t *req)
+{
+    char val[4] = {0};
+    if (httpd_req_get_url_query_str(req, val, sizeof(val)) == ESP_OK)
+    {
+        char idxstr[4] = {0};
+        if (httpd_query_key_value(val, "i", idxstr, sizeof(idxstr)) == ESP_OK)
+        {
+            uint8_t idx = (uint8_t)atoi(idxstr);
+            bool ok = storage_net_del(idx);
+            DBG("web: wifi del net%u %s\n", idx, ok ? "ok" : "FAIL");
+            httpd_resp_set_type(req, "application/json");
+            httpd_resp_send(req, ok ? "{\"ok\":true}" : "{\"ok\":false}",
+                            ok ? 9 : 10);
+            return ESP_OK;
+        }
+    }
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_send(req, "{\"ok\":false}", 10);
+    return ESP_OK;
 }
 
 static esp_err_t h_scan(httpd_req_t *req)
@@ -282,6 +327,14 @@ static esp_err_t h_save(httpd_req_t *req)
         pass[0] = 0;
 
     storage_set_wifi(ssid, pass);
+    /* многосетевое хранилище: добавляем или обновляем (без дубликатов) */
+    {
+        int8_t exist = storage_net_find(ssid);
+        if (exist >= 0)
+            storage_net_del(exist); /* пересохранение = удалить и добавить в конец */
+        if (!storage_net_add(ssid, pass))
+            DBG("web: net store full, only primary updated\n");
+    }
     {
         bool okSave = storage_save(storage_get());
         if (!okSave)
@@ -1499,6 +1552,12 @@ void web_start(void)
     httpd_register_uri_handler(sServer, &u);
     u = (httpd_uri_t){.uri = "/api/forgetwifi", .method = HTTP_POST,
                       .handler = h_api_forgetwifi};
+    httpd_register_uri_handler(sServer, &u);
+    u = (httpd_uri_t){.uri = "/api/wifilist", .method = HTTP_GET,
+                      .handler = h_api_wifilist};
+    httpd_register_uri_handler(sServer, &u);
+    u = (httpd_uri_t){.uri = "/api/wifidel", .method = HTTP_POST,
+                      .handler = h_api_wifidel};
     httpd_register_uri_handler(sServer, &u);
     u = (httpd_uri_t){.uri = "/api/ntp", .method = HTTP_GET,
                       .handler = h_api_ntp_get};

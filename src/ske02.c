@@ -15,16 +15,21 @@
 #include "ntp.h"
 #include "web.h"
 #include "mb_pass.h"
+#include "wifi.h"
 #include <ctype.h>
 
 #include <stdio.h>
 #include <stdlib.h>   /* atoi: lockout seconds */
+#include <stdarg.h>   /* va_list: wifi_send_line */
 #include <string.h>
 #include <time.h>
 
 #include "driver/uart.h"
 #include "freertos/queue.h"
 #include "freertos/task.h"
+
+#include "esp_wifi.h"
+#include "tcpip_adapter.h"
 
 #include "debug.h"
 #include "protocol.h"
@@ -599,6 +604,91 @@ static void values_cb(char *line, void *user)
     sCtx.nowMs = (uint32_t)xTaskGetTickCount();
     proto_values_line(&sCtx, line);
     xSemaphoreGive(sLock);
+}
+
+/*
+ * Раз в ~5 с проталкиваем прибору состояние WiFi раздельными командами:
+ *   WIP <u32>            — IP как десятичное число (a<<24|b<<16|c<<8|d)
+ *   WMAC <hi32> <lo32>   — MAC: байты 0..3 и 4..5 двумя числами
+ *   WRSSI <int>          — RSSI (со знаком)
+ *   WNET <STA:имя|AP:имя> — строка режима+SSID в raw UTF-8
+ * Каждая команда проходит через обычный word+number парсер прибора
+ * (WNET - текстовый перехватчик), ответ OK/промпт отбрасываем.
+ */
+#define WIFI_PUSH_EVERY 50 /* 10 с (50 циклов 'm' по 200 мс) */
+static void wifi_send_line(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
+static void wifi_send_line(const char *fmt, ...)
+{
+    static char line[96];
+    va_list ap;
+    va_start(ap, fmt);
+    vsnprintf(line, sizeof(line), fmt, ap);
+    va_end(ap);
+    uart_flush_rx();
+    uart_write_bytes(SKE_UART_NUM, line, strlen(line));
+    uart_write_bytes(SKE_UART_NUM, "\r", 1);
+    for (;;)
+    {
+        char resp[72];
+        int rc = read_line_until_prompt(resp, sizeof(resp), pdMS_TO_TICKS(300));
+        if (rc != 2)
+            break; /* промпт или таймаут */
+        /* прибор просит забыть все сети (меню "Forget all Net?") */
+        if (!strncmp(resp, "FORGET", 6))
+        {
+            DBG("wifi: gateway forget signal from meter menu\n");
+            storage_net_delall();
+            storage_set_wifi("", "");
+            storage_save(storage_get());
+            esp_restart(); /* перезагрузка в режим портала */
+        }
+        if (!strncmp(resp, "OK", 2))
+            break;
+    }
+}
+
+static void wifi_push_info(void)
+{
+    bool sta = wifi_sta_connected();
+
+    if (!sta && !ske02_link_up())
+        return;
+
+    tcpip_adapter_ip_info_t ip;
+    uint8_t mac[6] = {0};
+    int rssi = 0;
+    const char *ssid = "";
+    uint32_t ipval = 0;
+
+    if (sta)
+    {
+        if (tcpip_adapter_get_ip_info(TCPIP_ADAPTER_IF_STA, &ip) == ESP_OK)
+            ipval = ip.ip.addr;
+        esp_wifi_get_mac(ESP_IF_WIFI_STA, mac);
+        wifi_ap_record_t ap;
+        if (esp_wifi_sta_get_ap_info(&ap) == ESP_OK)
+        {
+            rssi = ap.rssi;
+            ssid = (const char *)ap.ssid;
+        }
+    }
+    else
+    {
+        if (tcpip_adapter_get_ip_info(TCPIP_ADAPTER_IF_AP, &ip) == ESP_OK)
+            ipval = ip.ip.addr;
+        esp_wifi_get_mac(ESP_IF_WIFI_AP, mac);
+        ssid = wifi_ap_ssid();
+        if (!ssid)
+            ssid = "AP";
+    }
+
+    wifi_send_line("WIP %02X%02X%02X%02X",
+                   (unsigned)(ipval & 0xFF), (unsigned)((ipval >> 8) & 0xFF),
+                   (unsigned)((ipval >> 16) & 0xFF), (unsigned)((ipval >> 24) & 0xFF));
+    wifi_send_line("WMAC %02X%02X%02X%02X%02X%02X",
+                   mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+    wifi_send_line("WRSSI %d", rssi);
+    wifi_send_line("WNET %s:%s", sta ? "STA" : "AP", ssid);
 }
 
 static bool ske_query_values(void)
@@ -1263,9 +1353,16 @@ static void meter_task(void *arg)
         case ST_IDLE:
             if (xTaskGetTickCount() - sT >= SKE_VALUES_PERIOD)
             {
+                static uint8_t sWifiCnt;
                 sT = xTaskGetTickCount();
                 if (ske_query_values())
                 {
+                    /* WiFi-инфо для меню прибора: раз в ~5 с (25 циклов 'm') */
+                    if (++sWifiCnt >= WIFI_PUSH_EVERY)
+                    {
+                        sWifiCnt = 0;
+                        wifi_push_info();
+                    }
                     static TickType_t lastBeat;
                     static uint8_t sEditCnt;   /* прошлый маркер правки */
                     static bool sEditInit;

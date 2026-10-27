@@ -112,6 +112,30 @@
             background: #4a2a2a;
             border-color: #6b3a3a
         }
+
+        /* сворачиваемый список сохранённых сетей */
+        #saved {
+            display: none;
+            margin-top: 10px;
+            padding: 6px;
+            background: #0e1116;
+            border: 1px solid #39414f;
+            border-radius: 4px
+        }
+
+        #saved table td {
+            border-top: 1px solid #2a3140
+        }
+
+        .delbtn {
+            background: #4a2a2a;
+            color: #d8a0a0;
+            border: 1px solid #6b3a3a;
+            border-radius: 4px;
+            padding: 2px 8px;
+            cursor: pointer;
+            font-size: 12px
+        }
     </style>
 </head>
 
@@ -130,10 +154,18 @@
          * слева действие, справа — разрушительное -->
         <div class="btnrow">
             <button type="submit">Подключиться</button>
-            <button type="button" class="forgetbtn" onclick="forgetWifi()"
-                title="Стереть сохранённые подключения и перезапустить шлюз в режиме точки доступа">Забыть сети</button>
+            <button type="button" class="viewbtn" onclick="toggleSaved()"
+                title="Показать сохранённые сети">Просмотр</button>
         </div>
     </form>
+    <div id="saved">
+        <b>Сохранённые сети</b>
+        <div id="savedlist">загрузка…</div>
+        <div style="margin-top:8px;text-align:right">
+            <button type="button" class="forgetbtn" onclick="forgetWifi()"
+                title="Стереть все сохранённые сети и перезапустить шлюз в режиме точки доступа">Забыть все сети</button>
+        </div>
+    </div>
     <h3>Найденные сети</h3>
     <div id="nets" class="nets">сканирование…</div>
     <script src="/wifi.js"></script>

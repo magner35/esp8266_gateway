@@ -22,6 +22,22 @@ bool storage_load(gw_settings_t *s); /* false = blank/invalid, defaults */
 const gw_settings_t *storage_get(void);
 void storage_set_wifi(const char *ssid, const char *pass);
 
+/* --- многосетевое хранилище Wi-Fi (NVS net0..netN) --- */
+#define WIFI_NETS_MAX 5
+typedef struct
+{
+    char ssid[33];
+    char pass[65];
+} wifi_net_t;
+
+void storage_nets_init(void);  /* миграция единичной сети -> net0 (однократно) */
+uint8_t storage_net_count(void);
+bool storage_net_get(uint8_t idx, wifi_net_t *out); /* idx < count */
+bool storage_net_add(const char *ssid, const char *pass); /* false = полный */
+bool storage_net_del(uint8_t idx);
+void storage_net_delall(void);
+int8_t storage_net_find(const char *ssid); /* -1 = нет */
+
 /* widget layout blob: opaque JSON owned by the page, served verbatim */
 bool widgets_load(char *buf, size_t cap); /* false = not stored yet */
 bool widgets_store(const char *json, size_t len);

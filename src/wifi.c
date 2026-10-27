@@ -16,8 +16,8 @@
 
 #define GW_HOSTNAME   "ske02-gw"
 #define GW_AP_PASS    "ske02setup"
-#define STA_TIMEOUT_MS 30000
-#define STA_MAX_TRIES 10 /* association attempts before the portal */
+#define STA_TIMEOUT_MS   30000 /* все сети: полный таймаут (быстрый цикл валит драйвер) */
+#define STA_MAX_TRIES     10   /* ретраев ассоциации на сеть (как было до правок AP) */
 
 #define EVT_GOT_IP   (1 << 0)
 #define EVT_LOST     (1 << 1)
@@ -72,6 +72,7 @@ static void on_event(void *arg, esp_event_base_t base, int32_t id,
             if (++sStaFails < STA_MAX_TRIES)
             {
                 DBG("wifi: assoc retry %u\n", (unsigned)sStaFails);
+                vTaskDelay(pdMS_TO_TICKS(10)); /* дать idle покормить WDT */
                 esp_wifi_connect();
                 return;
             }
@@ -119,10 +120,9 @@ static void start_portal(void)
     ap.ap.ssid_len = strlen(sApSsid);
     ap.ap.max_connection = 2;
     /*
-     * ОТКРЫТАЯ сеть: шифрованный AP + быстрый реконнект телефона
-     * (переиспользование PTK, в логе AES PN replay) роняет закрытый
-     * wifi-драйвер в wdt. Портал настройки существует только пока
-     * потерян домашний WiFi — открытая точка здесь приемлема.
+     * ОТКРЫТАЯ сеть: WPA2-AP требовал лишнюю кучу под crypto-buffers
+     * (esp_wifi_set_storage default), на грани OOM. Портал существует
+     * только пока потерян домашний WiFi — открытая точка приемлема.
      */
     ap.ap.authmode = WIFI_AUTH_OPEN;
 
@@ -148,41 +148,56 @@ static void start_portal(void)
 
 static void wifi_manager_task(void *arg)
 {
-    const gw_settings_t *st = storage_get();
     (void)arg;
+    uint8_t nets = storage_net_count();
 
-    if (st->ssid[0])
+    /* НЕТ сохранённых сетей → ТОЛЬКО портал (AP). STA-интерфейс в APSTA
+     * ничего не подключает (список пуст) — скан работает, интернета нет. */
+    if (nets == 0)
     {
-        wifi_config_t sta = {0};
-        EventBits_t bits;
-        strcpy((char *)sta.sta.ssid, st->ssid);
-        strcpy((char *)sta.sta.password, st->pass);
-        tcpip_adapter_init();
-        esp_wifi_set_mode(WIFI_MODE_STA);
-        esp_wifi_set_config(ESP_IF_WIFI_STA, &sta);
-        esp_wifi_start(); /* the connect comes on WIFI_EVENT_STA_START */
-        /* PS off и в STA: modem-sleep ронял скан (0 сетей) и рвал
-         * 5 Гц обмен с прибором в DTIM-окнах */
-        esp_wifi_set_ps(WIFI_PS_NONE);
-        DBG("wifi: joining \"%s\"\n", st->ssid);
-        bits = xEventGroupWaitBits(sEvents, EVT_GOT_IP | EVT_LOST, pdTRUE,
-                                   pdFALSE, pdMS_TO_TICKS(STA_TIMEOUT_MS));
-        if (bits & EVT_GOT_IP)
-        {
-            /* joined: STAY on STA - falling through to start_portal()
-             * here ALSO raised the AP next to the working STA link, and
-             * a browser still sitting on that AP kept seeing the portal */
-            tcpip_adapter_ip_info_t ip;
-            tcpip_adapter_get_ip_info(TCPIP_ADAPTER_IF_STA, &ip);
-            DBG("wifi: sta mode, ip %s\n", ip4addr_ntoa(&ip.ip));
-            vTaskDelete(NULL); /* reconnects are handled by on_event */
-        }
-        else
-            esp_wifi_stop();
+        start_portal();
+        vTaskDelete(NULL);
     }
 
-    start_portal();
-    vTaskDelete(NULL); /* the portal stays until reboot */
+    /* Есть сохранённые сети → ТОЛЬКО STA, бесконечный перебор.
+     * Никогда не падаем в портал: после подключения event handler
+     * сам реконнектит; если ни одна не подключилась — круг снова. */
+    {
+        wifi_config_t sta = {0};
+        wifi_net_t net;
+        EventBits_t bits;
+        tcpip_adapter_init();
+        esp_wifi_set_mode(WIFI_MODE_STA);
+        esp_wifi_set_ps(WIFI_PS_NONE);
+        for (;;)
+        {
+            for (uint8_t i = 0; i < nets; i++)
+            {
+                if (!storage_net_get(i, &net) || !net.ssid[0])
+                    continue;
+                sStaFails = 0;
+                sStaEverConnected = false;
+                strcpy((char *)sta.sta.ssid, net.ssid);
+                strcpy((char *)sta.sta.password, net.pass);
+                esp_wifi_set_config(ESP_IF_WIFI_STA, &sta);
+                esp_wifi_start();
+                DBG("wifi: joining \"%s\" (%u/%u)\n", net.ssid, i + 1, nets);
+                bits = xEventGroupWaitBits(sEvents, EVT_GOT_IP | EVT_LOST, pdTRUE,
+                                           pdFALSE, pdMS_TO_TICKS(STA_TIMEOUT_MS));
+                if (bits & EVT_GOT_IP)
+                {
+                    tcpip_adapter_ip_info_t ip;
+                    tcpip_adapter_get_ip_info(TCPIP_ADAPTER_IF_STA, &ip);
+                    DBG("wifi: sta mode, ip %s\n", ip4addr_ntoa(&ip.ip));
+                    vTaskDelete(NULL); /* реконнектами управляет on_event */
+                }
+                esp_wifi_stop();
+                vTaskDelay(pdMS_TO_TICKS(1000));
+            }
+            DBG("wifi: all %u networks failed, retry round\n", nets);
+            vTaskDelay(pdMS_TO_TICKS(5000));
+        }
+    }
 }
 
 void wifi_start(void)

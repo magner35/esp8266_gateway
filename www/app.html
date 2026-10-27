@@ -674,6 +674,23 @@ button,input,select,textarea{font:inherit;color:inherit}
         }#sec-wifi .forgetbtn {
             background: #4a2a2a;
             border-color: #6b3a3a
+        }#sec-wifi #saved {
+            display: none;
+            margin-top: 10px;
+            padding: 6px;
+            background: #0e1116;
+            border: 1px solid #39414f;
+            border-radius: 4px
+        }#sec-wifi #saved table td {
+            border-top: 1px solid #2a3140
+        }#sec-wifi .delbtn {
+            background: #4a2a2a;
+            color: #d8a0a0;
+            border: 1px solid #6b3a3a;
+            border-radius: 4px;
+            padding: 2px 8px;
+            cursor: pointer;
+            font-size: 12px
         }
 /* --- service.html --- */
 #sec-service {
@@ -859,10 +876,18 @@ button,input,select,textarea{font:inherit;color:inherit}
             autocapitalize="off" autocorrect="off" spellcheck="false">
         <div class="btnrow">
             <button type="submit">Подключиться</button>
-            <button type="button" class="forgetbtn" onclick="forgetWifi()"
-                title="Стереть сохранённые подключения и перезапустить шлюз в режиме точки доступа">Забыть сети</button>
+            <button type="button" class="viewbtn" onclick="toggleSaved()"
+                title="Показать сохранённые сети">Просмотр</button>
         </div>
     </form>
+    <div id="saved">
+        <b>Сохранённые сети</b>
+        <div id="savedlist">загрузка…</div>
+        <div style="margin-top:8px;text-align:right">
+            <button type="button" class="forgetbtn" onclick="forgetWifi()"
+                title="Стереть все сохранённые сети и перезапустить шлюз в режиме точки доступа">Забыть все сети</button>
+        </div>
+    </div>
     <h3>Найденные сети</h3>
     <div id="nets" class="nets">сканирование…</div>
 </section>
@@ -2460,12 +2485,42 @@ wSync();
         if (inWifi()) wifiLoad();
         window.addEventListener('hashchange', () => { if (inWifi()) wifiLoad() });
         async function forgetWifi() {
-            if (!confirm('Стереть сохранённые сети и перезапустить шлюз ' +
+            if (!confirm('Стереть ВСЕ сохранённые сети и перезапустить шлюз ' +
                          'в режиме точки доступа?')) return;
             try { await fetch('/api/forgetwifi', { method: 'POST' }); } catch (e) { }
             document.body.innerHTML = '<p class="scanmsg">Сети стёрты, шлюз ' +
                 'перезагружается в режим точки доступа. Подключитесь к ' +
                 'SKE02-GW-XXXX (открытая) и откройте 192.168.4.1</p>';
+        }
+        async function loadSaved() {
+            const box = document.getElementById('savedlist');
+            let nets = [];
+            try {
+                const r = await (await fetch('/api/wifilist')).json();
+                nets = r.nets || [];
+            } catch (e) { }
+            if (!nets.length) {
+                box.innerHTML = '<p class="scanmsg">нет сохранённых сетей</p>';
+                return;
+            }
+            let h = '<table>';
+            nets.forEach(n => {
+                h += '<tr><td>' + esc(n.s) + '</td><td style="text-align:right">' +
+                     '<button class="delbtn" onclick="delNet(' + n.i + ')" ' +
+                     'title="Удалить эту сеть">✕</button></td></tr>';
+            });
+            box.innerHTML = h + '</table>';
+        }
+        async function delNet(i) {
+            if (!confirm('Удалить эту сеть из сохранённых?')) return;
+            try { await fetch('/api/wifidel?i=' + i, { method: 'POST' }); } catch (e) { }
+            loadSaved();
+        }
+        function toggleSaved() {
+            const el = document.getElementById('saved');
+            const show = el.style.display === 'none' || !el.style.display;
+            el.style.display = show ? 'block' : 'none';
+            if (show) loadSaved();
         }
 ;
 /* --- service.js --- */

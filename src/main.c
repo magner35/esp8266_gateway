@@ -28,23 +28,9 @@ static void boot_task(void *arg)
     (void)arg;
     DBG("gateway rtos: boot\n");
     storage_init();
-    ntp_init();   /* конфиг из NVS; сам SNTP стартует по получении IP */
-    hex_store_init(); /* раздел avrhex под образы прибора */
-    /*
-     * ПРИБОР ПЕРВЫМ: листинг дерева читается ДО старта беспроводных
-     * задач - куча девственная (14К буфер гарантирован), flash-паузы
-     * NVS никому не мешают. Ждём готовности до 25с; если прибора нет -
-     * WiFi поднимется всё равно, листинг догонит в фоне.
-     */
+    ntp_init();   /* конфиг из NVS; SNTP стартует только по IP (в AP не стартует) */
+    hex_store_init();
     ske02_start();
-    /*
-     * ПРИБОР ПЕРВЫМ, СТРОГО: WiFi не поднимаем, пока листинг ЭТОЙ
-     * загрузки не дошёл до конца (ske02_ready). tree_count() не
-     * годится: он читает СТАРОЕ дерево из NVS и всегда > 0 - wifi
-     * стартовал мгновенно, его выхлоп на UART0 рвал команды
-     * ("I (68..)" для консоли прибора = мусор -> ERR syntax).
-     * Страховка от отсутствия прибора - 180с.
-     */
     {
         int waited = 0;
         while (!ske02_ready() && waited < 180000)
@@ -57,11 +43,19 @@ static void boot_task(void *arg)
     }
     DBG("gateway: settings fully loaded, starting WiFi\n");
     wifi_start();
-    /* the wifi task needs a moment to bring an interface up */
     vTaskDelay(pdMS_TO_TICKS(2000));
-    web_start();
-    dns_start();
-    mb_pass_start(); /* единственный Modbus TCP сервер: прозрачный мост :502 */
+    web_start(); /* портал нуждается в httpd всегда */
+    dns_start(); /* captive-redirect тоже */
+    /*
+     * AP-режим (портал): экономим кучу — Modbus TCP мост не нужен
+     * (SCADA не придёт на портал), heap-стек не нужен (диагностика).
+     * WiFi-скан уже on-demand (malloc при заходе на страницу Wi-Fi).
+     * NTP не стартует (SNTP активируется только по IP_EVENT_STA_GOT_IP).
+     */
+    if (!wifi_ap_ssid())
+        mb_pass_start(); /* прозрачный мост :502 — только в STA */
+    else
+        DBG("gateway: AP mode - modbus bridge off (heap)\n");
     vTaskDelete(NULL);
 }
 
@@ -101,46 +95,9 @@ static void stat_task(void *arg)
     }
 }
 
-/*
- * Логгер провалов кучи: опрашивает свободную память каждые 100 мс
- * и печатает каждый НОВЫЙ минимум (шаг 512 Б) с аптаймом — по
- * таймштампам видно, какое событие (страница/params/скан) ест кучу.
- */
-static uint32_t sLastDipLog;
-
-static void heap_watch_task(void *arg)
-{
-    uint32_t watermark = UINT32_MAX;
-    (void)arg;
-    for (;;)
-    {
-        uint32_t h = esp_get_free_heap_size();
-        if (h + 512 < watermark)
-        {
-            watermark = (h + 256) & ~255u;   /* гистерезис от дребезга */
-            /* не чаще раза в минуту: прошивка AVR сыплет дипами на
-             * каждую запись страницы и тонет в них */
-            {
-                uint32_t now_s = (uint32_t)(xTaskGetTickCount() *
-                                            portTICK_PERIOD_MS / 1000);
-                if (now_s - sLastDipLog >= 60)
-                {
-                    sLastDipLog = now_s;
-                    DBG("gw: heap dip %u at %lus\n", (unsigned)h,
-                        (unsigned long)now_s);
-                }
-            }
-        }
-        else if (h > watermark + 2048)
-            watermark = h;
-        vTaskDelay(pdMS_TO_TICKS(100));
-    }
-}
-
 void app_main(void)
 {
     dbg_init(); /* UART1 log + silence the SDK console on UART0 */
     xTaskCreate(boot_task, "boot", 3072, NULL, 4, NULL);
     xTaskCreate(stat_task, "stat", 2048, NULL, 2, NULL);
-    xTaskCreate(heap_watch_task, "heapw", 2048, NULL, 1, NULL);
 }
