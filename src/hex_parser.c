@@ -186,7 +186,7 @@ esp_err_t hex_file_parse(const char *path, hex_page_cb cb, void *user,
             sum += rec[i];
         if (sum != 0)
         {
-            logE(TAG, "строка %d: неверная контрольная сумма", lineno);
+            logE(TAG, "строка %d: неверная КС: '%.24s'", lineno, line);
             goto out;
         }
 

@@ -145,6 +145,30 @@
       btn.disabled = false;
     }
 
+    /* ВРЕМЕННО: сырой hex без .skpak (кнопка восстановления) */
+    function avrUploadHex(inp) {
+      const f = inp.files[0];
+      const m = document.getElementById('avrMsg');
+      if (!f) return;
+      m.className = 'msg';
+      m.textContent = 'hex… 0%';
+      const xhr = new XMLHttpRequest();
+      xhr.open('POST', '/api/avr/uploadhex');
+      xhr.upload.onprogress = e => {
+        if (e.lengthComputable)
+          m.textContent = 'hex… ' + Math.round(e.loaded / e.total * 100) + '%';
+      };
+      xhr.onload = () => {
+        try {
+          const r = JSON.parse(xhr.responseText);
+          if (r.ok) { m.textContent = ''; document.getElementById('avrBtn').disabled = false }
+          else { m.className = 'msg err'; m.textContent = 'ошибка: ' + (r.error || '?') }
+        } catch (e) { m.className = 'msg err'; m.textContent = 'ошибка ответа' }
+      };
+      xhr.onerror = () => { m.className = 'msg err'; m.textContent = 'нет ответа от шлюза' };
+      xhr.send(f);
+    }
+
     /* ---- OTA прошивки шлюза ---- */
     function otaUploadAuto(inp) {
       const f = inp.files[0];

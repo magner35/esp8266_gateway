@@ -921,8 +921,8 @@ button,input,select,textarea{font:inherit;color:inherit}
     </div>
     <div class="box">
         <h2 style="margin:0 0 6px">Обновление ПО шлюза</h2>
-        <input class="srv" id="otaFile" type="file" accept=".bin"
-               title="Прошивка шлюза (firmware.bin)"
+        <input class="srv" id="otaFile" type="file" accept=".skpak"
+               title="Пакет прошивки шлюза (.skpak): tools/ota_pack.py pack firmware.bin esp out.skpak"
                onchange="otaUploadAuto(this)">
         <div class="row" style="margin-top:10px">
             <button id="otaBtn" class="warn" onclick="otaFlash(this)" disabled>Прошить шлюз</button>
@@ -931,7 +931,12 @@ button,input,select,textarea{font:inherit;color:inherit}
     </div>
     <div class="box">
         <h2 style="margin:0 0 6px">Обновление ПО прибора</h2>
-        <input class="srv" id="avrFile" type="file" accept=".hex" onchange="avrUploadAuto(this)">
+        <input class="srv" id="avrFile" type="file" accept=".skpak" title="Пакет прошивки прибора (.skpak): tools/ota_pack.py pack image.hex avr out.skpak" onchange="avrUploadAuto(this)">
+        <div class="row" style="margin-top:6px">
+            <label style="font-size:12px;opacity:.7">временно, без пакета:</label>
+            <input class="srv" id="avrHexFile" type="file" accept=".hex"
+                   style="font-size:12px" onchange="avrUploadHex(this)">
+        </div>
         <div class="row" style="margin-top:10px">
             <button class="warn" id="avrBtn" onclick="avrFlash(this)" disabled>Обновить</button>
             <span class="msg" id="avrMsg"></span>
@@ -2634,6 +2639,28 @@ wSync();
         }
       } catch (e) { m.className = 'msg err'; m.textContent = 'нет ответа от шлюза' }
       btn.disabled = false;
+    }
+    function avrUploadHex(inp) {
+      const f = inp.files[0];
+      const m = document.getElementById('avrMsg');
+      if (!f) return;
+      m.className = 'msg';
+      m.textContent = 'hex… 0%';
+      const xhr = new XMLHttpRequest();
+      xhr.open('POST', '/api/avr/uploadhex');
+      xhr.upload.onprogress = e => {
+        if (e.lengthComputable)
+          m.textContent = 'hex… ' + Math.round(e.loaded / e.total * 100) + '%';
+      };
+      xhr.onload = () => {
+        try {
+          const r = JSON.parse(xhr.responseText);
+          if (r.ok) { m.textContent = ''; document.getElementById('avrBtn').disabled = false }
+          else { m.className = 'msg err'; m.textContent = 'ошибка: ' + (r.error || '?') }
+        } catch (e) { m.className = 'msg err'; m.textContent = 'ошибка ответа' }
+      };
+      xhr.onerror = () => { m.className = 'msg err'; m.textContent = 'нет ответа от шлюза' };
+      xhr.send(f);
     }
     function otaUploadAuto(inp) {
       const f = inp.files[0];

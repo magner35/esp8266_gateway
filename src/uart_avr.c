@@ -16,6 +16,7 @@
 #include "driver/uart.h"
 #include "driver/gpio.h"
 #include "esp_task_wdt.h"
+#include "esp_wifi.h"
 
 #include "avr_conf.h"
 #include "debug.h"
@@ -113,6 +114,16 @@ void avr_flash_begin(void)
     int n;
 
     ske02_suspend(true);
+    /*
+     * WiFi ГАСИМ на время сессии: всплески WiFi-прерываний при слабом
+     * сигнале рвут TX-заливку FIFO посреди 262-байтного кадра страницы
+     * ("запись 0x.. не удалась" серией, канал умирает насовсем). Веб
+     * на минуту отваливается - это цена надёжной прошивки; STA после
+     * esp_wifi_start() реконнектится сама (STA_START -> connect).
+     */
+    DBG("%s: wifi off for avr session\n", TAG);
+    esp_wifi_stop();
+    vTaskDelay(pdMS_TO_TICKS(100));
     /* PRELOAD на скорости консольного канала (115200): прибор гасит
      * задачи и показывает экран "Обновление ПО" ДО сброса в загрузчик;
      * затем скорость загрузчика (AVR_UART_BAUD) для urclock */
@@ -137,4 +148,6 @@ void avr_flash_end(void)
     uart_set_baudrate(AVR_UART_NUM, AVR_CONSOLE_BAUD);
     uart_flush_input(AVR_UART_NUM);
     ske02_suspend(false);
+    DBG("%s: wifi back on\n", TAG);
+    esp_wifi_start();
 }

@@ -590,16 +590,19 @@ static void page_cb(uint32_t addr, const uint8_t *page, void *user)
         c->errors++;
         return;
     }
-    if (ur_page_write(addr, p) != 0)
+    int wrc = ur_page_write(addr, p);
+    if (wrc != 0)
     {
         avr_drain();
         vTaskDelay(pdMS_TO_TICKS(120));
-        if (ur_page_write(addr, p) != 0)
+        wrc = ur_page_write(addr, p);
+        if (wrc != 0)
         {
             if (++c->consec_dead == 5)
                 logE(TAG, "запись: связь с загрузчиком потеряна - "
                           "остаток пропускается");
-            logE(TAG, "запись 0x%X не удалась", addr);
+            logE(TAG, "запись 0x%X не удалась (%s)", addr,
+                 wrc == -1 ? "таймаут ответа" : "чужой ответ");
             c->errors++;
             return;
         }

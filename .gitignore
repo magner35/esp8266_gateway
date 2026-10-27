@@ -8,3 +8,4 @@ tests/host_tests
 tests/host_tests.exe
 tests/*.obj
 __pycache__/
+tools/keys/

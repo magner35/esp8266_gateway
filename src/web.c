@@ -28,6 +28,7 @@
 #include "spi_flash.h"
 #include "esp_task_wdt.h"
 #include "hex_store.h"
+#include "ota_sec.h"
 #include "uart_avr.h"
 #include "urclock.h"
 #include "tree_store.h"
@@ -1092,6 +1093,102 @@ static esp_err_t h_api_reboot(httpd_req_t *req)
 static esp_err_t h_api_avr_upload(httpd_req_t *req)
 {
     char buf[1024];
+    ota_sec_t sec;
+    int rc;
+    int n;
+    int have = 0;
+    uint32_t fed = 0;
+    uint32_t skip; /* байт заголовка в первом чанке */
+
+    httpd_resp_set_type(req, "application/json");
+    /* первый чанк обязан вместить заголовок .skpak целиком */
+    while (have < OTA_SEC_HDR)
+    {
+        n = httpd_req_recv(req, buf + have, sizeof(buf) - have);
+        if (n <= 0)
+        {
+            httpd_resp_set_status(req, "400 Bad Request");
+            httpd_resp_send(req, "{\"ok\":false,\"error\":\"пакет короче заголовка\"}", 0);
+            return ESP_OK;
+        }
+        have += n;
+    }
+    rc = ota_sec_begin(&sec, (const uint8_t *)buf, 0xFFFFFFFF);
+    if (rc != OTA_SEC_OK)
+    {
+        DBG("web: avr hdr %02X %02X %02X %02X %02X %02X %02X %02X len %d\n",
+            (uint8_t)buf[0], (uint8_t)buf[1], (uint8_t)buf[2], (uint8_t)buf[3],
+            (uint8_t)buf[4], (uint8_t)buf[5], (uint8_t)buf[6], (uint8_t)buf[7],
+            (int)req->content_len);
+        goto bad;
+    }
+    if (rc == OTA_SEC_OK && sec.type != OTA_SEC_AVR)
+        rc = OTA_SEC_TYPE;
+    if (rc == OTA_SEC_OK && !hex_store_begin(sec.plain_len))
+        rc = OTA_SEC_LEN; /* раздел мал */
+    if (rc != OTA_SEC_OK)
+        goto bad;
+
+    skip = OTA_SEC_HDR;
+    for (;;)
+    {
+        uint8_t *data = (uint8_t *)buf + skip;
+        uint32_t dlen = (uint32_t)have - skip;
+        skip = 0;
+        if (dlen)
+        {
+            rc = ota_sec_feed(&sec, data, dlen); /* in-place: теперь open */
+            if (rc != OTA_SEC_OK)
+                goto bad;
+            if (fed == 0 && data[0] != ':')
+            {
+                rc = OTA_SEC_NOTIMG; /* первая строка intel hex */
+                goto bad;
+            }
+            if (!hex_store_chunk((const char *)data, dlen))
+            {
+                httpd_resp_set_status(req, "500 Internal Server Error");
+                httpd_resp_send(req, "{\"ok\":false,\"error\":\"запись раздела\"}", 0);
+                return ESP_OK;
+            }
+            fed += dlen;
+        }
+        n = httpd_req_recv(req, buf, sizeof(buf));
+        if (n <= 0)
+            break;
+        have = n;
+    }
+    rc = ota_sec_finish(&sec);
+    if (rc != OTA_SEC_OK)
+        goto bad;
+    DBG("web: avr .skpak ok, %u Б, \"%s\"\n",
+        (unsigned)fed, sec.note);
+    {
+        char out[96];
+        snprintf(out, sizeof(out), "{\"ok\":true,\"bytes\":%u}", (unsigned)fed);
+        httpd_resp_send(req, out, strlen(out));
+    }
+    return ESP_OK;
+
+bad:
+    {
+        char out[96];
+        if (sec.active || fed)
+            hex_store_begin(0); /* выкинуть частичную запись из раздела */
+        snprintf(out, sizeof(out), "{\"ok\":false,\"error\":\"%s\"}",
+                 ota_sec_str(rc));
+        httpd_resp_set_status(req, "400 Bad Request");
+        httpd_resp_send(req, out, strlen(out));
+        DBG("web: avr .skpak rejected: %s\n", ota_sec_str(rc));
+        return ESP_OK;
+    }
+}
+
+/* POST /api/avr/uploadhex: ВРЕМЕННЫЙ обход .skpak - сырой intel hex
+ * прямо в раздел (кнопка восстановления, без подписи/шифрования) */
+static esp_err_t h_api_avr_uploadhex(httpd_req_t *req)
+{
+    char buf[1024];
     int n;
     uint32_t total = 0;
 
@@ -1104,6 +1201,14 @@ static esp_err_t h_api_avr_upload(httpd_req_t *req)
     }
     while ((n = httpd_req_recv(req, buf, sizeof(buf))) > 0)
     {
+        if (total == 0 && buf[0] != ':')
+        {
+            httpd_resp_set_status(req, "400 Bad Request");
+            httpd_resp_send(req, "{\"ok\":false,\"error\":\"не intel hex\"}", 0);
+            return ESP_OK;
+        }
+        if (total == 0)
+            DBG("web: raw hex starts '%.16s'\n", buf);
         if (!hex_store_chunk(buf, (uint32_t)n))
         {
             httpd_resp_set_status(req, "500 Internal Server Error");
@@ -1112,7 +1217,15 @@ static esp_err_t h_api_avr_upload(httpd_req_t *req)
         }
         total += (uint32_t)n;
     }
-    DBG("web: avr hex uploaded, %u bytes\n", (unsigned)total);
+    if (total != req->content_len)
+    {
+        /* обрыв тела (плохой WiFi): в разделе недописанный файл */
+        hex_store_begin(0);
+        httpd_resp_set_status(req, "400 Bad Request");
+        httpd_resp_send(req, "{\"ok\":false,\"error\":\"обрыв передачи файла\"}", 0);
+        return ESP_OK;
+    }
+    DBG("web: avr RAW hex uploaded (no .skpak), %u bytes\n", (unsigned)total);
     {
         char out[96];
         snprintf(out, sizeof(out), "{\"ok\":true,\"bytes\":%u}", (unsigned)total);
@@ -1198,12 +1311,18 @@ static esp_ota_handle_t sOtaHandle;
 static bool sOtaReady;
 static uint32_t sOtaBytes;
 
-/* POST /api/ota/upload: тело = firmware.bin -> неактивный слот */
+/* POST /api/ota/upload: тело = пакет .skpak (esp) -> неактивный слот.
+ * Расшифровка in-place + SHA-256 на лету, подпись Ed25519 - в конце;
+ * провал любой проверки = слот не активируется (/api/ota/flash не пустит). */
 static esp_err_t h_api_ota_upload(httpd_req_t *req)
 {
     char buf[1024];
+    ota_sec_t sec;
+    int rc;
     int n;
-    uint32_t total = 0;
+    int have = 0;
+    uint32_t fed = 0;
+    uint32_t skip;
 
     httpd_resp_set_type(req, "application/json");
     if (!sOtaCfg)
@@ -1214,57 +1333,107 @@ static esp_err_t h_api_ota_upload(httpd_req_t *req)
     }
     sOtaReady = false;
     sOtaPart = esp_ota_get_next_update_partition(NULL);
-    if (!sOtaPart || req->content_len == 0 || req->content_len > sOtaPart->size)
+    if (!sOtaPart)
     {
         httpd_resp_set_status(req, "400 Bad Request");
-        httpd_resp_send(req, "{\"ok\":false,\"error\":\"слот/размер\"}", 0);
+        httpd_resp_send(req, "{\"ok\":false,\"error\":\"нет ota-слота\"}", 0);
         return ESP_OK;
     }
+    while (have < OTA_SEC_HDR)
+    {
+        n = httpd_req_recv(req, buf + have, sizeof(buf) - have);
+        if (n <= 0)
+        {
+            httpd_resp_set_status(req, "400 Bad Request");
+            httpd_resp_send(req, "{\"ok\":false,\"error\":\"пакет короче заголовка\"}", 0);
+            return ESP_OK;
+        }
+        have += n;
+    }
+    rc = ota_sec_begin(&sec, (const uint8_t *)buf, sOtaPart->size);
+    if (rc != OTA_SEC_OK)
+    {
+        DBG("web: ota hdr %02X %02X %02X %02X %02X %02X %02X %02X len %d\n",
+            (uint8_t)buf[0], (uint8_t)buf[1], (uint8_t)buf[2], (uint8_t)buf[3],
+            (uint8_t)buf[4], (uint8_t)buf[5], (uint8_t)buf[6], (uint8_t)buf[7],
+            (int)req->content_len);
+        goto bad;
+    }
+    if (sec.type != OTA_SEC_ESP)
+    {
+        rc = OTA_SEC_TYPE;
+        goto bad;
+    }
+
     /* точный размер: OTA_SIZE_UNKNOWN стёр бы весь слот (896К, ~40с) */
-    DBG("web: ota erase %u B in %s...\n",
-        (unsigned)req->content_len, sOtaPart->label);
-    if (esp_ota_begin(sOtaPart, req->content_len, &sOtaHandle) != ESP_OK)
+    DBG("web: ota erase %u B in %s (\"%s\")...\n",
+        (unsigned)sec.plain_len, sOtaPart->label, sec.note);
+    if (esp_ota_begin(sOtaPart, sec.plain_len, &sOtaHandle) != ESP_OK)
     {
         httpd_resp_set_status(req, "500 Internal Server Error");
         httpd_resp_send(req, "{\"ok\":false,\"error\":\"ota begin\"}", 0);
         return ESP_OK;
     }
-    while ((n = httpd_req_recv(req, buf, sizeof(buf))) > 0)
+
+    skip = OTA_SEC_HDR;
+    for (;;)
     {
-        if (total == 0 && buf[0] != (char)0xE9)
+        uint8_t *data = (uint8_t *)buf + skip;
+        uint32_t dlen = (uint32_t)have - skip;
+        skip = 0;
+        if (dlen)
         {
-            httpd_resp_set_status(req, "400 Bad Request");
-            httpd_resp_send(req, "{\"ok\":false,\"error\":\"не образ ESP\"}", 0);
-            return ESP_OK;
+            rc = ota_sec_feed(&sec, data, dlen); /* in-place: теперь open */
+            if (rc != OTA_SEC_OK)
+                break;
+            if (fed == 0 && data[0] != (uint8_t)0xE9)
+            {
+                rc = OTA_SEC_NOTIMG; /* первый байт ESP-образа */
+                break;
+            }
+            if (esp_ota_write(sOtaHandle, data, dlen) != ESP_OK)
+            {
+                httpd_resp_set_status(req, "500 Internal Server Error");
+                httpd_resp_send(req, "{\"ok\":false,\"error\":\"ota write\"}", 0);
+                return ESP_OK;
+            }
+            fed += dlen;
+            esp_task_wdt_reset();
+            if ((fed & 0xFFFF) == 0)
+                DBG("web: ota %u B...\n", (unsigned)fed);
         }
-        if (esp_ota_write(sOtaHandle, buf, (size_t)n) != ESP_OK)
-        {
-            httpd_resp_set_status(req, "500 Internal Server Error");
-            httpd_resp_send(req, "{\"ok\":false,\"error\":\"ota write\"}", 0);
-            return ESP_OK;
-        }
-        total += (uint32_t)n;
-        esp_task_wdt_reset();
-        if ((total & 0xFFFF) == 0)
-            DBG("web: ota %u B...\n", (unsigned)total);
+        n = httpd_req_recv(req, buf, sizeof(buf));
+        if (n <= 0)
+            break;
+        have = n;
     }
-    if (total != req->content_len ||
-        esp_ota_end(sOtaHandle) != ESP_OK)
-    {
-        /* битый/неполный образ: активная прошивка НЕ тронута */
-        httpd_resp_set_status(req, "400 Bad Request");
-        httpd_resp_send(req, "{\"ok\":false,\"error\":\"битый образ\"}", 0);
-        return ESP_OK;
-    }
-    sOtaBytes = total;
+    esp_ota_end(sOtaHandle); /* провал ниже = слот мусорный, но не активен */
+    if (rc == OTA_SEC_OK)
+        rc = ota_sec_finish(&sec);
+    if (rc != OTA_SEC_OK)
+        goto bad;
+
+    sOtaBytes = fed;
     sOtaReady = true;
-    DBG("web: ota staged %u B -> %s\n", (unsigned)total, sOtaPart->label);
+    DBG("web: ota staged %u B -> %s (\"%s\")\n",
+        (unsigned)fed, sOtaPart->label, sec.note);
     {
         char out[96];
-        snprintf(out, sizeof(out), "{\"ok\":true,\"bytes\":%u}", (unsigned)total);
+        snprintf(out, sizeof(out), "{\"ok\":true,\"bytes\":%u}", (unsigned)fed);
         httpd_resp_send(req, out, strlen(out));
     }
     return ESP_OK;
+
+bad:
+    {
+        char out[96];
+        snprintf(out, sizeof(out), "{\"ok\":false,\"error\":\"%s\"}",
+                 ota_sec_str(rc));
+        httpd_resp_set_status(req, "400 Bad Request");
+        httpd_resp_send(req, out, strlen(out));
+        DBG("web: ota .skpak rejected: %s\n", ota_sec_str(rc));
+        return ESP_OK;
+    }
 }
 
 /* POST /api/ota/flash: переключить слот и перезагрузиться */
@@ -1616,6 +1785,9 @@ void web_start(void)
     httpd_register_uri_handler(sServer, &u);
     u = (httpd_uri_t){.uri = "/api/avr/upload", .method = HTTP_POST,
                       .handler = h_api_avr_upload};
+    httpd_register_uri_handler(sServer, &u);
+    u = (httpd_uri_t){.uri = "/api/avr/uploadhex", .method = HTTP_POST,
+                      .handler = h_api_avr_uploadhex};
     httpd_register_uri_handler(sServer, &u);
     u = (httpd_uri_t){.uri = "/api/avr/flash", .method = HTTP_POST,
                       .handler = h_api_avr_flash};
