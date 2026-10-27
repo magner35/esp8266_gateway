@@ -113,7 +113,7 @@ void avr_flash_begin(void)
     int n;
 
     ske02_suspend(true);
-    /* PRELOAD на скорости консольного канала (1 Мбит): прибор гасит
+    /* PRELOAD на скорости консольного канала (115200): прибор гасит
      * задачи и показывает экран "Обновление ПО" ДО сброса в загрузчик;
      * затем скорость загрузчика (AVR_UART_BAUD) для urclock */
     uart_set_baudrate(AVR_UART_NUM, AVR_CONSOLE_BAUD);
