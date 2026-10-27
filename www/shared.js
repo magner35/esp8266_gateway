@@ -243,28 +243,19 @@ const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;'
       pause: { n: 'ПАУЗА', col: '#856622', h: 'пауза дозатора' },
       reset: { n: 'СБРОС', col: '#1a3c91', h: 'сброс объёма' }
     };
-    let BTNP = { mode: 89, reset: 142 };   /* param ids, refreshed by paramsTick */
+    /* кнопки дозатора: прямые консольные слова прибора (без id меню) */
+    const BTNMAP = {
+      stop: 'BSTOP', start: 'BSTART', pause: 'BPAUSE', reset: 'TRESET'
+    };
     async function btnAct(mode) {
+      const c = BTNMAP[mode];
+      if (!c) return;
       try {
-        if (mode === 'start') {
-          await fetch('/api/set', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-            body: 'id=' + BTNP.mode + '&v=' + encodeURIComponent('Старт') + '&pw='
-          });
-        } else if (mode === 'stop' || mode === 'pause') {
-          await fetch('/api/set', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-            body: 'id=' + BTNP.mode + '&v=' + encodeURIComponent('Стоп') + '&pw='
-          });
-        } else if (mode === 'reset') {
-          await fetch('/api/run', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-            body: 'id=' + BTNP.reset + '&pw='
-          });
-        }
+        await fetch('/api/cmd', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: 'c=' + c
+        });
       } catch (e) { }
     }
     /*
@@ -1241,14 +1232,9 @@ const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;'
         const un = { rate: '', obj: '', ob: '', time: '' };
         const mult = { type: MULT.type, value: MULT.value };
         let mulU = MULU;
-        const btnp = { mode: BTNP.mode, reset: BTNP.reset };
         const inp = {};
         for (const p of d.params) {
           if (!p.n) continue;
-          /* doser buttons: Режим Стоп|Старт + CMD Сброс объёма */
-          if (p.t === 11 && p.tb === 'Дозатор' && p.n === 'Режим' &&
-            p.o && p.o.includes('Старт')) btnp.mode = p.i;
-          if (p.cx && p.n.indexOf('Сброс') === 0 && p.tb === 'Сброс объёма') btnp.reset = p.i;
           /* doser setpoints: Доза / Упреждение / Перелив in Уставки */
           if (p.t === 0 && p.tb === 'Дозатор' && p.n === 'Лимит')
             LIM = parseFloat(p.v);   /* потолок Порции (режет прибор) */
@@ -1301,10 +1287,9 @@ const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;'
           for (const w of widgets) parSyncAuto(w);
           pageRender();               /* relabel the bars with the new units */
         }
-        /* кнопки и уставки дозатора: перерисовать при изменении */
+        /* уставки дозатора: перерисовать при изменении */
         const inpChanged = Object.keys(INP).length !== Object.keys(inp).length ||
           Object.keys(inp).some(s => INP[s] && inp[s] && (INP[s].id !== inp[s].id || INP[s].v !== inp[s].v));
-        if (btnp.mode !== BTNP.mode || btnp.reset !== BTNP.reset) BTNP = btnp;
         if (inpChanged) { INP = inp; pageRender() }
       } catch (e) { }
     }

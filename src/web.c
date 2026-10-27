@@ -1015,6 +1015,44 @@ static esp_err_t h_api_run(httpd_req_t *req)
     return reply_ok_err(req, &r, NULL);
 }
 
+/*
+ * POST /api/cmd c=<WORD>: кнопки дозатора на главной странице. Слово
+ * проходит белый список и уходит в прибор как есть (консоль отвечает
+ * OK/ERR - без паролей, действия мгновенные).
+ */
+static esp_err_t h_api_cmd(httpd_req_t *req)
+{
+    char body[64];
+    char word[12];
+    int len = httpd_req_recv(req, body, sizeof(body) - 1);
+    ske_req_t r;
+    if (len <= 0)
+    {
+        httpd_resp_set_status(req, "400 Bad Request");
+        httpd_resp_send(req, NULL, 0);
+        return ESP_FAIL;
+    }
+    body[len] = 0;
+    if (!field(body, "c", word, sizeof(word)))
+    {
+        httpd_resp_set_status(req, "400 Bad Request");
+        httpd_resp_send(req, "bad cmd", 7);
+        return ESP_FAIL;
+    }
+    if (strcmp(word, "BSTART") && strcmp(word, "BPAUSE") &&
+        strcmp(word, "BSTOP") && strcmp(word, "TRESET"))
+    {
+        httpd_resp_set_status(req, "400 Bad Request");
+        httpd_resp_send(req, "bad cmd", 7);
+        return ESP_FAIL;
+    }
+    memset(&r, 0, sizeof(r));
+    r.cmd = SKEQ_CMD;
+    strlcpy(r.text, word, sizeof(r.text));
+    ske02_request(&r, 15000);
+    return reply_ok_err(req, &r, NULL);
+}
+
 static esp_err_t h_api_refresh(httpd_req_t *req)
 {
     ske_req_t r;
@@ -1540,6 +1578,9 @@ void web_start(void)
     httpd_register_uri_handler(sServer, &u);
     u = (httpd_uri_t){.uri = "/api/run", .method = HTTP_POST,
                       .handler = h_api_run};
+    httpd_register_uri_handler(sServer, &u);
+    u = (httpd_uri_t){.uri = "/api/cmd", .method = HTTP_POST,
+                      .handler = h_api_cmd};
     httpd_register_uri_handler(sServer, &u);
     u = (httpd_uri_t){.uri = "/api/refresh", .method = HTTP_POST,
                       .handler = h_api_refresh};

@@ -1120,6 +1120,21 @@ static void exec_request(ske_req_t *req)
             sLastOk = xTaskGetTickCount();
         break;
 
+    case SKEQ_CMD:
+        /* консольное слово как есть (кнопки дозатора BSTART/BPAUSE/
+         * BSTOP/TRESET; белый список проверяет web-слой) */
+        snprintf(cmd, sizeof(cmd), "%s", req->text);
+        if (!txt_command(cmd, reply_cb, &rc_, SKE_CMD_TIMEOUT))
+        {
+            req->result = SKE_ERR_TRANSPORT;
+            break;
+        }
+        req->result = rc_.seen_ok ? BS_OK
+                                  : (rc_.status ? rc_.status : BS_BAD_TYPE);
+        if (req->result == BS_OK)
+            sLastOk = xTaskGetTickCount();
+        break;
+
     case SKEQ_UNLOCK:
         if (!req->text[0])
         {

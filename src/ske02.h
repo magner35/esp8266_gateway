@@ -17,6 +17,7 @@ typedef enum
 {
     SKEQ_SET,      /* s <id> <packed value> */
     SKEQ_RUN,      /* x <id> */
+    SKEQ_CMD,      /* консольное слово как есть (кнопки дозатора) */
     SKEQ_UNLOCK,   /* p <pass> */
     SKEQ_REFRESH,  /* full 'l' listing (the "Обновить" button) */
     SKEQ_RESCAN,   /* wipe the cache + full rediscovery */
