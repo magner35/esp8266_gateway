@@ -194,6 +194,19 @@
         </div>
     </div>
 
+    <!-- Обновление с сервера производителя -->
+    <div class="box">
+        <h2 style="margin:0 0 6px">Обновление с сервера производителя</h2>
+        <div class="row">
+            <input class="srv" id="updUrl" style="flex:1"
+                   placeholder="http://dl.example.com/ske02/ (пусто = демо)">
+            <button onclick="updSaveUrl(this)">Сохранить</button>
+            <button onclick="updCheck(this)">Проверить обновления</button>
+        </div>
+        <div id="updList" style="margin-top:10px"></div>
+        <span class="msg" id="updMsg"></span>
+    </div>
+
     <!-- OTA прошивки самого шлюза -->
     <div class="box">
         <h2 style="margin:0 0 6px">Обновление ПО шлюза</h2>
@@ -201,7 +214,7 @@
                title="Пакет прошивки шлюза (.skpak): tools/ota_pack.py pack firmware.bin esp out.skpak"
                onchange="otaUploadAuto(this)">
         <div class="row" style="margin-top:10px">
-            <button id="otaBtn" class="warn" onclick="otaFlash(this)" disabled>Прошить шлюз</button>
+            <button id="otaBtn" class="warn" onclick="otaFlash(this)" disabled>Обновить</button>
             <span class="msg" id="otaMsg"></span>
         </div>
     </div>
@@ -210,11 +223,7 @@
     <div class="box">
         <h2 style="margin:0 0 6px">Обновление ПО прибора</h2>
         <input class="srv" id="avrFile" type="file" accept=".skpak" title="Пакет прошивки прибора (.skpak): tools/ota_pack.py pack image.hex avr out.skpak" onchange="avrUploadAuto(this)">
-        <div class="row" style="margin-top:6px">
-            <label style="font-size:12px;opacity:.7">временно, без пакета:</label>
-            <input class="srv" id="avrHexFile" type="file" accept=".hex"
-                   style="font-size:12px" onchange="avrUploadHex(this)">
-        </div>
+
         <div class="row" style="margin-top:10px">
             <button class="warn" id="avrBtn" onclick="avrFlash(this)" disabled>Обновить</button>
             <span class="msg" id="avrMsg"></span>

@@ -920,23 +920,29 @@ button,input,select,textarea{font:inherit;color:inherit}
         </div>
     </div>
     <div class="box">
+        <h2 style="margin:0 0 6px">Обновление с сервера производителя</h2>
+        <div class="row">
+            <input class="srv" id="updUrl" style="flex:1"
+                   placeholder="http://dl.example.com/ske02/ (пусто = демо)">
+            <button onclick="updSaveUrl(this)">Сохранить</button>
+            <button onclick="updCheck(this)">Проверить обновления</button>
+        </div>
+        <div id="updList" style="margin-top:10px"></div>
+        <span class="msg" id="updMsg"></span>
+    </div>
+    <div class="box">
         <h2 style="margin:0 0 6px">Обновление ПО шлюза</h2>
         <input class="srv" id="otaFile" type="file" accept=".skpak"
                title="Пакет прошивки шлюза (.skpak): tools/ota_pack.py pack firmware.bin esp out.skpak"
                onchange="otaUploadAuto(this)">
         <div class="row" style="margin-top:10px">
-            <button id="otaBtn" class="warn" onclick="otaFlash(this)" disabled>Прошить шлюз</button>
+            <button id="otaBtn" class="warn" onclick="otaFlash(this)" disabled>Обновить</button>
             <span class="msg" id="otaMsg"></span>
         </div>
     </div>
     <div class="box">
         <h2 style="margin:0 0 6px">Обновление ПО прибора</h2>
         <input class="srv" id="avrFile" type="file" accept=".skpak" title="Пакет прошивки прибора (.skpak): tools/ota_pack.py pack image.hex avr out.skpak" onchange="avrUploadAuto(this)">
-        <div class="row" style="margin-top:6px">
-            <label style="font-size:12px;opacity:.7">временно, без пакета:</label>
-            <input class="srv" id="avrHexFile" type="file" accept=".hex"
-                   style="font-size:12px" onchange="avrUploadHex(this)">
-        </div>
         <div class="row" style="margin-top:10px">
             <button class="warn" id="avrBtn" onclick="avrFlash(this)" disabled>Обновить</button>
             <span class="msg" id="avrMsg"></span>
@@ -2583,6 +2589,75 @@ wSync();
     const inSvc = () => location.hash === '#service';
     if (inSvc()) ntpLoad();
     window.addEventListener('hashchange', () => { if (inSvc()) ntpLoad() });
+    function updInit() {
+      fetch('/api/upd').then(r => r.json()).then(s => {
+        document.getElementById('updUrl').value = s.url || '';
+      }).catch(() => { });
+    }
+    if (document.getElementById('updUrl')) updInit();
+    async function updSaveUrl(btn) {
+      const m = document.getElementById('updMsg');
+      const url = document.getElementById('updUrl').value.trim();
+      try {
+        const r = await (await fetch('/api/upd/url', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: 'url=' + encodeURIComponent(url)
+        })).json();
+        m.className = 'msg' + (r.ok ? '' : ' err');
+        m.textContent = r.ok ? (url ? 'адрес сохранён' : 'демо-режим (адрес пуст)') : 'не сохранилось';
+      } catch (e) { m.className = 'msg err'; m.textContent = 'нет ответа' }
+    }
+    async function updCheck(btn) {
+      const m = document.getElementById('updMsg');
+      const list = document.getElementById('updList');
+      m.className = 'msg';
+      m.textContent = 'проверяю...';
+      list.innerHTML = '';
+      try {
+        const r = await (await fetch('/api/upd/check')).json();
+        if (r.error) { m.className = 'msg err'; m.textContent = 'ошибка: ' + r.error; return }
+        m.textContent = r.demo ? 'ДЕМО: адрес сервера не задан' : 'сервер: ' + (r.items ? r.items.length : 0) + ' версий';
+        if (!r.items) return;
+        list.innerHTML = r.items.map((it, i) =>
+          '<div class="row" style="margin:4px 0;align-items:center">' +
+          '<span style="min-width:52px;font-weight:600">' + (it.type === 'gw' ? 'шлюз' : 'прибор') + '</span>' +
+          '<span style="min-width:86px">v' + it.ver + '</span>' +
+          '<span style="min-width:84px;opacity:.7">' + it.date + '</span>' +
+          '<span style="opacity:.7">' + Math.round(it.size / 1024) + ' КБ</span>' +
+          '<span style="flex:1;opacity:.8">' + (it.note || '') + '</span>' +
+          '<button data-f="' + it.file + '" data-t="' + it.type + '" onclick="updDl(this.dataset.f,this.dataset.t)">Скачать</button>' +
+          '</div>').join('');
+      } catch (e) { m.className = 'msg err'; m.textContent = 'нет ответа от шлюза' }
+    }
+    async function updDl(file, type) {
+      const m = document.getElementById('updMsg');
+      m.className = 'msg';
+      m.textContent = 'скачивание...';
+      try {
+        const r = await (await fetch('/api/upd/dl', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: 'file=' + encodeURIComponent(file) + '&type=' + type
+        })).json();
+        if (!r.ok) { m.className = 'msg err'; m.textContent = 'ошибка: ' + (r.error || '?'); return }
+      } catch (e) { m.className = 'msg err'; m.textContent = 'нет ответа'; return }
+      for (;;) {
+        await new Promise(r => setTimeout(r, 800));
+        let s;
+        try { s = await (await fetch('/api/upd/dl')).json() } catch (e) { continue }
+        if (!s.running) {
+          if (s.ok) {
+            m.textContent = 'скачано ' + Math.round(s.bytes / 1024) + ' КБ, подпись ОК — нажми «' +
+              (type === 'gw' ? 'Прошить шлюз' : 'Обновить') + '» выше';
+            if (type === 'gw') document.getElementById('otaBtn').disabled = false;
+            else document.getElementById('avrBtn').disabled = false;
+          } else { m.className = 'msg err'; m.textContent = 'ошибка: ' + (s.error || '?') }
+          return;
+        }
+        m.textContent = 'скачивание... ' + Math.round(s.bytes / 1024) + ' КБ';
+      }
+    }
     function avrUploadAuto(inp) {
       const f = inp.files[0];
       const m = document.getElementById('avrMsg');
@@ -2614,24 +2689,42 @@ wSync();
       try {
         const pb = document.getElementById('avrPb');
         pb.style.width = '0';
-        let shown = 0;
-        const step = r => {
-          let p = 0;
-          if (r.total > 0 && r.done > 0) {
-            if (r.phase === 2) p = r.done / r.total * 90;
-            else if (r.phase === 3) p = 90 + r.done / r.total * 40;
+        let shown = 0, done = false;
+        const t0 = Date.now();
+        const move = p => {
+          if (!done && p > shown) {
+            shown = p;
+            pb.style.width = Math.min(100, Math.round(shown)) + '%';
           }
-          if (r.phase === 3 && r.done === 0) p = 90;
-          if (p > shown) shown = p;
-          pb.style.width = Math.min(100, Math.round(shown)) + '%';
         };
-        await fetch('/api/avr/flash', { method: 'POST' });
+        const byClock = () => {
+          const t = (Date.now() - t0) / 1000;
+          if (t < 3) move(t / 3 * 6);                     
+          else if (t < 8) move(6 + (t - 3) / 5 * 84);     
+          else if (t < 18) move(90 + (t - 8) / 10 * 7);   
+          else move(97);                                   
+        };
+        const step = r => {
+          if (r.total > 0 && r.done > 0) {
+            if (r.phase === 2) move(r.done / r.total * 90);
+            else if (r.phase === 3) move(90 + r.done / r.total * 7);
+          }
+          if (r.phase === 3) move(90);
+        };
+        const tick = setInterval(byClock, 300);
+        try {
+          await fetch('/api/avr/flash', { method: 'POST' });
+        } catch (e) { }
         for (;;) {
-          await new Promise(r => setTimeout(r, 1000));
+          await new Promise(r => setTimeout(r, 700));
           let r;
-          try { r = await (await fetch('/api/avr/flash')).json() } catch (e) { break }
+          try {
+            r = await (await fetch('/api/avr/flash', { cache: 'no-store' })).json();
+          } catch (e) { continue; } 
           step(r);
           if (!r.running) {
+            done = true;
+            clearInterval(tick);
             if (r.ok) { m.textContent = 'готово: ' + r.kb + ' КБ, проверка ок'; pb.style.width = '100%' }
             else { m.className = 'msg err'; m.textContent = 'ошибка прошивки' }
             break;
@@ -2639,28 +2732,6 @@ wSync();
         }
       } catch (e) { m.className = 'msg err'; m.textContent = 'нет ответа от шлюза' }
       btn.disabled = false;
-    }
-    function avrUploadHex(inp) {
-      const f = inp.files[0];
-      const m = document.getElementById('avrMsg');
-      if (!f) return;
-      m.className = 'msg';
-      m.textContent = 'hex… 0%';
-      const xhr = new XMLHttpRequest();
-      xhr.open('POST', '/api/avr/uploadhex');
-      xhr.upload.onprogress = e => {
-        if (e.lengthComputable)
-          m.textContent = 'hex… ' + Math.round(e.loaded / e.total * 100) + '%';
-      };
-      xhr.onload = () => {
-        try {
-          const r = JSON.parse(xhr.responseText);
-          if (r.ok) { m.textContent = ''; document.getElementById('avrBtn').disabled = false }
-          else { m.className = 'msg err'; m.textContent = 'ошибка: ' + (r.error || '?') }
-        } catch (e) { m.className = 'msg err'; m.textContent = 'ошибка ответа' }
-      };
-      xhr.onerror = () => { m.className = 'msg err'; m.textContent = 'нет ответа от шлюза' };
-      xhr.send(f);
     }
     function otaUploadAuto(inp) {
       const f = inp.files[0];

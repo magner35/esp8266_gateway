@@ -29,6 +29,7 @@
 #include "esp_task_wdt.h"
 #include "hex_store.h"
 #include "ota_sec.h"
+#include "upd.h"
 #include "uart_avr.h"
 #include "urclock.h"
 #include "tree_store.h"
@@ -1184,56 +1185,6 @@ bad:
     }
 }
 
-/* POST /api/avr/uploadhex: ВРЕМЕННЫЙ обход .skpak - сырой intel hex
- * прямо в раздел (кнопка восстановления, без подписи/шифрования) */
-static esp_err_t h_api_avr_uploadhex(httpd_req_t *req)
-{
-    char buf[1024];
-    int n;
-    uint32_t total = 0;
-
-    httpd_resp_set_type(req, "application/json");
-    if (!hex_store_begin(req->content_len))
-    {
-        httpd_resp_set_status(req, "400 Bad Request");
-        httpd_resp_send(req, "{\"ok\":false,\"error\":\"раздел недоступен или файл велик\"}", 0);
-        return ESP_OK;
-    }
-    while ((n = httpd_req_recv(req, buf, sizeof(buf))) > 0)
-    {
-        if (total == 0 && buf[0] != ':')
-        {
-            httpd_resp_set_status(req, "400 Bad Request");
-            httpd_resp_send(req, "{\"ok\":false,\"error\":\"не intel hex\"}", 0);
-            return ESP_OK;
-        }
-        if (total == 0)
-            DBG("web: raw hex starts '%.16s'\n", buf);
-        if (!hex_store_chunk(buf, (uint32_t)n))
-        {
-            httpd_resp_set_status(req, "500 Internal Server Error");
-            httpd_resp_send(req, "{\"ok\":false,\"error\":\"запись раздела\"}", 0);
-            return ESP_OK;
-        }
-        total += (uint32_t)n;
-    }
-    if (total != req->content_len)
-    {
-        /* обрыв тела (плохой WiFi): в разделе недописанный файл */
-        hex_store_begin(0);
-        httpd_resp_set_status(req, "400 Bad Request");
-        httpd_resp_send(req, "{\"ok\":false,\"error\":\"обрыв передачи файла\"}", 0);
-        return ESP_OK;
-    }
-    DBG("web: avr RAW hex uploaded (no .skpak), %u bytes\n", (unsigned)total);
-    {
-        char out[96];
-        snprintf(out, sizeof(out), "{\"ok\":true,\"bytes\":%u}", (unsigned)total);
-        httpd_resp_send(req, out, strlen(out));
-    }
-    return ESP_OK;
-}
-
 /* цикл прошивки - в ОТДЕЛЬНОЙ задаче: конвейер (страницы/verify/
  * парсер hex + esp_partition) не влезал в стек httpd уверенно, а
  * переполнение стека на ESP = немой wdt reset */
@@ -1486,6 +1437,105 @@ static esp_err_t h_api_avr_status(httpd_req_t *req)
     return ESP_OK;
 }
 
+/* пакет прибран в неактивный слот ВНЕ веб-загрузки (upd.c: скачивание
+ * с сервера производителя) - активируем кнопку "Прошить шлюз" */
+void web_ota_staged(uint32_t bytes)
+{
+    sOtaPart = esp_ota_get_next_update_partition(NULL);
+    sOtaBytes = bytes;
+    sOtaReady = true;
+}
+
+/* ---- Обновление с сервера производителя (upd.c) ------------------- */
+
+/* GET /api/upd: адрес сервера + демо-флаг */
+static esp_err_t h_api_upd_status(httpd_req_t *req)
+{
+    char out[160];
+    httpd_resp_set_type(req, "application/json");
+    snprintf(out, sizeof(out), "{\"url\":\"%s\",\"demo\":%s}",
+             upd_url(), upd_url()[0] ? "false" : "true");
+    httpd_resp_send(req, out, strlen(out));
+    return ESP_OK;
+}
+
+/* POST /api/upd/url: сохранить адрес сервера обновлений */
+static esp_err_t h_api_upd_url(httpd_req_t *req)
+{
+    char body[160];
+    char url[96];
+    char out[96];
+    int len = httpd_req_recv(req, body, sizeof(body) - 1);
+    httpd_resp_set_type(req, "application/json");
+    if (len <= 0 || !field(body, "url", url, sizeof(url)) ||
+        !upd_set_url(url))
+    {
+        httpd_resp_set_status(req, "400 Bad Request");
+        httpd_resp_send(req, "{\"ok\":false}", 0);
+        return ESP_OK;
+    }
+    snprintf(out, sizeof(out), "{\"ok\":true,\"demo\":%s}",
+             url[0] ? "false" : "true");
+    httpd_resp_send(req, out, strlen(out));
+    return ESP_OK;
+}
+
+/* GET /api/upd/check: список версий (демо при пустом адресе) */
+static esp_err_t h_api_upd_check(httpd_req_t *req)
+{
+    static char json[2048]; /* одна проверка в момент */
+    httpd_resp_set_type(req, "application/json");
+    upd_check(json, sizeof(json));
+    httpd_resp_send(req, json, strlen(json));
+    return ESP_OK;
+}
+
+/* POST /api/upd/dl file=..&type=gw|meter: старт скачивания;
+ * GET - статус задачи */
+static esp_err_t h_api_upd_dl(httpd_req_t *req)
+{
+    char out[256];
+    httpd_resp_set_type(req, "application/json");
+    if (req->method == HTTP_GET)
+    {
+        const upd_state_t *s = upd_state();
+        snprintf(out, sizeof(out),
+                 "{\"running\":%s,\"ok\":%s,\"bytes\":%u,"
+                 "\"file\":\"%s\",\"error\":\"%s\"}",
+                 s->running ? "true" : "false", s->ok ? "true" : "false",
+                 (unsigned)s->bytes, s->file,
+                 s->running ? "" : s->err);
+        httpd_resp_send(req, out, strlen(out));
+        return ESP_OK;
+    }
+    {
+        char body[128];
+        char file[48], type[8];
+        int len = httpd_req_recv(req, body, sizeof(body) - 1);
+        if (len <= 0 || !field(body, "file", file, sizeof(file)) ||
+            !field(body, "type", type, sizeof(type)))
+        {
+            httpd_resp_set_status(req, "400 Bad Request");
+            httpd_resp_send(req, "{\"ok\":false}", 0);
+            return ESP_OK;
+        }
+        if (!upd_url()[0])
+        {
+            httpd_resp_set_status(req, "400 Bad Request");
+            httpd_resp_send(req, "{\"ok\":false,\"error\":\"демо: адрес сервера не задан\"}", 0);
+            return ESP_OK;
+        }
+        if (!upd_download_start(file, type))
+        {
+            httpd_resp_set_status(req, "409 Conflict");
+            httpd_resp_send(req, "{\"ok\":false,\"error\":\"уже идёт или имя файла\"}", 0);
+            return ESP_OK;
+        }
+        httpd_resp_send(req, "{\"ok\":true}", 8);
+    }
+    return ESP_OK;
+}
+
 /* ---- NTP: конфиг + статус синхронизации -------------------------- */
 
 static esp_err_t h_api_ntp_get(httpd_req_t *req)
@@ -1685,6 +1735,7 @@ void web_ota_enable(bool on)
 void web_start(void)
 {
     httpd_config_t cfg = HTTPD_DEFAULT_CONFIG();
+    upd_init(); /* адрес сервера обновлений из NVS (может быть пуст) */
     if (sServer || !sHttpdCfg)
         return;   /* уже поднят или выключен фичей из дерева прибора */
     cfg.max_uri_handlers = 36;
@@ -1786,9 +1837,6 @@ void web_start(void)
     u = (httpd_uri_t){.uri = "/api/avr/upload", .method = HTTP_POST,
                       .handler = h_api_avr_upload};
     httpd_register_uri_handler(sServer, &u);
-    u = (httpd_uri_t){.uri = "/api/avr/uploadhex", .method = HTTP_POST,
-                      .handler = h_api_avr_uploadhex};
-    httpd_register_uri_handler(sServer, &u);
     u = (httpd_uri_t){.uri = "/api/avr/flash", .method = HTTP_POST,
                       .handler = h_api_avr_flash};
     httpd_register_uri_handler(sServer, &u);
@@ -1803,6 +1851,21 @@ void web_start(void)
     httpd_register_uri_handler(sServer, &u);
     u = (httpd_uri_t){.uri = "/api/ota/flash", .method = HTTP_POST,
                       .handler = h_api_ota_flash};
+    httpd_register_uri_handler(sServer, &u);
+    u = (httpd_uri_t){.uri = "/api/upd", .method = HTTP_GET,
+                      .handler = h_api_upd_status};
+    httpd_register_uri_handler(sServer, &u);
+    u = (httpd_uri_t){.uri = "/api/upd/url", .method = HTTP_POST,
+                      .handler = h_api_upd_url};
+    httpd_register_uri_handler(sServer, &u);
+    u = (httpd_uri_t){.uri = "/api/upd/check", .method = HTTP_GET,
+                      .handler = h_api_upd_check};
+    httpd_register_uri_handler(sServer, &u);
+    u = (httpd_uri_t){.uri = "/api/upd/dl", .method = HTTP_POST,
+                      .handler = h_api_upd_dl};
+    httpd_register_uri_handler(sServer, &u);
+    u = (httpd_uri_t){.uri = "/api/upd/dl", .method = HTTP_GET,
+                      .handler = h_api_upd_dl};
     httpd_register_uri_handler(sServer, &u);
     u = (httpd_uri_t){.uri = "/api/ota", .method = HTTP_GET,
                       .handler = h_api_ota_status};
