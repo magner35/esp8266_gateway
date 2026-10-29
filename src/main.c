@@ -5,6 +5,11 @@
  */
 #include <stdint.h>
 
+/* Версия шлюза: дата+время сборки; espcons.c печатает в консоли
+ * USBESP-режима (маркер SKEGWv1: ищут также инструменты пакета) */
+const char g_gw_version[44] __attribute__((section(".rodata_desc"))) =
+    "SKEGWv1:" __DATE__ " " __TIME__;
+
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 

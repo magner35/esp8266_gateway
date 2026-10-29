@@ -12,6 +12,7 @@
  * the command queue; the UART is touched from this task only.
  */
 #include "ske02.h"
+#include "espcons.h"
 #include "ntp.h"
 #include "web.h"
 #include "mb_pass.h"
@@ -1293,6 +1294,14 @@ static void meter_task(void *arg)
             continue;
         }
 
+        /* USBESP: ATmega отдала USB-UART нам (PB1->GPIO14 LOW) -
+         * работаем консолью шлюза, обмен с прибором стоит до END */
+        if (espcons_check_enter())
+        {
+            espcons_poll();
+            continue;
+        }
+
         switch (sState)
         {
         case ST_WAKE:
@@ -1507,6 +1516,7 @@ void ske02_start(void)
     sReqMutex = xSemaphoreCreateMutex();
     sReqDone = xSemaphoreCreateBinary();
     sQueue = xQueueCreate(2, sizeof(ske_req_t *));
+    espcons_init(); /* GPIO15 (req) / GPIO12 (ack) для USBESP */
     xTaskCreate(meter_task, "meter", 3584, NULL, 5, NULL);
 }
 
