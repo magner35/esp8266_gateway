@@ -82,98 +82,36 @@
     if (inSvc()) ntpLoad();
     window.addEventListener('hashchange', () => { if (inSvc()) ntpLoad() });
     /* ---- обновление с сервера производителя (upd.c) ---- */
-    function updInit() {
-      fetch('/api/upd').then(r => r.json()).then(s => {
-        document.getElementById('updUrl').value = s.url || '';
-      }).catch(() => { });
-    }
-    if (document.getElementById('updUrl')) updInit();
-
-    async function updSaveUrl(btn) {
-      const m = document.getElementById('updMsg');
-      const url = document.getElementById('updUrl').value.trim();
-      try {
-        const r = await (await fetch('/api/upd/url', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-          body: 'url=' + encodeURIComponent(url)
-        })).json();
-        m.className = 'msg' + (r.ok ? '' : ' err');
-        m.textContent = r.ok ? (url ? 'адрес сохранён' : 'демо-режим (адрес пуст)') : 'не сохранилось';
-      } catch (e) { m.className = 'msg err'; m.textContent = 'нет ответа' }
-    }
-
-    async function updCheck(btn) {
-      const m = document.getElementById('updMsg');
-      const list = document.getElementById('updList');
-      m.className = 'msg';
-      m.textContent = 'проверяю...';
-      list.innerHTML = '';
-      try {
-        const r = await (await fetch('/api/upd/check')).json();
-        if (r.error) { m.className = 'msg err'; m.textContent = 'ошибка: ' + r.error; return }
-        m.textContent = r.demo ? 'ДЕМО: адрес сервера не задан' : 'сервер: ' + (r.items ? r.items.length : 0) + ' версий';
-        if (!r.items) return;
-        list.innerHTML = r.items.map((it, i) =>
-          '<div class="row" style="margin:4px 0;align-items:center">' +
-          '<span style="min-width:52px;font-weight:600">' + (it.type === 'gw' ? 'шлюз' : 'прибор') + '</span>' +
-          '<span style="min-width:86px">v' + it.ver + '</span>' +
-          '<span style="min-width:84px;opacity:.7">' + it.date + '</span>' +
-          '<span style="opacity:.7">' + Math.round(it.size / 1024) + ' КБ</span>' +
-          '<span style="flex:1;opacity:.8">' + (it.note || '') + '</span>' +
-          '<button data-f="' + it.file + '" data-t="' + it.type + '" onclick="updDl(this.dataset.f,this.dataset.t)">Скачать</button>' +
-          '</div>').join('');
-      } catch (e) { m.className = 'msg err'; m.textContent = 'нет ответа от шлюза' }
-    }
-
-    async function updDl(file, type) {
-      const m = document.getElementById('updMsg');
-      m.className = 'msg';
-      m.textContent = 'скачивание...';
-      try {
-        const r = await (await fetch('/api/upd/dl', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-          body: 'file=' + encodeURIComponent(file) + '&type=' + type
-        })).json();
-        if (!r.ok) { m.className = 'msg err'; m.textContent = 'ошибка: ' + (r.error || '?'); return }
-      } catch (e) { m.className = 'msg err'; m.textContent = 'нет ответа'; return }
-      for (;;) {
-        await new Promise(r => setTimeout(r, 800));
-        let s;
-        try { s = await (await fetch('/api/upd/dl')).json() } catch (e) { continue }
-        if (!s.running) {
-          if (s.ok) {
-            m.textContent = 'скачано ' + Math.round(s.bytes / 1024) + ' КБ, подпись ОК — нажми «' +
-              (type === 'gw' ? 'Прошить шлюз' : 'Обновить') + '» выше';
-            if (type === 'gw') document.getElementById('otaBtn').disabled = false;
-            else document.getElementById('avrBtn').disabled = false;
-          } else { m.className = 'msg err'; m.textContent = 'ошибка: ' + (s.error || '?') }
-          return;
-        }
-        m.textContent = 'скачивание... ' + Math.round(s.bytes / 1024) + ' КБ';
-      }
-    }
-
-    /* ---- прошивка прибора (urboot) ---- */
-    /* загрузка стартует сразу по выбору файла; прогресс - в строке
-     * над кнопкой (XHR: fetch прогресс отправки не показывает) */
-    function avrUploadAuto(inp) {
+    /* один вход обновления: пакет по имени файла
+     *   system_full*.skpak -> /api/sys/upload (шлюз+прибор)
+     *   gateway*.skpak     -> /api/ota/upload (шлюз)
+     *   meter или ske02 .skpak -> /api/avr/upload (прибор) */
+    function fwUploadAuto(inp) {
       const f = inp.files[0];
-      const m = document.getElementById('avrMsg');
+      const m = document.getElementById('fwMsg');
       if (!f) return;
+      const nm = f.name.toLowerCase();
+      let url = '/api/avr/upload';       /* meter/ske02 - по умолчанию */
+      if (nm.indexOf('system_full') === 0) url = '/api/sys/upload';
+      else if (nm.indexOf('gateway') === 0) url = '/api/ota/upload';
       m.className = 'msg';
-      m.textContent = 'подготовка… 0%';
+      m.textContent = 'загрузка… 0%';
       const xhr = new XMLHttpRequest();
-      xhr.open('POST', '/api/avr/upload');
+      xhr.open('POST', url);
       xhr.upload.onprogress = e => {
         if (e.lengthComputable)
-          m.textContent = 'подготовка… ' + Math.round(e.loaded / e.total * 100) + '%';
+          m.textContent = 'загрузка… ' + Math.round(e.loaded / e.total * 100) + '%';
       };
       xhr.onload = () => {
         try {
           const r = JSON.parse(xhr.responseText);
-          if (r.ok) { m.textContent = ''; document.getElementById('avrBtn').disabled = false }
+          if (r.ok) {
+            m.textContent = '';
+            document.getElementById('otaBtn').disabled = !(
+              url === '/api/sys/upload' || url === '/api/ota/upload');
+            document.getElementById('avrBtn').disabled = !(
+              url === '/api/sys/upload' || url === '/api/avr/upload');
+          }
           else { m.className = 'msg err'; m.textContent = 'ошибка: ' + (r.error || '?') }
         } catch (e) { m.className = 'msg err'; m.textContent = 'ошибка ответа' }
       };
@@ -182,7 +120,7 @@
     }
 
     async function avrFlash(btn) {
-      const m = document.getElementById('avrMsg');
+      const m = document.getElementById('fwMsg');
       if (!confirm('Обновить ПО? Обмен данными остановится на минуту.')) return;
       btn.disabled = true;
       m.className = 'msg';
@@ -242,31 +180,8 @@
     }
 
     /* ---- OTA прошивки шлюза ---- */
-    function otaUploadAuto(inp) {
-      const f = inp.files[0];
-      const m = document.getElementById('otaMsg');
-      if (!f) return;
-      m.className = 'msg';
-      m.textContent = 'загрузка… 0%';
-      const xhr = new XMLHttpRequest();
-      xhr.open('POST', '/api/ota/upload');
-      xhr.upload.onprogress = e => {
-        if (e.lengthComputable)
-          m.textContent = 'загрузка… ' + Math.round(e.loaded / e.total * 100) + '%';
-      };
-      xhr.onload = () => {
-        try {
-          const r = JSON.parse(xhr.responseText);
-          if (r.ok) { m.textContent = ''; document.getElementById('otaBtn').disabled = false }
-          else { m.className = 'msg err'; m.textContent = 'ошибка: ' + (r.error || '?') }
-        } catch (e) { m.className = 'msg err'; m.textContent = 'ошибка ответа' }
-      };
-      xhr.onerror = () => { m.className = 'msg err'; m.textContent = 'нет ответа от шлюза' };
-      xhr.send(f);
-    }
-
     async function otaFlash(btn) {
-      const m = document.getElementById('otaMsg');
+      const m = document.getElementById('fwMsg');
       if (!confirm('Прошить шлюз? Он перезагрузится, страница подождёт его возвращения.')) return;
       btn.disabled = true;
       m.className = 'msg';

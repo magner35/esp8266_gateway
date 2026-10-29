@@ -1185,6 +1185,168 @@ bad:
     }
 }
 
+/* POST /api/sys/upload: тело = ЕДИНЫЙ пакет .skpak (шлюз+прибор,
+ * type=3 от pack-all). Однопостовой путь (как /api/ota/upload):
+ * расшифровка in-place, на лету разрез потока: [4Б esp_len][esp bin]
+ * -> неактивный OTA-слот, остаток (hex) -> раздел avrhex. Подпись
+ * Ed25519 - в конце над всем бандлом; провал = обе части не активны.
+ * Тот же URL работает и для curl:
+ *   curl --data-binary @dist/system_full.skpak http://<gw>/api/sys/upload */
+static esp_err_t h_api_sys_upload(httpd_req_t *req)
+{
+    char buf[1024];
+    ota_sec_t sec;
+    esp_ota_handle_t ota;
+    bool ota_open = false, hex_open = false;
+    uint32_t esp_len = 0, fed = 0, fed_esp = 0;
+    uint8_t lenb[4];
+    int rc = OTA_SEC_OK;
+    int n;
+    const esp_partition_t *part = NULL;
+
+    httpd_resp_set_type(req, "application/json");
+    /* первые OTA_SEC_HDR байт = заголовок пакета (может прийти куском) */
+    n = httpd_req_recv(req, buf, sizeof(buf));
+    if (n <= OTA_SEC_HDR)
+    {
+        httpd_resp_set_status(req, "400 Bad Request");
+        httpd_resp_send(req, "{\"ok\":false,\"error\":\"пакет меньше заголовка\"}", strlen("{\"ok\":false,\"error\":\"пакет меньше заголовка\"}"));
+        return ESP_OK;
+    }
+    part = esp_ota_get_next_update_partition(NULL);
+    /* лимит конвейера для БАНДЛА - не размер ota-слота (бандл в слот
+     * целиком не пишется: только его esp-часть): честный потолок
+     * esp(<=896К) + hex(<=448К) с запасом */
+    rc = ota_sec_begin(&sec, (const uint8_t *)buf, 2 * 1024 * 1024);
+    if (rc == OTA_SEC_OK && sec.type != OTA_SEC_BUNDLE)
+        rc = OTA_SEC_TYPE;
+    if (rc == OTA_SEC_OK && (sec.plain_len < 5 || sec.plain_len > 1100000u))
+        rc = OTA_SEC_LEN;
+    if (rc != OTA_SEC_OK)
+        goto bad;
+
+    /* поток: сначала расшифрованные 4Б длины ESP-части (они идут
+     * сразу после 152Б заголовка - первая порция их уже содержит) */
+    {
+        uint32_t take = (uint32_t)n - OTA_SEC_HDR;
+        if (ota_sec_feed(&sec, (uint8_t *)buf + OTA_SEC_HDR, take) != 0)
+        {
+            rc = OTA_SEC_HASH;
+            goto bad;
+        }
+        fed = take;
+        if (take < 4)
+        {
+            rc = OTA_SEC_LEN; /* кусок меньше поля длины - не бывает
+                                 при 1К буфере, но честно проверим */
+            goto bad;
+        }
+        memcpy(&esp_len, buf + OTA_SEC_HDR, 4);
+        if (esp_len == 0 || esp_len + 4 >= sec.plain_len)
+        {
+            rc = OTA_SEC_LEN;
+            goto bad;
+        }
+        if (esp_ota_begin(part, esp_len, &ota) != ESP_OK)
+        {
+            rc = OTA_SEC_LEN;
+            goto bad;
+        }
+        ota_open = true;
+        if (!hex_store_begin(sec.plain_len - 4 - esp_len))
+        {
+            rc = OTA_SEC_LEN;
+            goto bad;
+        }
+        hex_open = true;
+        /* остаток первой порции после 4Б длины: начало ESP-части */
+        {
+            uint32_t data_off = OTA_SEC_HDR + 4;
+            uint32_t dl = (uint32_t)n - data_off;
+            uint32_t to_esp = dl < esp_len ? dl : esp_len;
+            if (to_esp && esp_ota_write(ota, buf + data_off, to_esp) != ESP_OK)
+            {
+                rc = OTA_SEC_LEN;
+                goto bad;
+            }
+            fed_esp = to_esp;
+        }
+    }
+
+    while ((n = httpd_req_recv(req, buf, sizeof(buf))) > 0)
+    {
+        if (ota_sec_feed(&sec, (uint8_t *)buf, (uint32_t)n) != 0)
+        {
+            rc = OTA_SEC_HASH;
+            goto bad;
+        }
+        fed += (uint32_t)n;
+        esp_task_wdt_reset();
+        {
+            uint32_t pos = fed_esp;
+            uint32_t take = (uint32_t)n;
+            if (pos < esp_len)
+            {
+                uint32_t to_esp = esp_len - pos;
+                if (to_esp > take)
+                    to_esp = take;
+                if (esp_ota_write(ota, buf, to_esp) != ESP_OK)
+                {
+                    rc = OTA_SEC_LEN;
+                    goto bad;
+                }
+                fed_esp += to_esp;
+                take -= to_esp;
+                if (!take)
+                    continue;
+                memmove(buf, buf + to_esp, take);
+            }
+            if (!hex_store_chunk(buf, take))
+            {
+                rc = OTA_SEC_LEN;
+                goto bad;
+            }
+        }
+    }
+    rc = ota_sec_finish(&sec);
+    if (rc != 0)
+        goto bad;
+    if (ota_open && esp_ota_end(ota) != ESP_OK)
+    {
+        ota_open = false; /* handle поглощён */
+        rc = OTA_SEC_LEN;
+        goto bad_noend;
+    }
+    ota_open = false;
+    web_ota_staged(fed_esp);  /* кнопка "Прошить шлюз" */
+    DBG("web: sys .skpak ok: esp %u B + meter %u B",
+        (unsigned)fed_esp, (unsigned)(fed - 4 - fed_esp));
+    {
+        char out[96];
+        snprintf(out, sizeof(out),
+                 "{\"ok\":true,\"bytes\":%u,\"meter\":true}",
+                 (unsigned)fed);
+        httpd_resp_send(req, out, strlen(out));
+    }
+    return ESP_OK;
+
+bad:
+    if (ota_open)
+        esp_ota_end(ota);
+bad_noend:
+    if (hex_open)
+        hex_store_begin(0);
+    {
+        char out[96];
+        httpd_resp_set_status(req, "400 Bad Request");
+        snprintf(out, sizeof(out), "{\"ok\":false,\"error\":\"%s\"}",
+                 ota_sec_str(rc));
+        httpd_resp_send(req, out, strlen(out));
+        DBG("web: sys .skpak rejected: %s", ota_sec_str(rc));
+    }
+    return ESP_OK;
+}
+
 /* цикл прошивки - в ОТДЕЛЬНОЙ задаче: конвейер (страницы/verify/
  * парсер hex + esp_partition) не влезал в стек httpd уверенно, а
  * переполнение стека на ESP = немой wdt reset */
@@ -1848,6 +2010,9 @@ void web_start(void)
     httpd_register_uri_handler(sServer, &u);
     u = (httpd_uri_t){.uri = "/api/ota/upload", .method = HTTP_POST,
                       .handler = h_api_ota_upload};
+    httpd_register_uri_handler(sServer, &u);
+    u = (httpd_uri_t){.uri = "/api/sys/upload", .method = HTTP_POST,
+                      .handler = h_api_sys_upload};
     httpd_register_uri_handler(sServer, &u);
     u = (httpd_uri_t){.uri = "/api/ota/flash", .method = HTTP_POST,
                       .handler = h_api_ota_flash};

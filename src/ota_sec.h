@@ -18,6 +18,7 @@
 #define OTA_SEC_HDR 152
 #define OTA_SEC_ESP 1 /* образ ESP (firmware.bin) */
 #define OTA_SEC_AVR 2 /* hex прибора */
+#define OTA_SEC_BUNDLE 3 /* единый образ: [u32 esp_len][esp bin][avr hex] */
 
 enum
 {

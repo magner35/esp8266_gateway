@@ -36,7 +36,8 @@ int ota_sec_begin(ota_sec_t *s, const uint8_t *hdr, uint32_t max_plain)
     memset(s, 0, sizeof(*s));
     if (memcmp(hdr, kMagic, 8) != 0)
         return OTA_SEC_MAGIC;
-    if (hdr[8] != OTA_SEC_ESP && hdr[8] != OTA_SEC_AVR)
+    if (hdr[8] != OTA_SEC_ESP && hdr[8] != OTA_SEC_AVR &&
+        hdr[8] != OTA_SEC_BUNDLE)
         return OTA_SEC_TYPE;
     memcpy(&len, hdr + 12, 4); /* little-endian */
     if (len == 0 || len > max_plain)
