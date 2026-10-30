@@ -299,7 +299,17 @@ function replaySeq(seq, off) {
   });
 }
 
+/* опрос шлюза живёт только на #main: в меню слоты освобождаются */
+let mainVisible = true;
+window.addEventListener('hashchange', () => {
+  const h = location.hash.replace('#', '');
+  mainVisible = (h === '' || h === 'main');
+});
+{ const h = location.hash.replace('#', '');
+  mainVisible = (h === '' || h === 'main'); }
+
 async function pollLoop() {
+  if (!mainVisible) { setTimeout(pollLoop, 2000); return; }
   const t0 = Date.now();
   let ok = false;
   try {

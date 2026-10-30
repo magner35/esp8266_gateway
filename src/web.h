@@ -13,5 +13,6 @@ void web_ota_enable(bool on);
 
 /* образ прибран в неактивный OTA-слот вне веб-загрузки (upd.c) */
 void web_ota_staged(uint32_t bytes);
+bool web_ota_ready(void); /* отложен ли образ ESP (для UPDATE_GATEWAY) */
 
 #endif /* GW_WEB_H */

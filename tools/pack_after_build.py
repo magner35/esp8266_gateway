@@ -4,13 +4,14 @@
 Подключён в platformio.ini:
     extra_scripts = post:tools/pack_after_build.py
 
-После каждой удачной сборки шлюза обновляет dist/:
-  gateway.skpak      - образ ESP (только что собранный)
-  meter.skpak        - hex прибора, если ../Totalizer_FreeRTOS сборка есть
-  system_full.skpak  - ЕДИНЫЙ образ (esp + avr; ПРИНИМАЕТСЯ прошивкой
-                       с bundle-поддержкой - пока просто хранится)
+После каждой удачной сборки шлюза обновляет:
+  dist/system_full.skpak  - ЕДИНЫЙ образ (esp + avr) + versions.txt
+                            для сервера обновлений (консоль: DOWNLOAD)
+  dist/curl/gateway.skpak - отдельные пакеты для заливки через curl
+  dist/curl/meter.skpak     (веб-эндпоинты /api/ota/upload и
+                            /api/avr/upload), без versions.txt
 
-Молча пропускает meter-часть, если сборки прибора нет; если нет
+Молча пропускает упаковку, если сборки прибора нет; если нет
 ключей tools/keys/ - печатает подсказку и не ломает сборку.
 """
 import re
@@ -26,6 +27,7 @@ BUILD = ROOT / ".pio/build/esp8266_modern_rtos"
 METER = ROOT.parent / "Totalizer_FreeRTOS"
 PACK = ROOT / "tools/ota_pack.py"
 DIST = ROOT / "dist"
+CURL = ROOT / "dist/curl"
 
 
 def _run(args):
@@ -44,7 +46,17 @@ def _meter_version():
 
 
 def _gw_version():
-    """версия шлюза: дата сборки из маркера в образе (SKEGWv1:...)"""
+    """версия шлюза из src/version.h (GW_FWVERSION), единообразно
+    с прибором; fallback — дата из маркера в образе"""
+    ver_h = ROOT / "src/version.h"
+    try:
+        m = re.search(r'#define\s+GW_FWVERSION\s+"([^"]+)"',
+                      ver_h.read_text(encoding="utf-8", errors="replace"))
+        if m:
+            return m.group(1)
+    except OSError:
+        pass
+    # fallback: дата из маркера
     binpath = BUILD / "firmware.bin"
     try:
         data = binpath.read_bytes()
@@ -59,27 +71,15 @@ def _gw_version():
 
 def _write_versions():
     """versions.txt для локального тест-сервера (python -m http.server)"""
-    lines = []
-    gw = DIST / "gateway.skpak"
-    meter = DIST / "meter.skpak"
     bundle = DIST / "system_full.skpak"
-    gwver = _gw_version()
-    mver = _meter_version()
+    if not bundle.exists():
+        return
     from datetime import date
     today = date.today().isoformat()
-    if gw.exists():
-        lines.append(f"gw {gwver or 'dev'} {today} {gw.name} "
-                     f"{gw.stat().st_size} gateway firmware")
-    if meter.exists():
-        lines.append(f"meter {mver or 'dev'} {today} {meter.name} "
-                     f"{meter.stat().st_size} meter firmware")
-    if bundle.exists():
-        lines.append(f"bundle {mver or 'dev'} {today} {bundle.name} "
-                     f"{bundle.stat().st_size} unified gw+meter")
-    if lines:
-        (DIST / "versions.txt").write_text("\n".join(lines) + "\n",
-                                           encoding="utf-8")
-        print(f"pack: versions.txt ({len(lines)} entries)")
+    line = (f"bundle {_gw_version() or 'dev'}+{_meter_version() or 'dev'} "
+            f"{today} {bundle.name} {bundle.stat().st_size} gw+meter")
+    (DIST / "versions.txt").write_text(line + "\n", encoding="utf-8")
+    print("pack: versions.txt (bundle only)")
 
 
 def package(source, target, env):
@@ -90,21 +90,30 @@ def package(source, target, env):
     if not (ROOT / "tools/keys").exists():
         print("pack: no tools/keys - run 'python tools/ota_pack.py genkeys'")
         return
-    DIST.mkdir(exist_ok=True)
-    _run(["pack", str(binpath), "esp", str(DIST / "gateway.skpak"),
-          "--note", "gw"])
     mhex = METER / ".pio/build/ATmega128/firmware.hex"
-    if mhex.exists():
-        mver = _meter_version()
-        _run(["pack", str(mhex), "avr", str(DIST / "meter.skpak"),
-              "--note", "meter"])
-        args = ["pack-all", str(binpath), str(mhex),
-                str(DIST / "system_full.skpak")]
-        if mver:
-            args += ["--mver", mver]
-        _run(args)
-    else:
-        print("pack: no meter build, skip meter/system packages")
+    if not mhex.exists():
+        print("pack: no meter build, skip packing")
+        return
+    DIST.mkdir(exist_ok=True)
+    # отдельные пакеты больше не живут в корне dist - убрать застарелые
+    for stale in ("gateway.skpak", "meter.skpak"):
+        p = DIST / stale
+        if p.exists():
+            p.unlink()
+            print(f"pack: removed stale {stale}")
+    args = ["pack-all", str(binpath), str(mhex),
+            str(DIST / "system_full.skpak")]
+    mver = _meter_version()
+    if mver:
+        args += ["--mver", mver]
+    _run(args)
+    # отдельные пакеты для curl-заливки (без versions.txt)
+    CURL.mkdir(exist_ok=True)
+    _run(["pack", str(binpath), "esp", str(CURL / "gateway.skpak"),
+          "--note", "gw"])
+    _run(["pack", str(mhex), "avr", str(CURL / "meter.skpak"),
+          "--note", "meter"])
+    print("pack: dist/curl/ gateway.skpak + meter.skpak")
     _write_versions()
 
 

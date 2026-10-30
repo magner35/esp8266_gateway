@@ -8,6 +8,7 @@
  */
 
 void dbg_init(void);
+void dbg_rom_redirect(void); /* ets_printf -> UART1 (повторять после wifi-рестартов) */
 
 #ifdef __cplusplus
 #define dbg_va(...) __VA_ARGS__

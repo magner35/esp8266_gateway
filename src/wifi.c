@@ -142,6 +142,7 @@ static void start_portal(void)
     esp_wifi_set_protocol(WIFI_IF_AP,
                           WIFI_PROTOCOL_11B | WIFI_PROTOCOL_11G);
     esp_wifi_start();
+    dbg_rom_redirect(); /* wifi-драйвер мог вернуть свой ets-putc */
     esp_wifi_set_ps(WIFI_PS_NONE);   /* явно: PS + softAP = wdt */
     sPortalMode = true;
     dns_start(); /* captive-redirect: существует только в портале,
@@ -184,6 +185,7 @@ static void wifi_manager_task(void *arg)
                 strcpy((char *)sta.sta.password, net.pass);
                 esp_wifi_set_config(ESP_IF_WIFI_STA, &sta);
                 esp_wifi_start();
+                dbg_rom_redirect(); /* wifi-драйвер мог вернуть свой ets-putc */
                 DBG("wifi: joining \"%s\" (%u/%u)\n", net.ssid, i + 1, nets);
                 bits = xEventGroupWaitBits(sEvents, EVT_GOT_IP | EVT_LOST, pdTRUE,
                                            pdFALSE, pdMS_TO_TICKS(STA_TIMEOUT_MS));

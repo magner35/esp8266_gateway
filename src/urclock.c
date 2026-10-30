@@ -7,6 +7,7 @@
 #include "freertos/task.h"
 
 #include "avr_conf.h"
+#include "espcons.h"
 #include "hex_parser.h"
 #include "logger.h"
 #include "uart_avr.h"
@@ -445,6 +446,15 @@ static void page_cb(uint32_t addr, const uint8_t *page, void *user)
         return; /* проход-предподсчёт: колбэка нет */
     uint8_t buf[AVR_PAGE_SIZE];
     const uint8_t *p = page;
+
+    /* Ctrl+C из консоли шлюза: рвём сессию между страницами;
+     * hex остаётся в разделе, UPDATE_METER можно повторить */
+    if (espcons_abort_pending())
+    {
+        logW(TAG, "aborted by console (Ctrl+C), page 0x%X", addr);
+        c->errors++;
+        return;
+    }
 
     /* стр.0 под VBL-загрузчиком патчит хост (в обоих проходах одинаково) */
     if (addr == 0 && c->host_vbl_patch)

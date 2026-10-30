@@ -4,9 +4,10 @@
  * captive dns (portal mode only).
  */
 #include <stdint.h>
+#include "version.h"
 
-/* Версия шлюза: дата+время сборки; espcons.c печатает в консоли
- * USBESP-режима (маркер SKEGWv1: ищут также инструменты пакета) */
+/* Штамп сборки (дата+время) для отладки; номер версии — GW_FWVERSION
+ * в version.h, единообразно с прибором */
 const char g_gw_version[44] __attribute__((section(".rodata_desc"))) =
     "SKEGWv1:" __DATE__ " " __TIME__;
 

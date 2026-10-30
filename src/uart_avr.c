@@ -151,4 +151,5 @@ void avr_flash_end(void)
     ske02_suspend(false);
     DBG("%s: wifi back on\n", TAG);
     esp_wifi_start();
+    dbg_rom_redirect(); /* wifi-драйвер мог вернуть свой ets-putc */
 }

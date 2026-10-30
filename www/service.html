@@ -182,16 +182,19 @@
             <label class="chk" style="margin:0" title="Определить часовой пояс по публичному IP шлюза">
                 <input type="checkbox" id="ntpAuto" onchange="ntpAutoChk()">Авто</label>
         </div>
-        <label>Сервер 1</label>
-        <input class="srv" id="ntpS1" maxlength="31" autocapitalize="off" spellcheck="false">
-        <label>Сервер 2</label>
-        <input class="srv" id="ntpS2" maxlength="31" autocapitalize="off" spellcheck="false">
-        <div class="row" style="margin-top:10px">
-            <button onclick="ntpSave()" title="Сохранить настройки и отправить время в прибор">Сохранить</button>
-            <label class="chk" style="margin:0" title="Синхронизировать время и корректировать таймер прибора"><input
-                    type="checkbox" id="ntpOn"> Синхронизировать время</label>
-            <span class="msg" id="ntpMsg"></span>
-        </div>
+        <details style="margin-top:6px">
+            <summary style="cursor:pointer;opacity:.7;font-size:13px">Серверы</summary>
+            <label style="margin-top:6px">Сервер 1</label>
+            <input class="srv" id="ntpS1" maxlength="31" autocapitalize="off" spellcheck="false">
+            <label>Сервер 2</label>
+            <input class="srv" id="ntpS2" maxlength="31" autocapitalize="off" spellcheck="false">
+            <div class="row" style="margin-top:10px">
+                <button onclick="ntpSave()" title="Сохранить настройки и отправить время в прибор">Сохранить</button>
+                <span class="msg" id="ntpMsg"></span>
+            </div>
+        </details>
+        <label class="chk" style="margin-top:8px" title="Синхронизировать время и корректировать таймер прибора"><input
+                type="checkbox" id="ntpOn"> Синхронизировать время</label>
     </div>
 
     <!-- Обновление ПО: один вход, пакет по имени файла -->
@@ -201,8 +204,8 @@
                title="gateway.skpak - шлюз; meter.skpak - прибор; system_full.skpak - ЕДИНЫЙ образ (шлюз+прибор)"
                onchange="fwUploadAuto(this)">
         <div class="row" style="margin-top:10px">
-            <button id="otaBtn" class="warn" onclick="otaFlash(this)" disabled>Прошить шлюз</button>
-            <button class="warn" id="avrBtn" onclick="avrFlash(this)" disabled>Обновить (прибор)</button>
+            <button id="otaBtn" class="warn" onclick="otaFlash(this)" disabled>Обновить шлюз</button>
+            <button class="warn" id="avrBtn" onclick="avrFlash(this)" disabled>Обновить прибор</button>
             <span class="msg" id="fwMsg"></span>
         </div>
         <div class="pbar"><div id="avrPb"></div></div>

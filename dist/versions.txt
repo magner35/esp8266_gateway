@@ -1,3 +1,1 @@
-gw Oct 30 2026 12:40:54 2026-10-30 gateway.skpak 766792 gateway firmware
-meter 3425 2026-10-30 meter.skpak 279886 meter firmware
-bundle 3425 2026-10-30 system_full.skpak 1046530 unified gw+meter
+bundle 3425+3425 2026-10-30 system_full.skpak 1047970 gw+meter
