@@ -34,8 +34,8 @@ extern const char g_gw_version[44]; /* main.c: метка версии */
 #define EC_PIN_ACK 12 /* -> PB3: HIGH = сессия окончена */
 
 #define EC_MAX_NET 10 /* кэш SSID после SCAN (для JOIN-мастера) */
-#define HIST_MAX 16  /* история команд (стрелки вверх/вниз) */
-#define HIST_LEN 32  /* максимальная длина команды в истории */
+#define HIST_MAX 16   /* история команд (стрелки вверх/вниз) */
+#define HIST_LEN 32   /* максимальная длина команды в истории */
 
 static bool sActive;
 static bool sEcho = true;
@@ -101,8 +101,9 @@ bool espcons_check_enter(void)
         sActive = true;
         upd_url_init(); /* адрес сервера обновлений из NVS */
         uart_flush(EC_UART);
-        uart_write_bytes(EC_UART, "\r\nGateway console\r\n", 26);
-        snprintf(line, sizeof(line), "fw %s, heap %u\r\n", g_gw_version,
+        uart_write_bytes(EC_UART, "\r\nGateway console\r\n",
+                         sizeof("\r\nGateway console\r\n") - 1);
+        snprintf(line, sizeof(line), "%s, heap %u\r\n", g_gw_version,
                  (unsigned)esp_get_free_heap_size());
         uart_write_bytes(EC_UART, line, strlen(line));
         uart_write_bytes(EC_UART, "ESP> ", 5);
@@ -712,7 +713,7 @@ static void upd_download(const char *url)
     reply("\r\nstopping web...\r\n");
     web_httpd_enable(false);
     vTaskDelay(pdMS_TO_TICKS(500));
-    
+
     memset(&sUpdSec, 0, sizeof(sUpdSec));
     sUpdHdrHave = 0;
     sUpdHdrDone = false;

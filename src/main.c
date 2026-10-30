@@ -9,7 +9,7 @@
 /* Штамп сборки (дата+время) для отладки; номер версии — GW_FWVERSION
  * в version.h, единообразно с прибором */
 const char g_gw_version[44] __attribute__((section(".rodata_desc"))) =
-    "SKEGWv1:" __DATE__ " " __TIME__;
+    "SKEGW 3425: " __DATE__ " " __TIME__;
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
