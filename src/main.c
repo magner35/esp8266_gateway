@@ -1,4 +1,10 @@
 /*
+ * Created on Fri Oct 30 2026
+ *
+ * Copyright (c) 2026 by magner mr.jaedong@gmail.com
+ */
+
+/*
  * ESP8266 gateway for the SKE-02 flow meter - ESP8266_RTOS_SDK v3.4 port.
  * Tasks: wifi manager, meter (UART console client), httpd, modbus tcp,
  * captive dns (portal mode only).

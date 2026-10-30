@@ -697,6 +697,19 @@ static void avr_run(void *arg)
     avr_flash_end();
 }
 
+/* сеть ещё не поднята? Консоль входит сразу после ребута (ATmega держит
+ * запрос), а lwIP поднимается секундами позже: сетевые вызовы в этом
+ * окне убивают стек ассертом "Invalid mbox" (tcpip_mbox ещё нет) */
+static bool net_not_ready(void)
+{
+    tcpip_adapter_ip_info_t ip;
+    tcpip_adapter_get_ip_info(TCPIP_ADAPTER_IF_STA, &ip);
+    if (ip.ip.addr)
+        return false;
+    reply("\r\nnetwork not ready (no ip), wait for wifi and retry\r\n");
+    return true;
+}
+
 /* скачать .skpak по полному URL при выключенном вебе (для DOWNLOAD) */
 static void upd_download(const char *url)
 {
@@ -709,6 +722,8 @@ static void upd_download(const char *url)
         reply("\r\nbad url\r\n");
         return;
     }
+    if (net_not_ready())
+        return;
 
     reply("\r\nstopping web...\r\n");
     web_httpd_enable(false);
@@ -1050,6 +1065,8 @@ static void cmd_check(void)
         reply("\r\nserver not set (URL <address>)\r\n");
         return;
     }
+    if (net_not_ready())
+        return;
     snprintf(url, sizeof(url), "%s/versions.txt", sUpdUrl);
     reply("\r\nchecking ");
     reply(sUpdUrl);
@@ -1207,6 +1224,8 @@ static void cmd_ping(const char *args)
     }
     if (!port)
         port = 80;
+    if (net_not_ready())
+        return;
 
     sPingPort = port;
     snprintf(b, sizeof(b), "\r\nping %s:%u...\r\n", host, (unsigned)port);
@@ -1269,7 +1288,7 @@ static uint8_t len;
 
 static void tab_complete(void)
 {
-    const char *match[8];
+    const char *match[20]; /* вся таблица команд + запас для SSID */
     uint8_t n = 0;
     uint8_t i;
     /* используем ГЛОБАЛЬНЫЙ len (актуален: line[len]=0 всегда),
@@ -1278,14 +1297,14 @@ static void tab_complete(void)
     /* JOIN-мастер: SSID-шаг - дополняем из кэша SCAN */
     if (sJoinState == JOIN_SSID)
     {
-        for (i = 0; i < sScanCount && n < 8; i++)
+        for (i = 0; i < sScanCount && n < 20; i++)
             if (!strncasecmp(sScanSsid[i], line, len))
                 match[n++] = sScanSsid[i];
     }
     else if (sJoinState == JOIN_IDLE)
     {
         /* обычный режим: дополняем имя команды */
-        for (i = 0; kCmds[i] && n < 8; i++)
+        for (i = 0; kCmds[i] && n < 20; i++)
             if (!strncasecmp(kCmds[i], line, len))
                 match[n++] = kCmds[i];
     }
@@ -1308,14 +1327,19 @@ static void tab_complete(void)
         }
         return;
     }
-    /* несколько: напечатать варианты, строку не менять */
+    /* несколько: колонки по 4 (16 знаков), строку не менять */
     reply("\r\n");
     for (i = 0; i < n; i++)
     {
-        reply(match[i]);
-        reply("  ");
+        char col[18];
+        snprintf(col, sizeof(col), "%-16s", match[i]);
+        reply(col);
+        if ((i & 3) == 3)
+            reply("\r\n");
     }
-    reply("\r\n> ");
+    if (n & 3)
+        reply("\r\n");
+    reply("> ");
     reply(line);
 }
 
@@ -1509,12 +1533,10 @@ void espcons_poll(void)
         }
         if (ch == '\t')
         {
-            DBG("espcons: TAB, len=%u line='%s'\r\n", (unsigned)len, line);
             tab_complete();
             continue;
         }
-        if (ch < ' ' && ch != '\r' && ch != '\n' && ch != 8 && ch != 0x7F)
-            DBG("espcons: ctrl 0x%02X\r\n", ch);
+
         if (ch == '\r')
         {
             if (sEcho)
