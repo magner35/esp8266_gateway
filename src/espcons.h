@@ -11,5 +11,6 @@
 void espcons_init(void);
 bool espcons_check_enter(void); /* true = линия наша: уходим в poll */
 void espcons_poll(void);        /* читает/исполняет до выхода или таймаута */
+bool espcons_is_active(void);   /* true = консоль шлюза заняла UART */
 
 #endif /* GW_ESPCONS_H */

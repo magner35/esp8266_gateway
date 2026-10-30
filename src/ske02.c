@@ -1281,6 +1281,20 @@ static void meter_task(void *arg)
     ske_req_t *req;
     for (;;)
     {
+        /* USBESP: ПЕРЕД очередью — Modbus-мост не должен слать MB
+         * в линию, пока терминал у консоли шлюза */
+        if (espcons_check_enter())
+        {
+            /* слить всё, что успело попасть в очередь до входа */
+            {
+                ske_req_t *stale;
+                while (xQueueReceive(sQueue, &stale, 0) == pdTRUE)
+                    xSemaphoreGive(sReqDone);
+            }
+            espcons_poll();
+            continue;
+        }
+
         while (xQueueReceive(sQueue, &req, 0) == pdTRUE)
         {
             exec_request(req);
@@ -1291,14 +1305,6 @@ static void meter_task(void *arg)
         {
             /* UART отдан программатору AVR: не слать ничего в линию */
             vTaskDelay(pdMS_TO_TICKS(100));
-            continue;
-        }
-
-        /* USBESP: ATmega отдала USB-UART нам (PB1->GPIO14 LOW) -
-         * работаем консолью шлюза, обмен с прибором стоит до END */
-        if (espcons_check_enter())
-        {
-            espcons_poll();
             continue;
         }
 
@@ -1530,6 +1536,16 @@ bool ske02_request(const ske_req_t *req, uint32_t timeout_ms)
     sSlot.result = BS_OK;
     sSlot.err[0] = 0;
     sSeq++;
+
+    /* консоль шлюза заняла UART: немедленный отлуп, ничего не копим */
+    if (espcons_is_active())
+    {
+        sSlot.result = SKE_ERR_TRANSPORT;
+        strlcpy(sSlot.err, "console session", sizeof(sSlot.err));
+        memcpy((void *)&req->result, &sSlot.result, sizeof(int));
+        strlcpy(req->err, sSlot.err, sizeof(req->err));
+        return false;
+    }
 
     {
         ske_req_t *ptr = &sSlot;

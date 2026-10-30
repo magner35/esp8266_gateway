@@ -46,6 +46,11 @@ static uint8_t sHistCount;
 static int8_t sHistBrowse;
 static uint8_t sEscState;   /* 0=норма, 1=ESC, 2=ESC[ */
 
+bool espcons_is_active(void)
+{
+    return sActive;
+}
+
 /* состояния JOIN-мастера */
 enum { JOIN_IDLE, JOIN_SSID, JOIN_PASS };
 static uint8_t sJoinState = JOIN_IDLE;

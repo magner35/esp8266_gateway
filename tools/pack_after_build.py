@@ -43,6 +43,45 @@ def _meter_version():
         return ""
 
 
+def _gw_version():
+    """версия шлюза: дата сборки из маркера в образе (SKEGWv1:...)"""
+    binpath = BUILD / "firmware.bin"
+    try:
+        data = binpath.read_bytes()
+        off = data.find(b"SKEGWv1:")
+        if off >= 0:
+            v = data[off + 8:off + 40].split(bytes([0]))[0]
+            return v.decode("ascii", "replace").strip()
+    except OSError:
+        pass
+    return ""
+
+
+def _write_versions():
+    """versions.txt для локального тест-сервера (python -m http.server)"""
+    lines = []
+    gw = DIST / "gateway.skpak"
+    meter = DIST / "meter.skpak"
+    bundle = DIST / "system_full.skpak"
+    gwver = _gw_version()
+    mver = _meter_version()
+    from datetime import date
+    today = date.today().isoformat()
+    if gw.exists():
+        lines.append(f"gw {gwver or 'dev'} {today} {gw.name} "
+                     f"{gw.stat().st_size} gateway firmware")
+    if meter.exists():
+        lines.append(f"meter {mver or 'dev'} {today} {meter.name} "
+                     f"{meter.stat().st_size} meter firmware")
+    if bundle.exists():
+        lines.append(f"bundle {mver or 'dev'} {today} {bundle.name} "
+                     f"{bundle.stat().st_size} unified gw+meter")
+    if lines:
+        (DIST / "versions.txt").write_text("\n".join(lines) + "\n",
+                                           encoding="utf-8")
+        print(f"pack: versions.txt ({len(lines)} entries)")
+
+
 def package(source, target, env):
     binpath = BUILD / "firmware.bin"
     if not binpath.exists():
@@ -66,6 +105,7 @@ def package(source, target, env):
         _run(args)
     else:
         print("pack: no meter build, skip meter/system packages")
+    _write_versions()
 
 
 env.AddPostAction("$BUILD_DIR/${PROGNAME}.bin", package)

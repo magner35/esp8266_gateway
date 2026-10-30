@@ -111,6 +111,20 @@ static int http_fetch(const char *url, uint32_t max_len,
     host[slash - p] = 0;
     strcpy(path, slash);
 
+    /* порт после ':' (192.168.0.72:8080), дефолт 80 */
+    {
+        int port = 80;
+        char *colon = strchr(host, ':');
+        if (colon)
+        {
+            port = atoi(colon + 1);
+            *colon = 0; /* отрезать порт от имени хоста */
+            if (port <= 0 || port > 65535)
+                port = 80;
+        }
+        sa.sin_port = htons((uint16_t)port);
+    }
+
     he = gethostbyname(host);
     if (!he || !he->h_addr_list[0])
     {
@@ -119,7 +133,7 @@ static int http_fetch(const char *url, uint32_t max_len,
     }
     memset(&sa, 0, sizeof(sa));
     sa.sin_family = AF_INET;
-    sa.sin_port = htons(80);
+    /* порт уже вычислен выше, sockaddr заполнен до gethostbyname */
     memcpy(&sa.sin_addr, he->h_addr_list[0], 4);
 
     fd = socket(AF_INET, SOCK_STREAM, 0);
