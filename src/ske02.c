@@ -635,7 +635,7 @@ static void wifi_send_line(const char *fmt, ...)
         if (rc != 2)
             break; /* промпт или таймаут */
         /* прибор просит забыть все сети (меню "Forget all Net?") */
-        if (!strncmp(resp, "FORGET", 6))
+        if (!strncasecmp(resp, "FORGET", 6))
         {
             DBG("wifi: gateway forget signal from meter menu\n");
             storage_net_delall();
@@ -643,7 +643,7 @@ static void wifi_send_line(const char *fmt, ...)
             storage_save(storage_get());
             esp_restart(); /* перезагрузка в режим портала */
         }
-        if (!strncmp(resp, "OK", 2))
+        if (!strncasecmp(resp, "OK", 2))
             break;
     }
 }

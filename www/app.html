@@ -493,8 +493,6 @@ button,input,select,textarea{font:inherit;color:inherit}
       padding: 2px 4px;
       font-size: 13px;
       box-sizing: border-box
-    }#sec-settings #filter {
-      width: 80px
     }#sec-settings #nav {
       display: flex;
       flex-wrap: wrap;
@@ -856,9 +854,6 @@ button,input,select,textarea{font:inherit;color:inherit}
     <button id="btnApply" onclick="applyAll()">Применить</button>
     <button id="btnRefresh" onclick="refreshAll()">Обновить</button>
     <span id="applyMsg" class="flash"></span>
-  </div>
-  <div id="bar">
-    <input id="filter" placeholder="фильтр" oninput="applyFilter()">
   </div>
   <div id="sections">
     <p>Опрос прибора…</p>
@@ -2321,7 +2316,7 @@ wSync();
       return '<tr data-n="' + esc((q.n + ' ' + q.i).toLowerCase()) + '" data-i="' + q.i + '"><td>' + esc(q.n || ('P' + q.i)) +
         (where ? '<div class="where">' + esc(where) + '</div>' : '') + '</td><td class="ctl">' + ctrl + '</td></tr>';
     }
-    const THEAD = '<tr><th>Параметр</th><th></th></tr>';
+    const THEAD = ''; 
     function decorate(arr) {
       const rows = [];
       for (const q of arr) {
@@ -2375,7 +2370,8 @@ wSync();
     function go2(k) { curT[cur] = k; applyFilter() }
     function go3(k) { curS[cur + '|' + curTab] = k; applyFilter() }
     function applyFilter() {
-      const f = $('filter').value.trim().toLowerCase();
+      const el = $('filter');
+      const f = el ? el.value.trim().toLowerCase() : ''; 
       if (!f) { setRender(built); return }
       renderSearch(f);
     }

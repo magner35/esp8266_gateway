@@ -9,3 +9,10 @@ tests/host_tests.exe
 tests/*.obj
 __pycache__/
 tools/keys/
+src/pages.h
+dist/curl/meter.skpak
+dist/curl/gateway.skpak
+dist/system_full.skpak
+src/pages.h
+dist/versions.txt
+www/app.html

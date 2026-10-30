@@ -79,7 +79,7 @@
       return '<tr data-n="' + esc((q.n + ' ' + q.i).toLowerCase()) + '" data-i="' + q.i + '"><td>' + esc(q.n || ('P' + q.i)) +
         (where ? '<div class="where">' + esc(where) + '</div>' : '') + '</td><td class="ctl">' + ctrl + '</td></tr>';
     }
-    const THEAD = '<tr><th>Параметр</th><th></th></tr>';
+    const THEAD = ''; /* заголовок не нужен: подпись убрана */
     /*
      * The server names the owning L2 menu explicitly ("tb"), because the
      * firmware prints subtrees before the parent's own params and the id
@@ -141,7 +141,8 @@
     function go2(k) { curT[cur] = k; applyFilter() }
     function go3(k) { curS[cur + '|' + curTab] = k; applyFilter() }
     function applyFilter() {
-      const f = $('filter').value.trim().toLowerCase();
+      const el = $('filter');
+      const f = el ? el.value.trim().toLowerCase() : ''; /* поля нет - обычный вид */
       if (!f) { setRender(built); return }
       renderSearch(f);
     }

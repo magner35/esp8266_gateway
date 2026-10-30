@@ -68,11 +68,6 @@
       box-sizing: border-box
     }
 
-    /* поле фильтра по имени/id в панели действий */
-    #filter {
-      width: 80px
-    }
-
     /* --- 2. навигация меню ----------------------------------------- */
 
     /* ряд кнопок разделов первого уровня (Измеритель/Основные/...) */
@@ -288,9 +283,6 @@
     <button id="btnApply" onclick="applyAll()">Применить</button>
     <button id="btnRefresh" onclick="refreshAll()">Обновить</button>
     <span id="applyMsg" class="flash"></span>
-  </div>
-  <div id="bar">
-    <input id="filter" placeholder="фильтр" oninput="applyFilter()">
   </div>
   <div id="sections">
     <p>Опрос прибора…</p>
