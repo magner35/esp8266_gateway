@@ -13,6 +13,7 @@
 
 #include "debug.h"
 #include "espcons.h"
+#include "version.h"
 #include "esp_system.h"
 #include "freertos/semphr.h"
 #include "freertos/queue.h"
@@ -76,6 +77,8 @@ static const char *const kCmds[] = {
     "update_gateway", "update_meter", "ping",
     "reboot", "exit", "quit", NULL};
 
+static void upd_url_init(void); /* определена ниже, рядом с cmd_url */
+
 void espcons_init(void)
 {
     gpio_config_t in = {.pin_bit_mask = 1ULL << EC_PIN_REQ,
@@ -86,10 +89,12 @@ void espcons_init(void)
                          .mode = GPIO_MODE_OUTPUT};
     gpio_config(&out);
     gpio_set_level(EC_PIN_ACK, 0);
+    /* адрес сервера нужен СРАЗУ после старта: проверка наличия OTA
+     * (espcons_ota_check) работает и без консольной сессии */
+    upd_url_init();
 }
 
 bool espcons_check_enter(void);
-static void upd_url_init(void); /* определена ниже, рядом с cmd_url */
 
 bool espcons_check_enter(void)
 {
@@ -1130,6 +1135,268 @@ static void cmd_upd_meter(void)
              sAvrOk ? "ok" : "FAIL",
              sAvrRes.written, sAvrRes.verify_fail);
     reply(b);
+}
+
+/* ---- OTA из меню прибора (маркеры otadev/otagw) --------------------
+ * Всё тихо: UART0 - линия прибора, прогресс/ошибки только в DBG (UART1).
+ * Одна задача 8К: при необходимости скачать бандл (как DOWNLOAD, но без
+ * консольного вывода), затем применить - urboot для прибора или
+ * переключение слота + перезагрузка для шлюза */
+static bool sOtaMenuBusy;
+
+static void ota_menu_task(void *arg)
+{
+    bool device = (intptr_t)arg != 0;
+
+    if (device ? !hex_store_stored() : !web_ota_ready())
+    {
+        char url[176];
+
+        if (!sUpdUrl[0])
+        {
+            DBG("ota: no server url saved\n");
+            goto out;
+        }
+        snprintf(url, sizeof(url), "%s/system_full.skpak", sUpdUrl);
+        DBG("ota: fetching bundle, web off\n");
+        web_httpd_enable(false);
+        vTaskDelay(pdMS_TO_TICKS(500));
+        memset(&sUpdSec, 0, sizeof(sUpdSec));
+        sUpdHdrHave = 0;
+        sUpdHdrDone = false;
+        sUpdFed = 0;
+        sUpdEspLen = 0;
+        sUpdFedEsp = 0;
+        sUpdLenHave = 0;
+        sUpdOtaOpen = sUpdHexOpen = false;
+        sUpdDest = 0;
+        sUpdErr[0] = 0;
+        upd_run(url); /* стек этой задачи 8К - можно напрямую */
+        web_start();
+        if (sUpdResult < 0)
+        {
+            DBG("ota: fetch failed: %s\n", sUpdErr);
+            goto out;
+        }
+    }
+    if (device)
+    {
+        DBG("ota: meter flash start\n");
+        avr_run(NULL); /* begin/urboot/end; WiFi гасится на сессию */
+        DBG("ota: meter flash %s (written %d)\n",
+            sAvrOk ? "ok" : "FAIL", sAvrRes.written);
+    }
+    else
+    {
+        DBG("ota: gateway switch slot, reboot\n");
+        if (esp_ota_set_boot_partition(
+                esp_ota_get_next_update_partition(NULL)) == ESP_OK)
+        {
+            vTaskDelay(pdMS_TO_TICKS(300));
+            esp_restart();
+        }
+        DBG("ota: boot switch failed\n");
+    }
+out:
+    sOtaMenuBusy = false;
+    vTaskDelete(NULL);
+}
+
+void espcons_ota_menu(bool device)
+{
+    if (sOtaMenuBusy)
+    {
+        DBG("ota: menu update already running\n");
+        return;
+    }
+    sOtaMenuBusy = true;
+    if (xTaskCreate(ota_menu_task, "otam", 8192,
+                    (void *)(intptr_t)(device ? 1 : 0), 3, NULL) != pdPASS)
+    {
+        sOtaMenuBusy = false;
+        DBG("ota: task create failed\n");
+    }
+}
+
+/* ---- наличие обновления (строка OTA в меню прибора) ----------------
+ * Раз после старта: тихий GET versions.txt, сравнение gw-части бандла
+ * со своей GW_FWVERSION; результат шлюз пушит в прибор словом WOTA */
+static char sOtaSrvVer[8];    /* версия gw на сервере */
+static int8_t sOtaAvail = -1; /* -1 не проверено, 0 нет, 1 есть, 2 сервер недоступен */
+static volatile bool sOtaCheckBusy; /* проверка уже выполняется */
+static TickType_t sOtaLastCheck;    /* тик последней проверки (период) */
+
+static void ota_check_task(void *arg)
+{
+    char url[176], host[64], path[48], hdr[256], req[192], line[96];
+    struct hostent *he;
+    struct sockaddr_in sa;
+    struct timeval ct = {.tv_sec = 8, .tv_usec = 0};
+    struct timeval rt = {.tv_sec = 1, .tv_usec = 0};
+    const char *p, *b;
+    char *colon, *slash;
+    uint16_t port = 80;
+    long clen = -1;
+    size_t hlen = 0, pos = 0;
+    int fd = -1, n, stalls = 0;
+
+    (void)arg;
+    p = sUpdUrl;
+    if (!p[0])
+        goto done;
+    snprintf(url, sizeof(url), "%s/versions.txt", p);
+    p = url;
+    if (!strncmp(p, "http://", 7))
+        p += 7;
+    slash = strchr(p, '/');
+    if (!slash || slash == p || (size_t)(slash - p) >= sizeof(host))
+        goto done;
+    memcpy(host, p, slash - p);
+    host[slash - p] = 0;
+    strlcpy(path, slash, sizeof(path));
+    colon = strchr(host, ':');
+    if (colon)
+    {
+        port = (uint16_t)atoi(colon + 1);
+        *colon = 0;
+    }
+    he = gethostbyname(host);
+    if (!he || !he->h_addr_list[0])
+        goto done;
+    fd = socket(AF_INET, SOCK_STREAM, 0);
+    if (fd < 0)
+        goto done;
+    setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &ct, sizeof(ct));
+    memset(&sa, 0, sizeof(sa));
+    sa.sin_family = AF_INET;
+    sa.sin_port = htons(port);
+    memcpy(&sa.sin_addr, he->h_addr_list[0], 4);
+    if (connect(fd, (struct sockaddr *)&sa, sizeof(sa)) < 0)
+        goto out;
+    setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &rt, sizeof(rt));
+    snprintf(req, sizeof(req),
+             "GET %s HTTP/1.1\r\nHost: %s\r\nConnection: close\r\n\r\n",
+             path, host);
+    if (send(fd, req, strlen(req), 0) <= 0)
+        goto out;
+    for (;;)
+    {
+        n = recv(fd, hdr + hlen, 1, 0);
+        if (n == 0)
+            goto out;
+        if (n < 0)
+        {
+            if (++stalls >= 5)
+                goto out;
+            continue;
+        }
+        stalls = 0;
+        hlen++;
+        if (hlen >= sizeof(hdr))
+            goto out;
+        if (hlen >= 4 && !memcmp(hdr + hlen - 4, "\r\n\r\n", 4))
+            break;
+    }
+    hdr[hlen] = 0;
+    if (strncmp(hdr, "HTTP/1.", 7) || hdr[9] != '2')
+        goto out;
+    {
+        char *cl = strstr(hdr, "Content-Length:");
+        if (cl)
+            clen = atol(cl + 15);
+    }
+    if (clen <= 0)
+        goto out;
+    /* нужна только первая строка (bundle X+Y ...) */
+    stalls = 0;
+    while (pos < sizeof(line) - 1 && clen > 0)
+    {
+        uint32_t want = (uint32_t)clen;
+        if (want > sizeof(line) - 1 - pos)
+            want = sizeof(line) - 1 - pos;
+        n = recv(fd, line + pos, want, 0);
+        if (n == 0)
+            break;
+        if (n < 0)
+        {
+            if (++stalls >= 5)
+                break;
+            continue;
+        }
+        stalls = 0;
+        pos += n;
+        clen -= n;
+        line[pos] = 0;
+        if (strchr(line, '\n'))
+            break;
+    }
+out:
+    if (fd >= 0)
+        close(fd);
+    if (pos == 0)
+        goto done;
+    line[pos] = 0;
+    b = strstr(line, "bundle ");
+    if (!b)
+        goto done;
+    b += 7;
+    {
+        char ver[8];
+        uint8_t i = 0;
+        while (b[i] && b[i] != '+' && i < sizeof(ver) - 1)
+        {
+            ver[i] = b[i];
+            i++;
+        }
+        ver[i] = 0;
+        DBG("ota: server bundle gw=%s, ours=%s\n", ver, GW_FWVERSION);
+        if (ver[0] && strcmp(ver, GW_FWVERSION))
+        {
+            strlcpy(sOtaSrvVer, ver, sizeof(sOtaSrvVer));
+            sOtaAvail = 1;
+        }
+        else
+            sOtaAvail = 0;
+        goto finish;
+    }
+done:
+    /* любая неудача (dns/connect/http/разбор) = сервер недоступен */
+    sOtaAvail = 2;
+    DBG("ota: server unreachable\n");
+finish:
+    sOtaCheckBusy = false;
+    vTaskDelete(NULL);
+}
+
+/* период: повторная проверка наличия обновления (первая - на первом
+ * wifi-тике после старта); путь тот же, что у консольного ping -
+ * TCP-connect к серверу + GET versions.txt */
+#define OTA_RECHECK_MS (10u * 60u * 1000u)
+
+void espcons_ota_check(void)
+{
+    TickType_t now = xTaskGetTickCount();
+
+    if (!sUpdUrl[0] || sOtaMenuBusy || sOtaCheckBusy)
+        return;
+    if (sOtaAvail >= 0 &&
+        (now - sOtaLastCheck) < pdMS_TO_TICKS(OTA_RECHECK_MS))
+        return; /* рано перепроверять */
+    sOtaLastCheck = now;
+    sOtaAvail = 0; /* до ответа задачи считаем "нет" */
+    sOtaCheckBusy = true;
+    if (xTaskCreate(ota_check_task, "otac", 4096, NULL, 3, NULL) != pdPASS)
+    {
+        sOtaCheckBusy = false;
+        DBG("ota: check task create failed\n");
+    }
+}
+
+int espcons_ota_version(void)
+{
+    if (sOtaAvail == 2)
+        return -1; /* сервер недоступен - прибор покажет это */
+    return (sOtaAvail == 1 && sOtaSrvVer[0]) ? atoi(sOtaSrvVer) : 0;
 }
 
 /* ping — tcp-проверка достижимости сервера обновлений (DNS + connect);

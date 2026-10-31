@@ -36,7 +36,7 @@ def _run(args):
 
 
 def _meter_version():
-    verh = METER / "include/board.h"
+    verh = METER / "include/debug.h"
     try:
         m = re.search(r'#define\s+FWVERSION\s+"([^"]+)"',
                       verh.read_text(encoding="utf-8", errors="replace"))

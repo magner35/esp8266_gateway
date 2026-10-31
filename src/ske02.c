@@ -643,6 +643,19 @@ static void wifi_send_line(const char *fmt, ...)
             storage_save(storage_get());
             esp_restart(); /* перезагрузка в режим портала */
         }
+        /* прибор просит обновление ПО из меню "OTA update" */
+        if (!strncasecmp(resp, "OTADEV", 6))
+        {
+            DBG("ota: meter menu asks device update\n");
+            espcons_ota_menu(true);
+            break;
+        }
+        if (!strncasecmp(resp, "OTAGW", 5))
+        {
+            DBG("ota: meter menu asks gateway update\n");
+            espcons_ota_menu(false);
+            break;
+        }
         if (!strncasecmp(resp, "OK", 2))
             break;
     }
@@ -690,6 +703,17 @@ static void wifi_push_info(void)
                    mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
     wifi_send_line("WRSSI %d", rssi);
     wifi_send_line("WNET %s:%s", sta ? "STA" : "AP", ssid);
+    /* наличие обновления для строки OTA в меню прибора */
+    {
+        static int16_t sLastWota = -1;
+        int v = espcons_ota_version();
+        if (v != sLastWota)
+        {
+            sLastWota = (int16_t)v;
+            DBG("wifi: ota push WOTA %d\n", v);
+        }
+        wifi_send_line("WOTA %d", v);
+    }
 }
 
 static bool ske_query_values(void)
@@ -1392,6 +1416,8 @@ static void meter_task(void *arg)
                     {
                         sWifiCnt = 0;
                         wifi_push_info();
+                        /* разовая проверка сервера обновлений (гейт внутри) */
+                        espcons_ota_check();
                     }
                     static TickType_t lastBeat;
                     static uint8_t sEditCnt;   /* прошлый маркер правки */

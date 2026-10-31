@@ -14,4 +14,9 @@ void espcons_poll(void);        /* читает/исполняет до выхо
 bool espcons_is_active(void);   /* true = консоль шлюза заняла UART */
 bool espcons_abort_pending(void); /* true = пользователь нажал Ctrl+C */
 
+/* OTA из меню прибора (маркеры otadev/otagw из консоли прибора) */
+void espcons_ota_menu(bool device); /* прошить прибор (true) или шлюз */
+void espcons_ota_check(void);       /* разовая проверка сервера обновлений */
+int espcons_ota_version(void);      /* 0 = нет обновления, иначе версия */
+
 #endif /* GW_ESPCONS_H */
