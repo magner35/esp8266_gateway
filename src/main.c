@@ -26,6 +26,7 @@ const char g_gw_version[44] __attribute__((section(".rodata_desc"))) =
 
 #include "debug.h"
 #include "mb_pass.h"
+#include "espcons.h"
 #include "ske02.h"
 #include "storage.h"
 #include "tree_store.h"
@@ -73,6 +74,12 @@ static void boot_task(void *arg)
         mb_pass_start(); /* прозрачный мост :502 — только в STA */
     else
         DBG("gateway: AP mode - modbus bridge off (heap)\n");
+
+    /* отложенная прошивка прибора, пережившая ребут: проверяем сами,
+     * НЕ завися от опроса прибора (ske02 может ещё быть в ретраях,
+     * а прошивка сама чинит прибор — GPIO5-сброс в urboot) */
+    vTaskDelay(pdMS_TO_TICKS(5000));
+    espcons_ota_pend_check();
     vTaskDelete(NULL);
 }
 

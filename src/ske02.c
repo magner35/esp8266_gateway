@@ -1316,6 +1316,11 @@ static void meter_task(void *arg)
                     xSemaphoreGive(sReqDone);
             }
             espcons_poll();
+            /* сессия кончилась (кабель вытащен / exit): исполнить
+             * отложенную прошивку прибора НЕЖДАНО тика ST_IDLE -
+             * опрос прибора может ещё восстанавливаться, а прошивке
+             * он и не нужен (hex во flash, вход в urboot - GPIO5) */
+            espcons_ota_pend_check();
             continue;
         }
 
@@ -1418,6 +1423,9 @@ static void meter_task(void *arg)
                         wifi_push_info();
                         /* разовая проверка сервера обновлений (гейт внутри) */
                         espcons_ota_check();
+                        /* отложенная прошивка прибора: после вытаскивания
+                         * USB (сессия кончилась) или после ребута шлюза */
+                        espcons_ota_pend_check();
                     }
                     static TickType_t lastBeat;
                     static uint8_t sEditCnt;   /* прошлый маркер правки */

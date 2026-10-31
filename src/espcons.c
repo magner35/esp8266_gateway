@@ -78,6 +78,9 @@ static const char *const kCmds[] = {
     "reboot", "exit", "quit", NULL};
 
 static void upd_url_init(void); /* определена ниже, рядом с cmd_url */
+static void ota_pend_load(void); /* определена ниже, в OTA-блоке */
+static void ota_pend_save(bool on); /* там же */
+static volatile bool sOtaPend;     /* отложенная прошивка прибора (см. OTA-блок) */
 
 void espcons_init(void)
 {
@@ -90,8 +93,11 @@ void espcons_init(void)
     gpio_config(&out);
     gpio_set_level(EC_PIN_ACK, 0);
     /* адрес сервера нужен СРАЗУ после старта: проверка наличия OTA
-     * (espcons_ota_check) работает и без консольной сессии */
+     * (espcons_ota_check) работает и без консольной сессии;
+     * заодно - отложенная прошивка прибора, если намерение пережило
+     * перезагрузку шлюза */
     upd_url_init();
+    ota_pend_load();
 }
 
 bool espcons_check_enter(void);
@@ -1117,24 +1123,21 @@ static void cmd_upd_gw(void)
     esp_restart();
 }
 
-/* UPDATE_METER — прошить прибор из hex, сохранённого DOWNLOAD'ом
- * (последовательность "Обновить (прибор)": urboot, WiFi гасится) */
+/* UPDATE_METER — прошить прибор из hex, сохранённого DOWNLOAD'ом.
+ * Во время USB-сессии urboot-обмен с прибором невозможен: запоминаем
+ * намерение (переживает ребут шлюза) и просим вытащить кабель -
+ * линия вернётся прибору, сессия кончится, прошивка начнётся сама */
 static void cmd_upd_meter(void)
 {
-    char b[96];
-
-    if (!hex_store_stored())
+    if (!hex_store_stored() && !sUpdUrl[0])
     {
-        reply("\r\nno meter hex (run DOWNLOAD)\r\n");
+        reply("\r\nno meter hex (run DOWNLOAD) and no server url\r\n");
         return;
     }
-    reply("\r\nflashing meter...\r\n");
-    if (!run_in_task(avr_run, NULL, 6144, "avrfl"))
-        return; /* отказ задачи или Ctrl+C — сообщение уже выше */
-    snprintf(b, sizeof(b), "meter %s: written %d, verify fail %d\r\n",
-             sAvrOk ? "ok" : "FAIL",
-             sAvrRes.written, sAvrRes.verify_fail);
-    reply(b);
+    ota_pend_save(true);
+    sOtaPend = true;
+    reply("\r\nunplug the USB cable - meter update will start automatically\r\n"
+          "(intent survives a gateway reboot)\r\n");
 }
 
 /* ---- OTA из меню прибора (маркеры otadev/otagw) --------------------
@@ -1144,6 +1147,35 @@ static void cmd_upd_meter(void)
  * переключение слота + перезагрузка для шлюза */
 static bool sOtaMenuBusy;
 
+/* отложенная прошивка прибора: во время USB-сессии urboot-обмен
+ * невозможен - update_meter запоминает намерение (NVS "gw"/"otadev",
+ * переживает ребут шлюза, в т.ч. от передёргивания USB) и просит
+ * пользователя вытащить кабель; исполнение - на первом же wifi-тике
+ * после возврата линии прибору или после загрузки шлюза.
+ * Флаг sOtaPend объявлен выше (нужен cmd_upd_meter) */
+static void ota_pend_save(bool on)
+{
+    nvs_handle_t h;
+    if (nvs_open("gw", NVS_READWRITE, &h) == ESP_OK)
+    {
+        nvs_set_u8(h, "otadev", on ? 1 : 0);
+        nvs_commit(h);
+        nvs_close(h);
+    }
+}
+
+static void ota_pend_load(void)
+{
+    nvs_handle_t h;
+    uint8_t v = 0;
+    if (nvs_open("gw", NVS_READONLY, &h) == ESP_OK)
+    {
+        nvs_get_u8(h, "otadev", &v);
+        nvs_close(h);
+    }
+    sOtaPend = v != 0;
+}
+
 static void ota_menu_task(void *arg)
 {
     bool device = (intptr_t)arg != 0;
@@ -1151,10 +1183,30 @@ static void ota_menu_task(void *arg)
     if (device ? !hex_store_stored() : !web_ota_ready())
     {
         char url[176];
+        tcpip_adapter_ip_info_t ip;
+        int w;
 
         if (!sUpdUrl[0])
         {
             DBG("ota: no server url saved\n");
+            if (device)
+                ota_pend_save(false);
+            goto out;
+        }
+        /* намерение может исполниться раньше wifi (рестарт шлюза
+         * при вытаскивании кабеля): ждём IP до минуты */
+        ip.ip.addr = 0;
+        for (w = 0; w < 60 && !ip.ip.addr; w++)
+        {
+            vTaskDelay(pdMS_TO_TICKS(1000));
+            tcpip_adapter_get_ip_info(TCPIP_ADAPTER_IF_STA, &ip);
+        }
+        if (!ip.ip.addr)
+        {
+            /* сети нет: намерение ОСТАВЛЯЕМ в NVS - повтор после
+             * следующего рестарта шлюза (в пределах одной загрузки
+             * RAM-флаг уже снят - зацикливания нет) */
+            DBG("ota: no network in 60 s, intent kept for next boot\n");
             goto out;
         }
         snprintf(url, sizeof(url), "%s/system_full.skpak", sUpdUrl);
@@ -1185,6 +1237,7 @@ static void ota_menu_task(void *arg)
         avr_run(NULL); /* begin/urboot/end; WiFi гасится на сессию */
         DBG("ota: meter flash %s (written %d)\n",
             sAvrOk ? "ok" : "FAIL", sAvrRes.written);
+        ota_pend_save(false); /* намерение исполнено (любым исходом) */
     }
     else
     {
@@ -1397,6 +1450,20 @@ int espcons_ota_version(void)
     if (sOtaAvail == 2)
         return -1; /* сервер недоступен - прибор покажет это */
     return (sOtaAvail == 1 && sOtaSrvVer[0]) ? atoi(sOtaSrvVer) : 0;
+}
+
+/* исполнить отложенную прошивку прибора, если намерение накоплено
+ * (вытаскивание USB завершило сессию, либо шлюз перезагрузился);
+ * вызывается из ~5-сек тика ske02 - реакция не дольше пары секунд.
+ * ПОКА СЕССИЯ АКТИВНА - не исполняем: urboot невозможен, ждём
+ * вытаскивания кабеля (после poll флаг проверят ещё раз) */
+void espcons_ota_pend_check(void)
+{
+    if (!sOtaPend || sOtaMenuBusy || sActive)
+        return;
+    sOtaPend = false; /* RAM-флаг снят; NVS очистит задача после попытки
+                       * (обрыв питания посреди прошивки = повтор на буте) */
+    espcons_ota_menu(true);
 }
 
 /* ping — tcp-проверка достижимости сервера обновлений (DNS + connect);

@@ -18,5 +18,6 @@ bool espcons_abort_pending(void); /* true = пользователь нажал 
 void espcons_ota_menu(bool device); /* прошить прибор (true) или шлюз */
 void espcons_ota_check(void);       /* разовая проверка сервера обновлений */
 int espcons_ota_version(void);      /* 0 = нет обновления, иначе версия */
+void espcons_ota_pend_check(void);  /* исполнить отложенную прошивку прибора */
 
 #endif /* GW_ESPCONS_H */
