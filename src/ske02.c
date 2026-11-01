@@ -228,9 +228,21 @@ static void info_cb(char *line, void *user)
     {
         char model[8] = {0};
         char fw[8] = {0};
-        char *m = line + 5, *w, *f, *we;
+        char hw[8] = {0};
+        char *m = line + 5, *w, *f, *we, *ph;
         while (*m == ' ')
             m++;
+        /* hw - САМЫМ ПЕРВЫМ: дальше по коду пишутся NUL-усечения
+         * токенов, а strstr не видит текст за встроенным NUL
+         * (так hw терялся и превращался в "0") */
+        ph = strstr(line, "hw ");
+        if (ph)
+        {
+            char *he = strchr(ph + 3, ' ');
+            if (he)
+                *he = 0;
+            strncpy(hw, ph + 3, sizeof(hw) - 1);
+        }
         w = strchr(m, ' ');
         if (w)
             *w = 0;
@@ -247,7 +259,9 @@ static void info_cb(char *line, void *user)
         if (model[0] && fw[0])
         {
             xSemaphoreTake(sLock, portMAX_DELAY);
-            snprintf(sCtx.version, sizeof(sCtx.version), "%s/%s", model, fw);
+            /* SKE02_10_3525: модель_железо_прошивка (низ главной) */
+            snprintf(sCtx.version, sizeof(sCtx.version), "%s_%s_%s",
+                     model, hw[0] ? hw : "0", fw);
             xSemaphoreGive(sLock);
         }
     }
