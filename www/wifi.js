@@ -26,8 +26,12 @@
             box.innerHTML = h + '</table>';
         }
         function pick(i) { document.getElementById('ssid').value = NETS[i].s }
-        /* скан запускать при каждом входе в раздел Wi-Fi */
-        const inWifi = () => location.hash === '#wifi' || location.hash === '';
+        /* скан запускать при каждом входе в раздел Wi-Fi.
+         * Пустой хэш - только если путь /wifi (так приземляется
+         * captive-портал); на главной (hash пуст, путь /) скана НЕТ */
+        const inWifi = () => location.hash === '#wifi' ||
+            (location.hash === '' &&
+             location.pathname.replace(/\/$/, '') === '/wifi');
         if (inWifi()) wifiLoad();
         window.addEventListener('hashchange', () => { if (inWifi()) wifiLoad() });
         async function forgetWifi() {

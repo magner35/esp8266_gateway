@@ -2451,7 +2451,9 @@ wSync();
             box.innerHTML = h + '</table>';
         }
         function pick(i) { document.getElementById('ssid').value = NETS[i].s }
-        const inWifi = () => location.hash === '#wifi' || location.hash === '';
+        const inWifi = () => location.hash === '#wifi' ||
+            (location.hash === '' &&
+             location.pathname.replace(/\/$/, '') === '/wifi');
         if (inWifi()) wifiLoad();
         window.addEventListener('hashchange', () => { if (inWifi()) wifiLoad() });
         async function forgetWifi() {

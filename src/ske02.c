@@ -1453,6 +1453,9 @@ static void meter_task(void *arg)
                         /* отложенная прошивка прибора: после вытаскивания
                          * USB (сессия кончилась) или после ребута шлюза */
                         espcons_ota_pend_check();
+                        /* окно 12ч NTP истекло - SNTP сам стартует
+                         * (раньше жило в удалённой stat_task) */
+                        ntp_poll_window();
                     }
                     static TickType_t lastBeat;
                     static uint8_t sEditCnt;   /* прошлый маркер правки */
@@ -1536,12 +1539,18 @@ static void meter_task(void *arg)
                          * reent - параллельное %f в двух задачах
                          * (тут и httpd /api/values) рвёт dtoa-freelist
                          * и валит шлюз IllegalInstruction-ом с float-
-                         * битами в PC (оплачено тремя крашами) */
-                        DBG("ske02: m ok (rate %u.%02u, total %u.%u)\n",
+                         * битами в PC (оплачено тремя крашами).
+                         * Сердцебиение мониторинга живёт здесь же
+                         * (вместо удалённой stat_task): heap/min/hwm */
+                        DBG("ske02: m ok (rate %u.%02u, total %u.%u, "
+                            "heap %u min %u hwm %u)\n",
                             (unsigned)sCtx.vals.rate,
                             (unsigned)((uint32_t)(sCtx.vals.rate * 100) % 100),
                             (unsigned)sCtx.vals.total,
-                            (unsigned)((uint32_t)(sCtx.vals.total * 10) % 10));
+                            (unsigned)((uint32_t)(sCtx.vals.total * 10) % 10),
+                            (unsigned)esp_get_free_heap_size(),
+                            (unsigned)esp_get_minimum_free_heap_size(),
+                            (unsigned)uxTaskGetStackHighWaterMark(NULL));
                         xSemaphoreGive(sLock);
                     }
                 }
@@ -1592,7 +1601,9 @@ void ske02_start(void)
     sReqDone = xSemaphoreCreateBinary();
     sQueue = xQueueCreate(2, sizeof(ske_req_t *));
     espcons_init(); /* GPIO15 (req) / GPIO12 (ack) для USBESP */
-    xTaskCreate(meter_task, "meter", 4608, NULL, 5, NULL);
+    /* 3840: пик замерен 3240 (hwm 600); 4608 был перестраховкой
+     * на время поиска краша (reent-гонка %f) - возвращаем кучу */
+    xTaskCreate(meter_task, "meter", 3840, NULL, 5, NULL);
 }
 
 bool ske02_request(const ske_req_t *req, uint32_t timeout_ms)

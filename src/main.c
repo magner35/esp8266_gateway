@@ -87,46 +87,11 @@ static void boot_task(void *arg)
     vTaskDelete(NULL);
 }
 
-/*
- * Сводка состояния раз в 30 с на UART1: видно без браузера, жив ли
- * WiFi, какой адрес и что с heap — когда "страница недоступна",
- * но прибор обменивается.
- */
-static void stat_task(void *arg)
-{
-    tcpip_adapter_ip_info_t ip;
-    (void)arg;
-    vTaskDelay(pdMS_TO_TICKS(15000));
-    for (;;)
-    {
-        ntp_poll_window(); /* окно 12ч истекло - SNTP сам стартует */
-        if (wifi_ap_ssid())
-        {
-            DBG("gw: portal, heap %u\n",
-                (unsigned)esp_get_free_heap_size());
-        }
-        else if (tcpip_adapter_get_ip_info(TCPIP_ADAPTER_IF_STA, &ip) == ESP_OK)
-        {
-            wifi_ap_record_t ap;
-            int rssi = 0;
-            if (esp_wifi_sta_get_ap_info(&ap) == ESP_OK)
-                rssi = ap.rssi;
-            DBG("gw: sta %s rssi %d heap %u min %u\n",
-                ip4addr_ntoa(&ip.ip), rssi,
-                (unsigned)esp_get_free_heap_size(),
-                (unsigned)esp_get_minimum_free_heap_size());
-        }
-        else
-            DBG("gw: no ip, heap %u min %u\n",
-                (unsigned)esp_get_free_heap_size(),
-                (unsigned)esp_get_minimum_free_heap_size());
-        vTaskDelay(pdMS_TO_TICKS(30000));
-    }
-}
-
 void app_main(void)
 {
     dbg_init(); /* UART1 log + silence the SDK console on UART0 */
     xTaskCreate(boot_task, "boot", 3072, NULL, 4, NULL);
-    xTaskCreate(stat_task, "stat", 2048, NULL, 2, NULL);
+    /* отдельной задачи мониторинга НЕТ (экономия ~2.4К кучи):
+     * сердцебиение heap/min/hwm печатает meter_task в "m ok",
+     * окно NTP проверяет wifi-тик ske02 - как STACKMON в приборе */
 }
