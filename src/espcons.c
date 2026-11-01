@@ -1829,7 +1829,16 @@ void espcons_poll(void)
     {
         int n = uart_read_bytes(EC_UART, &ch, 1, pdMS_TO_TICKS(200));
         if (n <= 0)
+        {
+            /* линия отпущена (кабель вынут, прибор вернул мультиплексор
+             * и поднял PB1 = REQ HIGH): сессии больше нет - тихо
+             * завершаем, обмен ske02 и отложенная прошивка прибора
+             * стартуют сразу после return. Без этого sActive висел
+             * true навсегда и глуш весь обмен */
+            if (gpio_get_level(EC_PIN_REQ))
+                sActive = false;
             return;
+        }
 
         /* стрелки: ESC [ A (вверх) / ESC [ B (вниз) */
         if (ch == 0x1B)
