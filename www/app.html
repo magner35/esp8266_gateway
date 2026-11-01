@@ -53,15 +53,17 @@ button,input,select,textarea{font:inherit;color:inherit}
       font-size: 18px;
       margin: 0 4px 0 0
     }#sec-main .tag {
-      background: #2a3140;
+      background: transparent;
       border-radius: 4px;
       padding: 3px 5px;
       font-size: 12px;
       white-space: nowrap
     }#sec-main .ok {
-      background: #1d5c2f
+      background: transparent;
+      color: #35d066
     }#sec-main .bad {
-      background: #6c2431
+      background: transparent;
+      color: #e05252
     }#sec-main button {
       background: #19284d;
       color: #fff;
@@ -90,8 +92,12 @@ button,input,select,textarea{font:inherit;color:inherit}
     }#sec-main #debug button {
       font-size: 12px;
       padding: 3px 5px
-    }#sec-main #values {
-      display: grid;
+    }#sec-main #devinfo {
+      color: #8b94a7;
+      font-size: 12px;
+      text-align: center;
+      padding: 8px 0 10px;
+    }#sec-main #values {      display: grid;
       grid-template-columns: repeat(auto-fill, minmax(60px, 1fr));
       gap: 6px;
       margin: 0 0 10px 0
@@ -796,11 +802,12 @@ button,input,select,textarea{font:inherit;color:inherit}
 <body>
 <section class="sec" id="sec-main">
 <header>
-    <h1>СКЭ-02 Шлюз</h1>
+    <h1>СКЭ-02 <span id="devsn"></span></h1>
     <span id="link" class="tag">…</span>
     <a href="#" class="gear" id="gear" onclick="gearClick();return false" title="Меню">Меню</a>
   </header>
   <div id="values"></div>
+  <div id="devinfo"></div>
   <button id="btnEdit" onclick="toggleEdit()" hidden>&#9998; Раскладка</button>
 </section>
 <section class="sec" id="sec-widgets">
@@ -831,15 +838,6 @@ button,input,select,textarea{font:inherit;color:inherit}
     <input id="newName" placeholder="имя профиля" onkeydown="if(event.key==='Enter')this.blur()">
     <button onclick="profCreate()">Сохранить текущий набор</button>
   </div>
-  <h2>info</h2>
-  <div id="debug">
-    <button onclick="rescan()">rescan</button>
-    <span id="fw" class="tag"></span>
-    <span class="tag" id="ip"></span>
-    <span class="tag" id="rss"></span>
-    <span class="tag" id="upt"></span>
-    <span class="tag" id="heap"></span>
-  </div>
 </section>
 <section class="sec" id="sec-settings">
 <header>
@@ -852,7 +850,6 @@ button,input,select,textarea{font:inherit;color:inherit}
   <div id="actions">
     <input id="secPw" type="text" class="pwmask" autocomplete="off" inputmode="numeric" maxlength="6" placeholder="пароль" oninput="pwInput()">
     <button id="btnApply" onclick="applyAll()">Применить</button>
-    <button id="btnRefresh" onclick="refreshAll()">Обновить</button>
     <span id="applyMsg" class="flash"></span>
   </div>
   <div id="sections">
@@ -911,6 +908,7 @@ button,input,select,textarea{font:inherit;color:inherit}
             <input class="srv" id="ntpS2" maxlength="31" autocapitalize="off" spellcheck="false">
             <div class="row" style="margin-top:10px">
                 <button onclick="ntpSave()" title="Сохранить настройки и отправить время в прибор">Сохранить</button>
+                <button onclick="ntpSyncNow()" title="Запросить время у NTP-сервера немедленно, окно 12 ч не учитывается">Синхронизировать</button>
                 <span class="msg" id="ntpMsg"></span>
             </div>
         </details>
@@ -2075,6 +2073,7 @@ function vApply(d) {
   }
 }
 let portalMode = false;
+let lastSn = null, lastDevinfo = null; 
 let pollRtt = 0, pollFails = 0;
 const POLL_BASE = 1000, POLL_MAX = 10000;
 function portalBanner(ap, ssid, ip) {
@@ -2146,6 +2145,17 @@ async function pollLoop() {
     }
     portalMode = !!d.ap;
     portalBanner(d.ap, d.ssid, d.ip);
+    if (d.sn !== undefined && d.sn !== lastSn) {
+      lastSn = d.sn;
+      $('devsn').textContent = d.sn ? '№' + d.sn : '';
+    }
+    {
+      const s = (d.fw || '') + (d.ip ? ' · ' + d.ip : '');
+      if (s !== lastDevinfo) {
+        lastDevinfo = s;
+        $('devinfo').textContent = s;
+      }
+    }
     if (d.cfg !== undefined && d.cfg !== lastCfg) {
       if (lastCfg !== null) paramsTick();
       lastCfg = d.cfg;
@@ -2234,19 +2244,6 @@ wSync();
       blob.rev++;
       if (await post()) profRender();
     }
-    async function infoTick() {
-      try {
-        const r = await (await fetch('/api/info')).json();
-        $('fw').textContent = r.fw + ' · параметров: ' + r.count;
-        $('ip').textContent = r.ip;
-        $('rss').textContent = r.ap ? r.rssi + ' dBm' : r.ssid + ': ' + r.rssi + ' dBm';
-        $('upt').textContent = hms(r.uptime);
-        $('heap').textContent = (r.heap / 1024 | 0) + ' KiB';
-      } catch (e) { }
-    }
-    async function rescan() { await fetch('/api/rescan', { method: 'POST' }); infoTick() }
-    function rebootDev() { if (confirm('Перезагрузить прибор?')) fetch('/api/reboot', { method: 'POST' }) }
-    infoTick(); setInterval(infoTick, 5000);
     panelLoad();
 ;
 /* --- settings.js --- */
@@ -2424,16 +2421,6 @@ wSync();
         else flash('команда выполнена');
       } catch (e) { alert('нет ответа от шлюза') }
     }
-    async function refreshAll() {
-      if (dirty.size && !confirm('Есть несохранённые изменения. Обновить без применения?')) return;
-      const b = $('btnRefresh'); b.disabled = true; b.textContent = 'Обновление…';
-      try {
-        const r = await (await fetch('/api/refresh', { method: 'POST' })).json();
-        if (!r.ok) alert('Прибор не ответил на запрос листинга');
-        await tick();
-      } catch (e) { alert('нет ответа от шлюза') }
-      b.disabled = false; b.textContent = 'Обновить';
-    }
     tick();
     setInterval(() => { if (!dirty.size && !document.hidden) tick() }, 30000);
 ;
@@ -2527,6 +2514,23 @@ wSync();
     function ntpAutoChk() {
       const a = $('ntpAuto');
       if (a) $('ntpTz').disabled = a.checked;
+    }
+    async function ntpSyncNow() {
+      const m = $('ntpMsg');
+      m.className = 'msg';
+      m.textContent = 'запрос…';
+      try {
+        await fetch('/api/ntp/sync', { method: 'POST' });
+        m.textContent = 'синхронизация…';
+        for (let i = 0; i < 15; i++) {
+          await new Promise(r => setTimeout(r, 1000));
+          try {
+            const st = await (await fetch('/api/ntp')).json();
+            if (st.sync) { m.textContent = 'время получено'; return }
+          } catch (e) { }
+        }
+        m.textContent = 'сервер не ответил';
+      } catch (e) { m.className = 'msg err'; m.textContent = 'нет ответа от шлюза' }
     }
     async function ntpSave() {
       const m = $('ntpMsg');

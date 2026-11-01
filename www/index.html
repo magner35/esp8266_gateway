@@ -84,8 +84,8 @@
 
     /* маленькая метка-пилюля в шапке (UART: связь, fw, ip...) */
     .tag {
-      background: #2a3140;
-      /* фон метки */
+      background: transparent;
+      /* фон метки: прозрачный */
       border-radius: 4px;
       padding: 3px 5px;
       font-size: 12px;
@@ -93,15 +93,17 @@
     }
 
     .ok {
-      background: #1d5c2f
+      background: transparent;
+      color: #35d066
     }
 
-    /* метка связи: зелёный (связь есть) */
+    /* метка связи: зелёная надпись (связь есть) */
     .bad {
-      background: #6c2431
+      background: transparent;
+      color: #e05252
     }
 
-    /* метка связи: красный (нет связи) */
+    /* метка связи: красная надпись (нет связи) */
 
     /* все обычные кнопки */
     button {
@@ -149,9 +151,16 @@
 
     /* --- 2. сетка виджетов ------------------------------------------- */
 
+    /* нижняя строка главной: версия прибора · адрес шлюза */
+    #devinfo {
+      color: #8b94a7;
+      font-size: 12px;
+      text-align: center;
+      padding: 8px 0 10px;
+    }
+
     /* контейнер всех карточек-виджетов (#values в body) */
-    #values {
-      display: grid;
+    #values {      display: grid;
       /* half-width tracks: a normal card spans 2 tracks (a full cell,
        * 10 chars of 15px monospace), a bit card spans 1 -> two bits
        * pack into one value-card slot */
@@ -513,7 +522,7 @@
 
 <body>
   <header>
-    <h1>СКЭ-02 Шлюз</h1>
+    <h1>СКЭ-02 <span id="devsn"></span></h1>
     <span id="link" class="tag">…</span>
     <!-- кнопка справа вверху: страница панели (раскладка/виджеты/
          Wi-Fi/перезагрузка/прибор/профили); в режиме правки
@@ -521,6 +530,9 @@
     <a href="#" class="gear" id="gear" onclick="gearClick();return false" title="Меню">Меню</a>
   </header>
   <div id="values"></div>
+  <!-- нижняя строка главной: версия прибора + адрес шлюза (из
+       единого опроса /api/values, отдельных запросов нет) -->
+  <div id="devinfo"></div>
   <!-- панели редактирования всё ещё живут здесь (режим правки и
        «Виджеты» открываются с /panel через /?edit=1 и /?widgets=1) -->
   <button id="btnEdit" onclick="toggleEdit()" hidden>&#9998; Раскладка</button>

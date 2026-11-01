@@ -28,6 +28,25 @@
 
     /* Сохранить: сохранить настройки -> дождаться синхронизации ->
      * отправить TIME в прибор. Неудача = короткое сообщение, TIME не шлём */
+    /* ручная принудительная синхронизация: окно 12 ч игнорируется */
+    async function ntpSyncNow() {
+      const m = $('ntpMsg');
+      m.className = 'msg';
+      m.textContent = 'запрос…';
+      try {
+        await fetch('/api/ntp/sync', { method: 'POST' });
+        m.textContent = 'синхронизация…';
+        for (let i = 0; i < 15; i++) {
+          await new Promise(r => setTimeout(r, 1000));
+          try {
+            const st = await (await fetch('/api/ntp')).json();
+            if (st.sync) { m.textContent = 'время получено'; return }
+          } catch (e) { }
+        }
+        m.textContent = 'сервер не ответил';
+      } catch (e) { m.className = 'msg err'; m.textContent = 'нет ответа от шлюза' }
+    }
+
     async function ntpSave() {
       const m = $('ntpMsg');
       try {

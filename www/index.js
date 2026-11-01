@@ -251,6 +251,7 @@ function vApply(d) {
  *     успехов — возврат к базовому темпу.
  */
 let portalMode = false;
+let lastSn = null, lastDevinfo = null; /* шапка № и низ fw·ip: DOM only on change */
 let pollRtt = 0, pollFails = 0;
 /* КОНТРОЛЬНАЯ ТОЧКА "адаптивный одиночный опрос" (ESP8266, мало
  * сокетов, медленный/зашумлённый канал): единственный периодический
@@ -342,6 +343,19 @@ async function pollLoop() {
     }
     portalMode = !!d.ap;
     portalBanner(d.ap, d.ssid, d.ip);
+    /* шапка: заводской номер; низ: версия прибора + адрес шлюза.
+     * Пишем в DOM только при изменении - опрос 5 Гц */
+    if (d.sn !== undefined && d.sn !== lastSn) {
+      lastSn = d.sn;
+      $('devsn').textContent = d.sn ? '№' + d.sn : '';
+    }
+    {
+      const s = (d.fw || '') + (d.ip ? ' · ' + d.ip : '');
+      if (s !== lastDevinfo) {
+        lastDevinfo = s;
+        $('devinfo').textContent = s;
+      }
+    }
     /* смена версии настроек прибора (меняли через меню/консоль СК-Э):
      * шлюз сам перечитывает дерево, мы - сразу подтягиваем параметры */
     if (d.cfg !== undefined && d.cfg !== lastCfg) {

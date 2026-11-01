@@ -106,6 +106,7 @@ typedef struct ProtoCtx
     uint16_t menuCount;
     uint16_t count;      /* parameter count from 'i' */
     char version[20];
+    char serial[11];   /* заводской номер прибора из 'i' (десятичный) */
     uint8_t sectionIds[SKE_MAX_SECTIONS]; /* pool ids of L1 menus, in order */
     uint8_t sectionNum;
 

@@ -12,6 +12,7 @@
 #include "debug.h"
 #include "ske02.h"
 #include "mb_pass.h"
+#include "web.h"
 
 /*
  * Прозрачный Modbus TCP (порт 502). Одна транзакция в момент (RTU-движок
@@ -21,7 +22,8 @@
  */
 
 #define MBP_PORT         502
-#define MBP_MAX_CONN     2   /* лимит ОДНОВРЕМЕННЫХ клиентов: +1 = ~3.2К кучи */
+#define MBP_MAX_CONN     2   /* веб ВКЛ: лимит ОДНОВРЕМЕННЫХ клиентов, +1 = ~3.2К кучи */
+#define MBP_MAX_CONN_NOWEB 5 /* веб ВЫКЛ (фича «WEB panel»): куча httpd свободна */
 #define MBP_RXBUF        300
 #define MBP_TRANSACT_MS  800
 
@@ -149,7 +151,7 @@ static void mb_pass_task(void *arg)
     addr.sin_family = AF_INET;
     addr.sin_addr.s_addr = htonl(INADDR_ANY);
     addr.sin_port = htons(MBP_PORT);
-    if (bind(ls, (struct sockaddr *)&addr, sizeof(addr)) < 0 || listen(ls, MBP_MAX_CONN) < 0)
+    if (bind(ls, (struct sockaddr *)&addr, sizeof(addr)) < 0 || listen(ls, MBP_MAX_CONN_NOWEB) < 0)
     {
         DBG("mbp: bind/listen fail\n");
         close(ls);
@@ -195,10 +197,12 @@ static void mb_pass_task(void *arg)
             setsockopt(fd, IPPROTO_TCP, TCP_KEEPCNT, &cnt, sizeof(cnt));
         }
         /* каждое ПОДКЛЮЧЁННОЕ соединение стоит ~3.2К кучи (стек задачи),
-         * поэтому лимит явный: сверх MBP_MAX_CONN - отказ подключения */
-        if (sClients >= MBP_MAX_CONN)
+         * поэтому лимит явный. Веб выключен фичей «WEB panel» (httpd
+         * погашен, ~12К кучи свободно) - пускаем больше клиентов */
+        int max_conn = web_httpd_active() ? MBP_MAX_CONN : MBP_MAX_CONN_NOWEB;
+        if (sClients >= max_conn)
         {
-            DBG("mbp: client refused (limit %d)\n", MBP_MAX_CONN);
+            DBG("mbp: client refused (limit %d)\n", max_conn);
             close(fd);
             continue;
         }

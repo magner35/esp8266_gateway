@@ -61,6 +61,10 @@ static void boot_task(void *arg)
     DBG("gateway: settings fully loaded, starting WiFi\n");
     wifi_start();
     vTaskDelay(pdMS_TO_TICKS(2000));
+    /* проверка сервера обновлений ДО старта веба: куча свободна от
+     * httpd, статус OTA в меню прибора готов к первому опросу;
+     * дальнейшие проверки - раз в сутки */
+    espcons_ota_boot_check();
     web_start(); /* портал нуждается в httpd всегда */
     /* captive-DNS стартует из start_portal(): в STA-режиме задачи
      * DNS не существует вовсе - ни стека, ни строки в логе */
@@ -95,6 +99,7 @@ static void stat_task(void *arg)
     vTaskDelay(pdMS_TO_TICKS(15000));
     for (;;)
     {
+        ntp_poll_window(); /* окно 12ч истекло - SNTP сам стартует */
         if (wifi_ap_ssid())
         {
             DBG("gw: portal, heap %u\n",

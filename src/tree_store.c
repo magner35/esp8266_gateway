@@ -83,6 +83,22 @@ void tree_commit(const ProtoCtx *ctx, uint16_t count)
     if (sFirstErr)
         return;
     nvs_set_blob(sNvs, "meta", meta, sizeof(meta));
+    /* СТЁРТЬ записи, не встретившиеся в ЭТОМ листинге: дерево без
+     * upfront-стирания (обрыв захвата не должен губить рабочее
+     * дерево), но после УСПЕШНОГО коммита хвосты старых id (сдвиг
+     * номеров при изменении меню прибора) остаются в NVS навсегда
+     * и показываются дубликатами. seenMap = истина текущего прохода */
+    {
+        uint16_t id;
+        char key[8];
+        for (id = 0; id < SKE_MAX_PARAMS; id++)
+        {
+            if (ctx->seenMap[id >> 3] & (1u << (id & 7)))
+                continue;
+            snprintf(key, sizeof(key), "p%u", id);
+            nvs_erase_key(sNvs, key); /* нет ключа - не ошибка */
+        }
+    }
     nvs_commit(sNvs);
     DBG("tree: %u params stored (wrote %u, err %d)\n",
         (unsigned)count, (unsigned)sWrote, sFirstErr);

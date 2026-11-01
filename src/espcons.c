@@ -81,6 +81,7 @@ static void upd_url_init(void); /* определена ниже, рядом с 
 static void ota_pend_load(void); /* определена ниже, в OTA-блоке */
 static void ota_pend_save(bool on); /* там же */
 static volatile bool sOtaPend;     /* отложенная прошивка прибора (см. OTA-блок) */
+static int8_t sOtaAvail = -1; /* OTA-статус: -1 не проверено, 0 нет, 1 есть, 2 сервер недоступен */
 
 void espcons_init(void)
 {
@@ -1228,6 +1229,9 @@ static void ota_menu_task(void *arg)
         if (sUpdResult < 0)
         {
             DBG("ota: fetch failed: %s\n", sUpdErr);
+            /* статус для меню прибора: ближайший пуш ушлёт WOTA -1,
+             * прибор покажет "Сервер недоступен" */
+            sOtaAvail = 2;
             goto out;
         }
     }
@@ -1275,7 +1279,7 @@ void espcons_ota_menu(bool device)
  * Раз после старта: тихий GET versions.txt, сравнение gw-части бандла
  * со своей GW_FWVERSION; результат шлюз пушит в прибор словом WOTA */
 static char sOtaSrvVer[8];    /* версия gw на сервере */
-static int8_t sOtaAvail = -1; /* -1 не проверено, 0 нет, 1 есть, 2 сервер недоступен */
+
 static volatile bool sOtaCheckBusy; /* проверка уже выполняется */
 static TickType_t sOtaLastCheck;    /* тик последней проверки (период) */
 
@@ -1421,10 +1425,9 @@ finish:
     vTaskDelete(NULL);
 }
 
-/* период: повторная проверка наличия обновления (первая - на первом
- * wifi-тике после старта); путь тот же, что у консольного ping -
- * TCP-connect к серверу + GET versions.txt */
-#define OTA_RECHECK_MS (10u * 60u * 1000u)
+/* период: повторная проверка наличия обновления - РАЗ В СУТКИ;
+ * стартовая (до веба) - espcons_ota_boot_check из boot_task */
+#define OTA_RECHECK_MS (24UL * 60UL * 60UL * 1000UL)
 
 void espcons_ota_check(void)
 {
@@ -1464,6 +1467,36 @@ void espcons_ota_pend_check(void)
     sOtaPend = false; /* RAM-флаг снят; NVS очистит задача после попытки
                        * (обрыв питания посреди прошивки = повтор на буте) */
     espcons_ota_menu(true);
+}
+
+/* стартовая проверка сервера обновлений ДО старта веба (boot_task):
+ * куча свободна от httpd, статус готов к первому открытию страницы.
+ * Ждём IP (до 30 с), запускаем проверку и ждём её завершения
+ * (ограничено 40 с - таймауты самой задачи короче) */
+void espcons_ota_boot_check(void)
+{
+    tcpip_adapter_ip_info_t ip;
+    TickType_t t0;
+    int w;
+
+    if (!sUpdUrl[0])
+        return; /* сервер не настроен - не задерживаем веб */
+    ip.ip.addr = 0;
+    for (w = 0; w < 30 && !ip.ip.addr; w++)
+    {
+        vTaskDelay(pdMS_TO_TICKS(1000));
+        tcpip_adapter_get_ip_info(TCPIP_ADAPTER_IF_STA, &ip);
+    }
+    if (!ip.ip.addr)
+    {
+        DBG("ota: no ip at boot, check deferred\n");
+        return; /* сети нет - возьмёт суточный цикл */
+    }
+    espcons_ota_check(); /* запускает задачу проверки */
+    t0 = xTaskGetTickCount();
+    while (sOtaCheckBusy &&
+           (xTaskGetTickCount() - t0) < pdMS_TO_TICKS(40000))
+        vTaskDelay(pdMS_TO_TICKS(200));
 }
 
 /* ping — tcp-проверка достижимости сервера обновлений (DNS + connect);

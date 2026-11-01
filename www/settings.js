@@ -200,18 +200,6 @@
         else flash('команда выполнена');
       } catch (e) { alert('нет ответа от шлюза') }
     }
-    /* "Обновить": full 'l' listing on the device (settings poll is on-demand
-     * only), then the page reloads from the refreshed cache */
-    async function refreshAll() {
-      if (dirty.size && !confirm('Есть несохранённые изменения. Обновить без применения?')) return;
-      const b = $('btnRefresh'); b.disabled = true; b.textContent = 'Обновление…';
-      try {
-        const r = await (await fetch('/api/refresh', { method: 'POST' })).json();
-        if (!r.ok) alert('Прибор не ответил на запрос листинга');
-        await tick();
-      } catch (e) { alert('нет ответа от шлюза') }
-      b.disabled = false; b.textContent = 'Обновить';
-    }
     tick();
     /* периодическое обновление (30с): после правки параметра в меню
      * САМОГО прибора шлюз перечитывает дерево по cfg_rev - подтянем

@@ -21,9 +21,42 @@
 #include "wifi.h" /* wifi_ap_ssid: проверка режима портала */
 #include "ntp.h"
 #include "storage.h"
+#include "nvs.h"
 
 static ntp_cfg_t sCfg;
 static bool sSynced = false;
+
+/* окно повторной синхронизации 12 ч (как у push времени в прибор):
+ * мягкий ребут шлюза НЕ должен снова дёргать NTP-сервер. Метка
+ * последней УСПЕШНОЙ синхронизации - в NVS "gw"/"ntplast"; после
+ * потери питания часы шлюза сбрасываются и синхронизация обязательна */
+#define NTP_RESYNC_S (12UL * 3600UL)
+static bool sRunning;     /* SNTP-опрос активен */
+static bool sWindowSkip;  /* в окне 12 ч: время верное, опрос не нужен */
+static TickType_t sWaitMeter; /* ждём время прибора (DS1307) с этого тика */
+
+static uint32_t ntp_last_load(void)
+{
+    nvs_handle_t h;
+    uint32_t v = 0;
+    if (nvs_open("gw", NVS_READONLY, &h) == ESP_OK)
+    {
+        nvs_get_u32(h, "ntplast", &v);
+        nvs_close(h);
+    }
+    return v;
+}
+
+static void ntp_last_save(uint32_t t)
+{
+    nvs_handle_t h;
+    if (nvs_open("gw", NVS_READWRITE, &h) == ESP_OK)
+    {
+        nvs_set_u32(h, "ntplast", t);
+        nvs_commit(h);
+        nvs_close(h);
+    }
+}
 
 /* определённый по IP часовой пояс (часы); sAutoTzOk = уже определён */
 static int8_t sAutoTz = 0;
@@ -38,6 +71,12 @@ static void on_sync(struct timeval *tv)
     (void)tv;
     sSynced = true;
     DBG("ntp: time synced\n");
+    /* метка для окна 12 ч (переживает мягкий ребут шлюза) */
+    {
+        time_t now = time(NULL);
+        if (now > 1600000000UL)
+            ntp_last_save((uint32_t)now);
+    }
     /* сеть точно работает - хорошее время для IP-геолокации */
     ntp_tz_auto_fetch();
 }
@@ -209,9 +248,27 @@ void ntp_tz_auto_fetch(void)
         sTzBusy = false;
 }
 
+/* общий запуск SNTP-опроса (без проверок) */
+static void ntp_start_poll(void)
+{
+    sntp_setoperatingmode(SNTP_OPMODE_POLL);
+    sntp_setservername(0, sCfg.s1);
+    if (sCfg.s2[0])
+        sntp_setservername(1, sCfg.s2);
+    else
+        sntp_setservername(1, NULL);
+    sntp_init();
+    sRunning = true;
+    sWindowSkip = false;
+    DBG("ntp: poll %s%s%s\n", sCfg.s1, sCfg.s2[0] ? " + " : "",
+        sCfg.s2[0] ? sCfg.s2 : "");
+}
+
 void ntp_apply(void)
 {
     sntp_stop();
+    sRunning = false;
+    sWindowSkip = false;
     sSynced = false;
     if (!sCfg.on || !sCfg.s1[0])
         return;
@@ -222,17 +279,65 @@ void ntp_apply(void)
         DBG("ntp: skip in portal mode\n");
         return;
     }
-    /* второй сервер не обязателен: один тоже валиден */
-    sntp_setoperatingmode(SNTP_OPMODE_POLL);
-    sntp_setservername(0, sCfg.s1);
-    if (sCfg.s2[0])
-        sntp_setservername(1, sCfg.s2);
-    else
-        sntp_setservername(1, NULL);
-    sntp_init();
-    DBG("ntp: poll %s%s%s\n", sCfg.s1, sCfg.s2[0] ? " + " : "",
-        sCfg.s2[0] ? sCfg.s2 : "");
+    /* часы шлюза сброшены (потеря питания): сначала время ПРИБОРА -
+     * строка "clock" из его 'i' вызовет ntp_apply снова. Не дождались
+     * за 5 минут (прибора нет/мёртв RTC) - синхронизируемся по NTP */
+    {
+        uint32_t last = ntp_last_load();
+        uint32_t now = (uint32_t)time(NULL);
+        if (now < 1600000000UL)
+        {
+            if (sWaitMeter == 0)
+            {
+                sWaitMeter = xTaskGetTickCount();
+                DBG("ntp: clock lost, waiting for meter rtc\n");
+                return;
+            }
+            if ((xTaskGetTickCount() - sWaitMeter) <
+                pdMS_TO_TICKS(5UL * 60 * 1000))
+                return; /* прибор ещё не ответил */
+            DBG("ntp: meter rtc silent 5 min, fallback to NTP\n");
+        }
+        else
+        {
+            sWaitMeter = 0;
+            /* окно 12 ч: синхронизировались недавно и часы живы
+             * (мягкий ребут или время прибора) - сервер не дёргаем */
+            if (last > 1600000000UL && now > last &&
+                now - last < NTP_RESYNC_S)
+            {
+                if (!sWindowSkip) /* лог один раз, а не каждые 30 с */
+                    DBG("ntp: synced %lus ago, in 12h window - skip poll\n",
+                        (unsigned long)(now - last));
+                sWindowSkip = true;
+                sSynced = true; /* время уже верное */
+                return;
+            }
+        }
+    }
+    ntp_start_poll();
     ntp_tz_auto_fetch();
+}
+
+/* ручная синхронизация (кнопка в вебе): окно 12 ч игнорируем */
+void ntp_force_sync(void)
+{
+    if (!sCfg.on || !sCfg.s1[0] || wifi_ap_ssid())
+        return;
+    sntp_stop();
+    sSynced = false;
+    ntp_start_poll();
+    DBG("ntp: manual sync requested\n");
+}
+
+/* периодический вызов (stat_task, 30 с): переоценить - окно 12 ч
+ * истекло или часы всё ещё ждут (прибор молчит - 5-мин fallback) */
+void ntp_poll_window(void)
+{
+    if (sRunning || sSynced)
+        return;
+    if (sWindowSkip || (uint32_t)time(NULL) < 1600000000UL)
+        ntp_apply();
 }
 
 const ntp_cfg_t *ntp_cfg(void)

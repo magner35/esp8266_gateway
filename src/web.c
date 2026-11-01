@@ -466,6 +466,10 @@ static esp_err_t h_api_values(httpd_req_t *req)
     static SkeValues cached;     /* last snapshot, served without waiting */
     const gw_settings_t *st = storage_get();
     bool portal = wifi_ap_ssid() != NULL;
+    /* версия/серийник прибора и IP: едут в этом же опросе (5 Гц),
+     * отдельный /api/info главной странице не нужен */
+    char fw[24] = "", sn[12] = "", ipstr[16] = "";
+    static char sFw[24], sSn[12]; /* прошлые значения при занятом приборе */
 
     /*
      * link/ready ride this 1 Hz endpoint so the UI badge refreshes with
@@ -483,6 +487,10 @@ static esp_err_t h_api_values(httpd_req_t *req)
         {
             cached = *v;
         }
+        strlcpy(fw, ske02_ctx()->version, sizeof(fw));
+        strlcpy(sn, ske02_ctx()->serial, sizeof(sn));
+        strlcpy(sFw, fw, sizeof(sFw));
+        strlcpy(sSn, sn, sizeof(sSn));
         xSemaphoreGive(ske02_lock());
     }
     else
@@ -491,6 +499,16 @@ static esp_err_t h_api_values(httpd_req_t *req)
         v = &cached;
         link = 1;
         ready = 1;
+        strlcpy(fw, sFw, sizeof(fw));
+        strlcpy(sn, sSn, sizeof(sn));
+    }
+    if (portal)
+        strlcpy(ipstr, "192.168.4.1", sizeof(ipstr));
+    else
+    {
+        tcpip_adapter_ip_info_t ip;
+        if (tcpip_adapter_get_ip_info(TCPIP_ADAPTER_IF_STA, &ip) == ESP_OK)
+            strlcpy(ipstr, ip4addr_ntoa(&ip.ip), sizeof(ipstr));
     }
     if (!cached.updated)
     {
@@ -534,15 +552,17 @@ static esp_err_t h_api_values(httpd_req_t *req)
         httpd_resp_set_type(req, "application/json");
         off = snprintf(out, sizeof(out),
                        "{\"ok\":1,\"age\":%lu,\"link\":%d,\"ready\":%d,"
-                       "\"now\":%lu,\"cfg\":%u,\"ap\":%d,\"ip\":\"%s\",\"ssid\":\"%s\",\"seq\":[",
+                       "\"now\":%lu,\"cfg\":%u,\"ap\":%d,\"ip\":\"%s\",\"ssid\":\"%s\","
+                       "\"fw\":\"%s\",\"sn\":\"%s\",\"seq\":[",
                        (unsigned long)((xTaskGetTickCount() * portTICK_PERIOD_MS -
                                         v->updated) / 1000),
                        link, ready,
                        (unsigned long)(xTaskGetTickCount() * portTICK_PERIOD_MS),
                        (unsigned)(v->edit_cnt ^ v->edit_id),
                        portal ? 1 : 0,
-                       portal ? "192.168.4.1" : "",
-                       portal ? wifi_ap_ssid() : st->ssid);
+                       ipstr,
+                       portal ? wifi_ap_ssid() : st->ssid,
+                       fw, sn);
         httpd_resp_send_chunk(req, out, off);
         for (int i = 0; i < n; i++)
         {
@@ -1630,6 +1650,16 @@ static esp_err_t h_api_ntp_get(httpd_req_t *req)
 }
 
 /* принудительная отправка времени в прибор (кнопка на Сервисе) */
+/* POST /api/ntp/sync: принудительная ручная синхронизация
+ * (кнопка в вебе) - окно 12 ч игнорируется */
+static esp_err_t h_api_ntp_sync(httpd_req_t *req)
+{
+    httpd_resp_set_type(req, "application/json");
+    ntp_force_sync();
+    httpd_resp_send(req, "{\"ok\":true}", 10);
+    return ESP_OK;
+}
+
 static esp_err_t h_api_ntp_push(httpd_req_t *req)
 {
     char out[192];
@@ -1806,6 +1836,11 @@ void web_ota_enable(bool on)
     DBG("web: ota %s\n", on ? "allowed" : "denied");
 }
 
+bool web_httpd_active(void)
+{
+    return sServer != NULL;
+}
+
 void web_start(void)
 {
     httpd_config_t cfg = HTTPD_DEFAULT_CONFIG();
@@ -1906,6 +1941,9 @@ void web_start(void)
     httpd_register_uri_handler(sServer, &u);
     u = (httpd_uri_t){.uri = "/api/ntp/push", .method = HTTP_POST,
                       .handler = h_api_ntp_push};
+    httpd_register_uri_handler(sServer, &u);
+    u = (httpd_uri_t){.uri = "/api/ntp/sync", .method = HTTP_POST,
+                      .handler = h_api_ntp_sync};
     httpd_register_uri_handler(sServer, &u);
     u = (httpd_uri_t){.uri = "/api/avr/upload", .method = HTTP_POST,
                       .handler = h_api_avr_upload};

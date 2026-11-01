@@ -24,6 +24,7 @@
 #include <stdarg.h>   /* va_list: wifi_send_line */
 #include <string.h>
 #include <time.h>
+#include <sys/time.h> /* settimeofday: время из DS1307 прибора */
 
 #include "driver/uart.h"
 #include "freertos/queue.h"
@@ -250,20 +251,38 @@ static void info_cb(char *line, void *user)
             xSemaphoreGive(sLock);
         }
     }
+    else if (!strncmp(line, "clock", 5))
+    {
+        /* время прибора (DS1307, UNIX UTC) из 'i': если часы шлюза
+         * сброшены (потеря питания) - берём отсюда, NTP не дёргаем;
+         * затем ntp_apply сам решит по окну 12 ч, нужен ли сервер */
+        long t = strtol(line + 5, NULL, 10);
+        time_t now = time(NULL);
+        if (t > 1600000000L && (uint32_t)now < 1600000000UL)
+        {
+            struct timeval tv;
+            tv.tv_sec = (time_t)t;
+            tv.tv_usec = 0;
+            settimeofday(&tv, NULL);
+            DBG("ntp: clock taken from meter rtc\n");
+            ntp_apply();
+        }
+    }
     else if (!strncmp(line, "serial", 6))
     {
         char *p = strstr(line, "params");
         long cnt;
+        long sn = strtol(line + 6, NULL, 10);
         if (!p)
             return;
         cnt = strtol(p + 6, NULL, 10);
+        xSemaphoreTake(sLock, portMAX_DELAY);
+        if (sn > 0)
+            snprintf(sCtx.serial, sizeof(sCtx.serial), "%06lu", sn);
         if (cnt > 0)
-        {
-            xSemaphoreTake(sLock, portMAX_DELAY);
             sCtx.count =
                 (cnt > SKE_MAX_PARAMS) ? SKE_MAX_PARAMS : (uint16_t)cnt;
-            xSemaphoreGive(sLock);
-        }
+        xSemaphoreGive(sLock);
     }
 }
 
@@ -302,7 +321,10 @@ static bool capture_listing(TickType_t timeout)
      * порождает команду уровнем глубже. Ответ уровня < 1.5К - буфер
      * 2.3К в куче, выделяется ОДИН РАЗ (старт, куча девственна).
      */
-    char queue[40][14];
+    /* очередь static (560Б): на стеке + кадры разбора переполняли
+     * meter_task (IllegalInstruction с мусорным PC после relist);
+     * вызывается только из meter_task - реентерабельность не нужна */
+    static char queue[40][14];
     int qt = 0;
     int chunks = 0;
     int len;
@@ -1199,6 +1221,11 @@ static void exec_request(ske_req_t *req)
     case SKEQ_RESCAN:
         xSemaphoreTake(sLock, portMAX_DELAY);
         proto_reset(&sCtx);
+        /* proto_init внутри memsets ВЕСЬ контекст: хуки обнуляются и
+         * дерево после рескана не пишется ("wrote 0, err 0") - как в
+         * ske02_start, ставим их заново СРАЗУ после reset */
+        sCtx.on_param = on_tree_param;
+        sCtx.on_value = on_tree_value;
         xSemaphoreGive(sLock);
         /* the reset wipes count/version too: re-run the full wake
          * sequence ('e' + 'i'), not just the listing - otherwise
@@ -1505,8 +1532,16 @@ static void meter_task(void *arg)
                     {
                         lastBeat = sLastOk;
                         xSemaphoreTake(sLock, portMAX_DELAY);
-                        DBG("ske02: m ok (rate %.2f, total %.1f)\n",
-                            (double)sCtx.vals.rate, (double)sCtx.vals.total);
+                        /* БЕЗ %f: целые. newlib на ESP8266 с общим
+                         * reent - параллельное %f в двух задачах
+                         * (тут и httpd /api/values) рвёт dtoa-freelist
+                         * и валит шлюз IllegalInstruction-ом с float-
+                         * битами в PC (оплачено тремя крашами) */
+                        DBG("ske02: m ok (rate %u.%02u, total %u.%u)\n",
+                            (unsigned)sCtx.vals.rate,
+                            (unsigned)((uint32_t)(sCtx.vals.rate * 100) % 100),
+                            (unsigned)sCtx.vals.total,
+                            (unsigned)((uint32_t)(sCtx.vals.total * 10) % 10));
                         xSemaphoreGive(sLock);
                     }
                 }
@@ -1557,7 +1592,7 @@ void ske02_start(void)
     sReqDone = xSemaphoreCreateBinary();
     sQueue = xQueueCreate(2, sizeof(ske_req_t *));
     espcons_init(); /* GPIO15 (req) / GPIO12 (ack) для USBESP */
-    xTaskCreate(meter_task, "meter", 3584, NULL, 5, NULL);
+    xTaskCreate(meter_task, "meter", 4608, NULL, 5, NULL);
 }
 
 bool ske02_request(const ske_req_t *req, uint32_t timeout_ms)

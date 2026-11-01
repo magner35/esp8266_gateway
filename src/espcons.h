@@ -16,8 +16,9 @@ bool espcons_abort_pending(void); /* true = пользователь нажал 
 
 /* OTA из меню прибора (маркеры otadev/otagw из консоли прибора) */
 void espcons_ota_menu(bool device); /* прошить прибор (true) или шлюз */
-void espcons_ota_check(void);       /* разовая проверка сервера обновлений */
+void espcons_ota_check(void);       /* проверка сервера (сутки между) */
 int espcons_ota_version(void);      /* 0 = нет обновления, иначе версия */
 void espcons_ota_pend_check(void);  /* исполнить отложенную прошивку прибора */
+void espcons_ota_boot_check(void);  /* старт: проверить сервер ДО веба */
 
 #endif /* GW_ESPCONS_H */

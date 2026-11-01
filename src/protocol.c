@@ -247,6 +247,46 @@ static uint32_t text_to_raw(SkeParam *p, const char *text)
     }
 }
 
+/* целочисленный float -> строка БЕЗ newlib %f: на этом SDK per-task
+ * reent сломан (общий на все задачи), и параллельное %f в двух
+ * задачах (meter_task SET + httpd /api/values) рвёт общий dtoa
+ * freelist - IllegalInstruction с float-битами в PC. Здесь только
+ * целочисленный snprintf и soft-float умножения (без reent) */
+static void fmt_float(char *buf, size_t cap, double v, uint8_t prec)
+{
+    uint64_t p10 = 1;
+    uint64_t fr;
+    int64_t ip;
+    uint8_t i;
+    size_t o = 0;
+
+    if (v < 0 && cap > 1)
+    {
+        buf[o++] = '-';
+        v = -v;
+    }
+    for (i = 0; i < prec; i++)
+        p10 *= 10;
+    ip = (int64_t)v;
+    fr = (uint64_t)((v - (double)ip) * (double)p10 + 0.5);
+    if (fr >= p10)
+    {
+        ip += 1;
+        fr -= p10;
+    }
+    o += (size_t)snprintf(buf + o, cap - o, "%lld", (long long)ip);
+    if (prec && o + 2 + prec < cap)
+    {
+        buf[o++] = '.';
+        for (i = prec; i > 0; i--)
+        {
+            p10 /= 10;
+            buf[o++] = (char)('0' + (fr / p10) % 10);
+        }
+        buf[o] = 0;
+    }
+}
+
 /* raw -> display text for the parameter type */
 void proto_raw_to_display(uint8_t type, uint32_t raw, char *buf, size_t cap)
 {
@@ -255,7 +295,7 @@ void proto_raw_to_display(uint8_t type, uint32_t raw, char *buf, size_t cap)
         float f;
         char *dot;
         memcpy(&f, &raw, 4);
-        snprintf(buf, cap, "%.3f", (double)f);
+        fmt_float(buf, cap, (double)f, 3);
         dot = strchr(buf, '.');
         if (dot)
         {
@@ -319,7 +359,7 @@ void proto_raw_to_cmd(uint8_t type, uint32_t raw, char *buf, size_t cap)
         char *q;
         char *end;
         memcpy(&f, &raw, 4);
-        snprintf(buf, cap, "%.6f", (double)f);
+        fmt_float(buf, cap, (double)f, 6);
         dot = strchr(buf, '.');
         if (dot)
         {

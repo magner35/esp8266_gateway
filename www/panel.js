@@ -87,19 +87,7 @@
       if (await post()) profRender();
     }
 
-    /* отладочная панель */
-    async function infoTick() {
-      try {
-        const r = await (await fetch('/api/info')).json();
-        $('fw').textContent = r.fw + ' · параметров: ' + r.count;
-        $('ip').textContent = r.ip;
-        $('rss').textContent = r.ap ? r.rssi + ' dBm' : r.ssid + ': ' + r.rssi + ' dBm';
-        $('upt').textContent = hms(r.uptime);
-        $('heap').textContent = (r.heap / 1024 | 0) + ' KiB';
-      } catch (e) { }
-    }
-    async function rescan() { await fetch('/api/rescan', { method: 'POST' }); infoTick() }
-    function rebootDev() { if (confirm('Перезагрузить прибор?')) fetch('/api/reboot', { method: 'POST' }) }
-    infoTick(); setInterval(infoTick, 5000);
+    /* версия/адрес прибора живут на главной странице; обслуживание
+     * (рескан/перезагрузка) - на странице «Сервис» */
     panelLoad();
   

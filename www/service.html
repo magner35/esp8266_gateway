@@ -190,6 +190,7 @@
             <input class="srv" id="ntpS2" maxlength="31" autocapitalize="off" spellcheck="false">
             <div class="row" style="margin-top:10px">
                 <button onclick="ntpSave()" title="Сохранить настройки и отправить время в прибор">Сохранить</button>
+                <button onclick="ntpSyncNow()" title="Запросить время у NTP-сервера немедленно, окно 12 ч не учитывается">Синхронизировать</button>
                 <span class="msg" id="ntpMsg"></span>
             </div>
         </details>

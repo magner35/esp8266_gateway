@@ -7,7 +7,9 @@
 #include "storage.h"
 
 void ntp_init(void);               /* загрузить конфиг, повесить колбэк */
-void ntp_apply(void);              /* запустить/остановить SNTP по конфигу */
+void ntp_apply(void);              /* SNTP по конфигу, окно 12ч из NVS */
+void ntp_force_sync(void);         /* ручная синхронизация: окно игнорируем */
+void ntp_poll_window(void);        /* 30-с вызов: окно истекло - стартовать */
 const ntp_cfg_t *ntp_cfg(void);
 void ntp_set(const ntp_cfg_t *c);  /* сохранить в NVS и применить */
 bool ntp_synced(void);
