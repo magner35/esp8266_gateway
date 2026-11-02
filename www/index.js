@@ -241,6 +241,9 @@ function vApply(d) {
  * Вызывается из pollLoop при переходе в OFFLINE */
 function vOffline() {
   if (!vBuilt) vBuild();
+  /* весь пояс виджетов - в чёрно-белую палитру (CSS #values.offline) */
+  const belt = document.getElementById('values');
+  if (belt) belt.classList.add('offline');
   for (const n of VFLOATS) { const e = $('vf_' + n); if (e) e.textContent = '—' }
   for (const n of VUINTS) { const e = $('vf_' + n); if (e) e.textContent = '—' }
   for (const w of widgets || []) {
@@ -399,6 +402,11 @@ async function pollLoop() {
       vOffline();
     }
     else {
+      /* связь вернулась: цвет виджетного пояса восстанавливается */
+      {
+        const belt = document.getElementById('values');
+        if (belt) belt.classList.remove('offline');
+      }
       /* шапка: заводской номер; низ: версия прибора + адрес шлюза.
        * Пишем в DOM только при изменении - опрос 5 Гц */
       if (d.sn !== undefined && d.sn !== lastSn) {

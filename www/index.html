@@ -160,14 +160,23 @@
     }
 
     /* контейнер всех карточек-виджетов (#values в body) */
-    #values {      display: grid;
+    #values {
+      display: grid;
       /* half-width tracks: a normal card spans 2 tracks (a full cell,
        * 10 chars of 15px monospace), a bit card spans 1 -> two bits
        * pack into one value-card slot */
       grid-template-columns: repeat(auto-fill, minmax(60px, 1fr));
       gap: 6px;
       /* расстояние между карточками */
-      margin: 0 0 10px 0
+      margin: 0 0 10px 0;
+      /* плавный уход в ч/б и обратно при OFFLINE */
+      transition: filter .4s, opacity .4s
+    }
+
+    /* OFFLINE: весь виджетный пояс - чёрно-белый и приглушённый */
+    #values.offline {
+      filter: grayscale(1);
+      opacity: .55
     }
 
     /* --- МОБИЛЬНАЯ ВЕРСИЯ (узкий экран): сетка фиксировано 4 трека

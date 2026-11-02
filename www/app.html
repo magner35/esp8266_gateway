@@ -97,10 +97,15 @@ button,input,select,textarea{font:inherit;color:inherit}
       font-size: 12px;
       text-align: center;
       padding: 8px 0 10px;
-    }#sec-main #values {      display: grid;
+    }#sec-main #values {
+      display: grid;
       grid-template-columns: repeat(auto-fill, minmax(60px, 1fr));
       gap: 6px;
-      margin: 0 0 10px 0
+      margin: 0 0 10px 0;
+      transition: filter .4s, opacity .4s
+    }#sec-main #values.offline {
+      filter: grayscale(1);
+      opacity: .55
     }@media (max-width: 640px),
     (pointer: coarse) and (hover: none){#sec-main #values {
         grid-template-columns: repeat(4, minmax(0, 1fr))
@@ -2074,6 +2079,8 @@ function vApply(d) {
 }
 function vOffline() {
   if (!vBuilt) vBuild();
+  const belt = document.getElementById('values');
+  if (belt) belt.classList.add('offline');
   for (const n of VFLOATS) { const e = $('vf_' + n); if (e) e.textContent = '—' }
   for (const n of VUINTS) { const e = $('vf_' + n); if (e) e.textContent = '—' }
   for (const w of widgets || []) {
@@ -2185,6 +2192,10 @@ async function pollLoop() {
       vOffline();
     }
     else {
+      {
+        const belt = document.getElementById('values');
+        if (belt) belt.classList.remove('offline');
+      }
       if (d.sn !== undefined && d.sn !== lastSn) {
         lastSn = d.sn;
         $('devsn').textContent = d.sn ? '№' + d.sn : '';
