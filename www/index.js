@@ -235,6 +235,34 @@ function vApply(d) {
     }
   }
 }
+/* OFFLINE-рендер (связь с прибором потеряна, d.link=0): последних
+ * значений быть не должно - числа прочерком, лампы погашены, бары
+ * нулевые без процентов, график очищен. Единицы/подписи остаются.
+ * Вызывается из pollLoop при переходе в OFFLINE */
+function vOffline() {
+  if (!vBuilt) vBuild();
+  for (const n of VFLOATS) { const e = $('vf_' + n); if (e) e.textContent = '—' }
+  for (const n of VUINTS) { const e = $('vf_' + n); if (e) e.textContent = '—' }
+  for (const w of widgets || []) {
+    if (!w.on) continue;
+    if (w.t === 'cval') { const e = $('vfc_' + w.k); if (e) e.textContent = '—' }
+    else if (w.t === 'par') { const e = $('vp_' + w.k); if (e) e.textContent = '—' }
+    else if (w.t === 'bit') {
+      const e = $('bl_' + w.k);
+      if (e) { e.style.background = BITOFF; e.classList.remove('on') }
+    }
+    else if (w.t === 'bar') {
+      const f = $('hf_' + w.k), t = $('bp_' + w.k);
+      if (f) { f.style.width = '0%'; f.classList.remove('alarm') }
+      if (t) { t.classList.remove('alarm'); t.textContent = '—' }
+    }
+    else if (w.t === 'chart' && CHARTS_ON) {
+      const b = chartLive[w.src];
+      if (b) { b.vals = []; b.ts = []; if ('srv' in b) b.srv = 0 }
+    }
+  }
+  chartDrawAll && chartDrawAll();
+}
 /*
  * ЕДИНСТВЕННЫЙ периодический запрос главной страницы: /api/values
  * везёт и значения, и link/ready, и ap/ip/ssid (баннер портала).
@@ -283,12 +311,25 @@ let replayTimers = [];
 
 /* пачка снимков за секунду опроса СК-Э -> проиграть равномерно
  * по 200 мс: транспорт 1 запрос/с, отображение 5 Гц */
-function replaySeq(seq, off) {
+function replaySeq(seq, now) {
   for (const t of replayTimers) clearTimeout(t);
   replayTimers = [];
   if (!seq || !seq.length) return;
-  const step = 1000 / seq.length;
-  seq.forEach((sv, i) => {
+  /* старые кадры не проигрываем: анимируем только свежие (моложе
+   * 1.5 с); если пачка целиком опоздала (вкладка спала, ринг отдал
+   * хвост) - сразу последний кадр без анимации истории */
+  const FRESH_MS = 1500;
+  const last = seq[seq.length - 1];
+  const fresh = now ? seq.filter(sv => now - sv.t <= FRESH_MS) : seq;
+  if (!fresh.length)
+  {
+    if (!vBuilt) vBuild();
+    vApply(last);
+    lastSeqT = last.t;
+    return;
+  }
+  const step = 1000 / fresh.length;
+  fresh.forEach((sv, i) => {
     replayTimers.push(setTimeout(() => {
       if (!vBuilt) vBuild();
       vApply(sv);
@@ -298,6 +339,9 @@ function replaySeq(seq, off) {
        * потерянные кадры дыр не оставляют */
     }, i * step));
   });
+  /* курсор - на самый новый кадр пачки, чтобы ринг не присылал
+   * пропущенные старые заново */
+  lastSeqT = last.t;
 }
 
 /* опрос шлюза живёт только на #main: в меню слоты освобождаются */
@@ -329,7 +373,10 @@ async function pollLoop() {
       });
     const d = await (await fetch(url, { signal: ctl.signal })).json();
     clearTimeout(to);
-    ok = !!d.ok;
+    /* JSON разобран = ШЛЮЗ жив (это не сетевая ошибка): ok:0 при
+     * link:0 - "прибор offline", а не повод для экспоненциального
+     * отката. Иначе OFFLINE-бейдж опаздывал до 10 с (откат опроса) */
+    ok = true;
     sLastResp = 'ok:' + (d.ok ? 1 : 0) +
       ' seq:' + (d.seq ? d.seq.length : 'нет') +
       (d.seq && d.seq.length
@@ -343,30 +390,49 @@ async function pollLoop() {
     }
     portalMode = !!d.ap;
     portalBanner(d.ap, d.ssid, d.ip);
-    /* шапка: заводской номер; низ: версия прибора + адрес шлюза.
-     * Пишем в DOM только при изменении - опрос 5 Гц */
-    if (d.sn !== undefined && d.sn !== lastSn) {
-      lastSn = d.sn;
-      $('devsn').textContent = d.sn ? '№' + d.sn : '';
+    /* OFFLINE: прибор не отвечает - никаких «выдуманных» цифр.
+     * Гасим виджеты/график, отменяем недоигранный реплей, а значения
+     * и графики не принимаем ВООБЩЕ (реплей поверх прочерков рисовал
+     * фантомы из серверного кольца) */
+    if (d.link === 0) {
+      replaySeq(null);
+      vOffline();
     }
-    {
-      const s = (d.fw || '') + (d.ip ? ' · ' + d.ip : '');
-      if (s !== lastDevinfo) {
-        lastDevinfo = s;
-        $('devinfo').textContent = s;
+    else {
+      /* шапка: заводской номер; низ: версия прибора + адрес шлюза.
+       * Пишем в DOM только при изменении - опрос 5 Гц */
+      if (d.sn !== undefined && d.sn !== lastSn) {
+        lastSn = d.sn;
+        $('devsn').textContent = d.sn ? '№' + d.sn : '';
       }
+      {
+        const s = (d.fw || '') + (d.ip ? ' · ' + d.ip : '');
+        if (s !== lastDevinfo) {
+          lastDevinfo = s;
+          $('devinfo').textContent = s;
+        }
+      }
+      if (d.cfg !== undefined && d.cfg !== lastCfg) {
+        if (lastCfg !== null) paramsTick();
+        lastCfg = d.cfg;
+      }
+      if (d.ok) replaySeq(d.seq, d.now || Date.now());
+      if (d.chart && d.chart.length) chartConsume(d.chart);
     }
-    /* смена версии настроек прибора (меняли через меню/консоль СК-Э):
-     * шлюз сам перечитывает дерево, мы - сразу подтягиваем параметры */
-    if (d.cfg !== undefined && d.cfg !== lastCfg) {
-      if (lastCfg !== null) paramsTick();
-      lastCfg = d.cfg;
-    }
-    if (d.ok) replaySeq(d.seq, Date.now() - (d.now || Date.now()));
-    if (d.chart && d.chart.length) chartConsume(d.chart);
   } catch (e) { }
   pollRtt = Date.now() - t0;
   pollFails = ok ? 0 : pollFails + 1;
+  /* шлюз НЕ ОТВЕЧАЕТ (fetch падает: обесточен вместе с прибором,
+   * потерян WiFi): бейдж раньше вообще не обновлялся при ошибках и
+   * ONLINE висел вечно. После 2 неудач подряд (~3-5 с с откатом) -
+   * OFFLINE и гашение виджетов; первый же ответ вернёт картинку */
+  if (pollFails === 2)
+  {
+    $('link').textContent = 'OFFLINE';
+    $('link').className = 'tag bad';
+    replaySeq(null);
+    vOffline();
+  }
   let dly = Math.max(POLL_BASE, pollRtt * 3);
   if (pollFails > 0)
     dly = Math.min(POLL_MAX, POLL_BASE * Math.pow(2, pollFails));

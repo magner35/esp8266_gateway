@@ -116,7 +116,12 @@ static int read_line_until_prompt(char *line, size_t cap, TickType_t timeout)
         if (n <= 0)
             return 0;
         if (proto_prompt_feed(&sCtx, (char)c))
+        {
+            /* промпт = консоль прибора жива: подтверждаем линк ЛЮБЫМ
+             * обменом (листинг/SET/wake), не только кадром 'm' */
+            sLastOk = xTaskGetTickCount();
             return 1;
+        }
         if (c == '\n' || c == '\r')
         {
             if (pos)
@@ -1685,7 +1690,18 @@ const SkeValues *ske02_values(void)
 
 bool ske02_link_up(void)
 {
-    return sLastOk && (xTaskGetTickCount() - sLastOk) < pdMS_TO_TICKS(15000);
+    /* окно 2.5 с (было 15): 'm' идёт 5 Гц, sLastOk дёргается и на
+     * любой промпт консоли (листинг/SET не роняют бейдж), поэтому
+     * настоящая тишина = прибор реально пропал - OFFLINE за ~секунду,
+     * не через 15 */
+    return sLastOk && (xTaskGetTickCount() - sLastOk) < pdMS_TO_TICKS(2500);
+}
+
+/* возраст последнего подтверждения линка (диагностика /api/values) */
+uint32_t ske02_link_age_ms(void)
+{
+    return sLastOk ? (uint32_t)((xTaskGetTickCount() - sLastOk) *
+                                portTICK_PERIOD_MS) : 0xFFFFFFFFu;
 }
 
 bool ske02_ready(void) { return sReady; }

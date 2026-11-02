@@ -2072,6 +2072,30 @@ function vApply(d) {
     }
   }
 }
+function vOffline() {
+  if (!vBuilt) vBuild();
+  for (const n of VFLOATS) { const e = $('vf_' + n); if (e) e.textContent = '—' }
+  for (const n of VUINTS) { const e = $('vf_' + n); if (e) e.textContent = '—' }
+  for (const w of widgets || []) {
+    if (!w.on) continue;
+    if (w.t === 'cval') { const e = $('vfc_' + w.k); if (e) e.textContent = '—' }
+    else if (w.t === 'par') { const e = $('vp_' + w.k); if (e) e.textContent = '—' }
+    else if (w.t === 'bit') {
+      const e = $('bl_' + w.k);
+      if (e) { e.style.background = BITOFF; e.classList.remove('on') }
+    }
+    else if (w.t === 'bar') {
+      const f = $('hf_' + w.k), t = $('bp_' + w.k);
+      if (f) { f.style.width = '0%'; f.classList.remove('alarm') }
+      if (t) { t.classList.remove('alarm'); t.textContent = '—' }
+    }
+    else if (w.t === 'chart' && CHARTS_ON) {
+      const b = chartLive[w.src];
+      if (b) { b.vals = []; b.ts = []; if ('srv' in b) b.srv = 0 }
+    }
+  }
+  chartDrawAll && chartDrawAll();
+}
 let portalMode = false;
 let lastSn = null, lastDevinfo = null; 
 let pollRtt = 0, pollFails = 0;
@@ -2093,18 +2117,29 @@ function portalBanner(ap, ssid, ip) {
 let lastSeqT = 0;      
 let lastCfg = null;    
 let replayTimers = [];
-function replaySeq(seq, off) {
+function replaySeq(seq, now) {
   for (const t of replayTimers) clearTimeout(t);
   replayTimers = [];
   if (!seq || !seq.length) return;
-  const step = 1000 / seq.length;
-  seq.forEach((sv, i) => {
+  const FRESH_MS = 1500;
+  const last = seq[seq.length - 1];
+  const fresh = now ? seq.filter(sv => now - sv.t <= FRESH_MS) : seq;
+  if (!fresh.length)
+  {
+    if (!vBuilt) vBuild();
+    vApply(last);
+    lastSeqT = last.t;
+    return;
+  }
+  const step = 1000 / fresh.length;
+  fresh.forEach((sv, i) => {
     replayTimers.push(setTimeout(() => {
       if (!vBuilt) vBuild();
       vApply(sv);
       lastSeqT = sv.t;
     }, i * step));
   });
+  lastSeqT = last.t;
 }
 let mainVisible = true;
 window.addEventListener('hashchange', () => {
@@ -2131,7 +2166,7 @@ async function pollLoop() {
       });
     const d = await (await fetch(url, { signal: ctl.signal })).json();
     clearTimeout(to);
-    ok = !!d.ok;
+    ok = true;
     sLastResp = 'ok:' + (d.ok ? 1 : 0) +
       ' seq:' + (d.seq ? d.seq.length : 'нет') +
       (d.seq && d.seq.length
@@ -2145,26 +2180,39 @@ async function pollLoop() {
     }
     portalMode = !!d.ap;
     portalBanner(d.ap, d.ssid, d.ip);
-    if (d.sn !== undefined && d.sn !== lastSn) {
-      lastSn = d.sn;
-      $('devsn').textContent = d.sn ? '№' + d.sn : '';
+    if (d.link === 0) {
+      replaySeq(null);
+      vOffline();
     }
-    {
-      const s = (d.fw || '') + (d.ip ? ' · ' + d.ip : '');
-      if (s !== lastDevinfo) {
-        lastDevinfo = s;
-        $('devinfo').textContent = s;
+    else {
+      if (d.sn !== undefined && d.sn !== lastSn) {
+        lastSn = d.sn;
+        $('devsn').textContent = d.sn ? '№' + d.sn : '';
       }
+      {
+        const s = (d.fw || '') + (d.ip ? ' · ' + d.ip : '');
+        if (s !== lastDevinfo) {
+          lastDevinfo = s;
+          $('devinfo').textContent = s;
+        }
+      }
+      if (d.cfg !== undefined && d.cfg !== lastCfg) {
+        if (lastCfg !== null) paramsTick();
+        lastCfg = d.cfg;
+      }
+      if (d.ok) replaySeq(d.seq, d.now || Date.now());
+      if (d.chart && d.chart.length) chartConsume(d.chart);
     }
-    if (d.cfg !== undefined && d.cfg !== lastCfg) {
-      if (lastCfg !== null) paramsTick();
-      lastCfg = d.cfg;
-    }
-    if (d.ok) replaySeq(d.seq, Date.now() - (d.now || Date.now()));
-    if (d.chart && d.chart.length) chartConsume(d.chart);
   } catch (e) { }
   pollRtt = Date.now() - t0;
   pollFails = ok ? 0 : pollFails + 1;
+  if (pollFails === 2)
+  {
+    $('link').textContent = 'OFFLINE';
+    $('link').className = 'tag bad';
+    replaySeq(null);
+    vOffline();
+  }
   let dly = Math.max(POLL_BASE, pollRtt * 3);
   if (pollFails > 0)
     dly = Math.min(POLL_MAX, POLL_BASE * Math.pow(2, pollFails));

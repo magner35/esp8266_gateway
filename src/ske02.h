@@ -74,6 +74,7 @@ void ske02_valring_push(uint32_t t_ms, const SkeValues *v);
 int  ske02_valring_since(uint32_t since_ms, uint32_t *ts, SkeValues *out, int max);
 
 bool ske02_link_up(void);
+uint32_t ske02_link_age_ms(void); /* мс с последнего промпта (диагностика) */
 bool ske02_ready(void);
 
 #endif /* GW_SKE02_H */

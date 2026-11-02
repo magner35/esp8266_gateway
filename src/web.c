@@ -470,6 +470,8 @@ static esp_err_t h_api_values(httpd_req_t *req)
      * отдельный /api/info главной странице не нужен */
     char fw[24] = "", sn[12] = "", ipstr[16] = "";
     static char sFw[24], sSn[12]; /* прошлые значения при занятом приборе */
+    bool busy = false;            /* прибор держит лок: ветка кэша */
+    static int8_t sSrvLink = -1;  /* диагностика: что выдали в прошлый раз */
 
     /*
      * link/ready ride this 1 Hz endpoint so the UI badge refreshes with
@@ -496,11 +498,22 @@ static esp_err_t h_api_values(httpd_req_t *req)
     else
     {
         /* meter busy: serve the cached copy (link/ready from last time) */
+        busy = true;
         v = &cached;
         link = 1;
         ready = 1;
         strlcpy(fw, sFw, sizeof(fw));
         strlcpy(sn, sSn, sizeof(sn));
+    }
+    /* ДИАГНОСТИКА обрыва: лог только при ИЗМЕНЕНИИ выдаваемого линка -
+     * видно и ветку (busy = прибор держит лок), и реальный возраст
+     * последнего промпта */
+    if ((int8_t)link != sSrvLink)
+    {
+        sSrvLink = (int8_t)link;
+        DBG("web: link served %d (%s, lastOk %lu ms ago)\n",
+            link, busy ? "busy-cache" : "live",
+            (unsigned long)ske02_link_age_ms());
     }
     if (portal)
         strlcpy(ipstr, "192.168.4.1", sizeof(ipstr));
@@ -516,7 +529,10 @@ static esp_err_t h_api_values(httpd_req_t *req)
         link = ske02_link_up() ? 1 : 0;
         ready = ske02_ready() ? 1 : 0;
     }
-    if (!v)
+    /* линк мёртв - НИКАКИХ значений, даже из кольца: раньше последний
+     * кэш выдавался как "свежий" снимок и страница_repлеила фантомы
+     * поверх OFFLINE-прочерков */
+    if (!v || !link)
     {
         snprintf(out, sizeof(out), "{\"ok\":0,\"link\":%d,\"ready\":%d}",
                  link, ready);
