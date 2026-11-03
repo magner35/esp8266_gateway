@@ -78,7 +78,7 @@ typedef struct
 /* live measurement values: the 'm' frame = MeterData_t of the firmware */
 typedef struct
 {
-    float frequency, rate_raw, rate_fast, rateMLPM, rate;
+    float frequency, rate_raw, rateMLPM, rate;
     float total_plus, total_minus, total, total_sum;
     float totalml_plus, totalml_minus, gtotal, gtotalml;
     float kf_value, batch;

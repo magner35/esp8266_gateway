@@ -568,7 +568,6 @@ static void vals_derive(ProtoCtx *ctx)
 
     v->rate = v->rateMLPM * sU_tb / (60.0f * sU_mlPerRate);
     v->rate_raw = v->rate;
-    v->rate_fast = v->rate;
     v->total_plus = v->totalml_plus / sU_totDiv;
     v->total_minus = v->totalml_minus / sU_totDiv;
     v->total = v->total_plus - v->total_minus;

@@ -1234,7 +1234,6 @@ static esp_err_t h_api_sys_upload(httpd_req_t *req)
     esp_ota_handle_t ota;
     bool ota_open = false, hex_open = false;
     uint32_t esp_len = 0, fed = 0, fed_esp = 0;
-    uint8_t lenb[4];
     int rc = OTA_SEC_OK;
     int n;
     const esp_partition_t *part = NULL;

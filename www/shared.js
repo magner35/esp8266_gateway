@@ -19,7 +19,6 @@ const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;'
       DOUT0: 'Вых0', DOUT1: 'Вых1', DOUT2: 'Вых2', BUZZER: 'Звук',
       HIGHFREQ: 'Частота>', LOWFREQ: 'Частота<', DUTY: 'Скважность', PHASE: 'Фаза'
     };
-    // const VFLOATS = ['frequency', 'rate_raw', 'rate_fast', 'rateMLPM', 'rate', 'total_plus', 'total_minus', 'total', 'total_sum', 'totalml_plus', 'totalml_minus', 'gtotal', 'gtotalml', 'kf_value', 'batch'];
     const VFLOATS = ['kf_value', 'batch'];
     const VUINTS = ['pulses_packet', 'pulses'];
     /* display labels only: the JSON keys stay the MeterData_t member
@@ -27,7 +26,6 @@ const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;'
     const LBL = {
       frequency: 'Частота, Гц',
       rate_raw: 'Расход (raw)',
-      rate_fast: 'Расход (fast)',
       rateMLPM: 'Расход, мл/мин',
       rate: 'Расход',
       total_plus: 'Объём +',
@@ -67,7 +65,6 @@ const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;'
       my_const: 10
     };
     const CUSTOM = {
-      // fast_plus_total: { calc: d => r7(d.rate_fast + 10) + d.total, label: 'Частота, Гц', on: true },
       frequency_hz: { calc: d => round2(d.frequency), label: 'Частота, Гц', on: true },
       k_factor: { calc: d => prec7(d.kf_value), label: 'К-фактор', on: true },
       imp_weight: { calc: d => prec7(d.kf_value), label: 'Цена имп', on: true },
@@ -99,7 +96,7 @@ const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;'
         const ps = PSEC[UNKEY[UN.time] || 'm'] || 60;
         if (isFinite(d.rateMLPM)) {
           d.rate = d.rateMLPM * ps / 60 / rk;
-          d.rate_raw = d.rate_fast = d.rate;
+          d.rate_raw = d.rate;
         }
         if (isFinite(d.totalml_plus)) {
           d.total_plus = d.totalml_plus / ok;

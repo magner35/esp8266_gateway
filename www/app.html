@@ -958,7 +958,6 @@ const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;'
     const LBL = {
       frequency: 'Частота, Гц',
       rate_raw: 'Расход (raw)',
-      rate_fast: 'Расход (fast)',
       rateMLPM: 'Расход, мл/мин',
       rate: 'Расход',
       total_plus: 'Объём +',
@@ -1000,7 +999,7 @@ const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;'
         const ps = PSEC[UNKEY[UN.time] || 'm'] || 60;
         if (isFinite(d.rateMLPM)) {
           d.rate = d.rateMLPM * ps / 60 / rk;
-          d.rate_raw = d.rate_fast = d.rate;
+          d.rate_raw = d.rate;
         }
         if (isFinite(d.totalml_plus)) {
           d.total_plus = d.totalml_plus / ok;

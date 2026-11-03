@@ -1435,6 +1435,15 @@ void espcons_ota_check(void)
 
     if (!sUpdUrl[0] || sOtaMenuBusy || sOtaCheckBusy)
         return;
+    /* сеть ОБЯЗАНА быть поднята: опрос прибора ожывает раньше WiFi,
+     * а gethostbyname до инициализации lwIP валит шлюз ассертом
+     * "Invalid mbox" (tcpip_mbox ещё не создан) */
+    {
+        tcpip_adapter_ip_info_t ip;
+        tcpip_adapter_get_ip_info(TCPIP_ADAPTER_IF_STA, &ip);
+        if (!ip.ip.addr)
+            return;
+    }
     if (sOtaAvail >= 0 &&
         (now - sOtaLastCheck) < pdMS_TO_TICKS(OTA_RECHECK_MS))
         return; /* рано перепроверять */

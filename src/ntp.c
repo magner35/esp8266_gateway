@@ -22,6 +22,17 @@
 #include "ntp.h"
 #include "storage.h"
 #include "nvs.h"
+#include "tcpip_adapter.h"
+
+/* сеть поднята? SNTP и IP-геолокация зовут lwIP, а вызов ДО инициализации
+ * tcpip (обмен с прибором оживает раньше WiFi!) - ассерт "Invalid mbox".
+ * Гейт обязателен для всех сетевых путей ntp */
+static bool ntp_ip_ready(void)
+{
+    tcpip_adapter_ip_info_t ip;
+    tcpip_adapter_get_ip_info(TCPIP_ADAPTER_IF_STA, &ip);
+    return ip.ip.addr != 0;
+}
 
 static ntp_cfg_t sCfg;
 static bool sSynced = false;
@@ -232,6 +243,10 @@ void ntp_tz_auto_fetch(void)
 {
     if (!sCfg.on || !sCfg.autoTz || sAutoTzOk || sTzBusy)
         return;
+    /* без сети IP-геолокация невозможна (и опасна: lwIP ещё не
+     * поднят - Invalid mbox); повторит GOT_IP/on_sync */
+    if (!ntp_ip_ready())
+        return;
     if ((int32_t)(xTaskGetTickCount() - sTzRetryAfter) < 0)
         return; /* бэкофф после неудачи */
     /* авто-TZ (HTTP к ip-api.com) - 4К стек задачи + DNS + TCP:
@@ -314,6 +329,13 @@ void ntp_apply(void)
                 return;
             }
         }
+    }
+    /* сеть должна быть поднята ДО старта SNTP: sntp_init тоже зовёт
+     * lwIP; обмен с прибором оживает раньше WiFi, GOT_IP перезапустит */
+    if (!ntp_ip_ready())
+    {
+        DBG("ntp: no ip yet - deferred\n");
+        return;
     }
     ntp_start_poll();
     ntp_tz_auto_fetch();
