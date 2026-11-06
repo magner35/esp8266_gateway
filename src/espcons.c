@@ -32,7 +32,13 @@ extern const char g_gw_version[44]; /* main.c: метка версии */
 
 #define EC_PIN_REQ 14 /* <- PB1: LOW = USB-UART у нас (инверсная, \
                        * подтяжка вверх из SDK; GPIO14 не страп) */
-#define EC_PIN_ACK 12 /* -> PB3: HIGH = сессия окончена */
+#define EC_PIN_ACK 12 /* -> PB3: HIGH = сессия окончена (плата:
+                          * GPIO12 соединён с PB3, цепь не меняется) */
+#define EC_PIN_RDY 13 /* <- PB2 (pull-up): RDY от прибора, ОТДЕЛЬНАЯ
+                        * линия параллельно ACK: LOW = консоль прибора
+                        * свободна; HIGH = USB вставлен / urboot /
+                        * ресет ATmega - В UART НЕ СЛАТЬ (мусор рвёт
+                        * urclock-прошивку и мешает терминалу) */
 
 #define EC_MAX_NET 10 /* кэш SSID после SCAN (для JOIN-мастера) */
 #define HIST_MAX 16   /* история команд (стрелки вверх/вниз) */
@@ -93,6 +99,10 @@ void espcons_init(void)
                          .mode = GPIO_MODE_OUTPUT};
     gpio_config(&out);
     gpio_set_level(EC_PIN_ACK, 0);
+    gpio_config_t rdy = {.pin_bit_mask = 1ULL << EC_PIN_RDY,
+                         .mode = GPIO_MODE_INPUT,
+                         .pull_up_en = GPIO_PULLUP_ENABLE};
+    gpio_config(&rdy);
     /* адрес сервера нужен СРАЗУ после старта: проверка наличия OTA
      * (espcons_ota_check) работает и без консольной сессии;
      * заодно - отложенная прошивка прибора, если намерение пережило
@@ -111,6 +121,7 @@ bool espcons_check_enter(void)
     {
         char line[64];
         sActive = true;
+        DBG("console: REQ low -> session open (usb handed to esp)\n");
         upd_url_init(); /* адрес сервера обновлений из NVS */
         uart_flush(EC_UART);
         uart_write_bytes(EC_UART, "\r\nGateway console\r\n",
@@ -579,6 +590,15 @@ bool espcons_abort_pending(void)
 {
     return sRunAbort;
 }
+
+/* RDY от прибора (PB2 -> GPIO13, pull-up): LOW = консоль прибора
+ * свободна - можно слать в UART; HIGH = USB вставлен / urboot /
+ * прибор в ресете (hi-Z + подтяжка) - шлюз обязан молчать */
+bool espcons_link_ready(void)
+{
+    return gpio_get_level(EC_PIN_RDY) == 0;
+}
+
 
 static void run_helper_task(void *arg)
 {
@@ -1614,13 +1634,14 @@ static void cmd_ping(const char *args)
     }
 }
 
-/* END: сообщить ATmega (GPIO12 HIGH), дождаться возврата мультиплексора
- * (PB1/GPIO14 упадёт в течение ~1 с), отпустить ACK */
+/* END: сообщить ATmega (GPIO12 HIGH -> PB3), дождаться возврата
+ * мультиплексора (PB1/GPIO14 упадёт в течение ~1 с), отпустить ACK */
 static void cmd_end(void)
 {
     int waits;
     gpio_set_level(EC_PIN_ACK, 1);
     reply("\r\nESP> closing...\r\n");
+    DBG("console: ACK high (asking meter to return line)\n");
     for (waits = 0; waits < 30; waits++)
     {
         if (gpio_get_level(EC_PIN_REQ)) /* линия отпущена = HIGH */
@@ -1628,6 +1649,8 @@ static void cmd_end(void)
         vTaskDelay(pdMS_TO_TICKS(100));
     }
     gpio_set_level(EC_PIN_ACK, 0);
+    DBG("console: ACK released, REQ %s\n",
+        gpio_get_level(EC_PIN_REQ) ? "high (returned)" : "low (still held)");
     if (!gpio_get_level(EC_PIN_REQ))
     {
         reply("ESP> meter did not take the line back\r\nESP> ");

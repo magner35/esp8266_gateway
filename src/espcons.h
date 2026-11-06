@@ -13,6 +13,8 @@ bool espcons_check_enter(void); /* true = линия наша: уходим в p
 void espcons_poll(void);        /* читает/исполняет до выхода или таймаута */
 bool espcons_is_active(void);   /* true = консоль шлюза заняла UART */
 bool espcons_abort_pending(void); /* true = пользователь нажал Ctrl+C */
+bool espcons_link_ready(void);    /* RDY (PB2->GPIO13): true = консоль
+                                     прибора свободна, можно слать в UART */
 
 /* OTA из меню прибора (маркеры otadev/otagw из консоли прибора) */
 void espcons_ota_menu(bool device); /* прошить прибор (true) или шлюз */

@@ -1197,7 +1197,7 @@ static esp_err_t h_api_avr_upload(httpd_req_t *req)
     rc = ota_sec_finish(&sec);
     if (rc != OTA_SEC_OK)
         goto bad;
-    DBG("web: avr .skpak ok, %u Б, \"%s\"\n",
+    DBG("web: avr .skpak ok, %u B, \"%s\"\n",
         (unsigned)fed, sec.note);
     {
         char out[96];

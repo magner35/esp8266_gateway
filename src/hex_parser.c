@@ -77,7 +77,7 @@ static void image_write(image_t *img, uint32_t addr, const uint8_t *data, int le
                 if (!img->warned_back)
                 {
                     img->warned_back = true;
-                    logW(TAG, "адрес 0x%X идёт назад (страница 0x%X отдана) - "
+                    logW(TAG, "address 0x%X goes backwards (page 0x%X already fed) - "
                               "дальнейшие назад-записи пропускаются молча",
                          addr, img->base);
                 }
@@ -146,7 +146,7 @@ esp_err_t hex_file_parse(const char *path, hex_page_cb cb, void *user,
     (void)path;                    /* источник - раздел avrhex */
     if (!hex_store_open())
     {
-        logE(TAG, "в avrhex нет загруженного образа");
+        logE(TAG, "no image stored in avrhex");
         return ESP_FAIL;
     }
 
@@ -171,14 +171,14 @@ esp_err_t hex_file_parse(const char *path, hex_page_cb cb, void *user,
         {
             if (line[strspn(line, " \r\n")] == '\0')   /* пустая строка */
                 continue;
-            logE(TAG, "строка %d: не начинается с ':'", lineno);
+            logE(TAG, "line %d: does not start with ':'", lineno);
             goto out;
         }
 
         n = parse_hex_bytes(line + 1, rec, sizeof(rec));
         if (n < 5)
         {
-            logE(TAG, "строка %d: короткая запись", lineno);
+            logE(TAG, "line %d: record too short", lineno);
             goto out;
         }
 
@@ -186,7 +186,7 @@ esp_err_t hex_file_parse(const char *path, hex_page_cb cb, void *user,
             sum += rec[i];
         if (sum != 0)
         {
-            logE(TAG, "строка %d: неверная КС: '%.24s'", lineno, line);
+            logE(TAG, "line %d: bad checksum: '%.24s'", lineno, line);
             goto out;
         }
 
@@ -195,7 +195,7 @@ esp_err_t hex_file_parse(const char *path, hex_page_cb cb, void *user,
         addr = ((uint32_t)rec[1] << 8) | rec[2];
         if (5 + len != n)
         {
-            logE(TAG, "строка %d: длина не сходится с данными", lineno);
+            logE(TAG, "line %d: length does not match data", lineno);
             goto out;
         }
 
@@ -206,7 +206,7 @@ esp_err_t hex_file_parse(const char *path, hex_page_cb cb, void *user,
             uint32_t abs_addr = ext_base + addr;
             if (abs_addr + len > AVR_FLASH_SIZE)
             {
-                logE(TAG, "строка %d: адрес 0x%X за пределами flash МК",
+                logE(TAG, "line %d: address 0x%X beyond MCU flash",
                      lineno, abs_addr + len - 1);
                 goto out;
             }
@@ -227,7 +227,7 @@ esp_err_t hex_file_parse(const char *path, hex_page_cb cb, void *user,
         case 5:                                     /* start address - пропуск */
             break;
         default:
-            logE(TAG, "строка %d: неизвестный тип записи %d", lineno, type);
+            logE(TAG, "line %d: unknown record type %d", lineno, type);
             goto out;
         }
 
@@ -236,12 +236,12 @@ esp_err_t hex_file_parse(const char *path, hex_page_cb cb, void *user,
     }
 
     if (!eof_seen)
-        logW(TAG, "файл без записи EOF - разбираю что есть");
+        logW(TAG, "no EOF record - parsing what we have");
 
 done:
     image_flush(&img);
     rc = ESP_OK;
-    logI(TAG, "строк %d, байт %u, адреса 0x%X..0x%X, страниц %d",
+    logI(TAG, "lines %d, bytes %u, addresses 0x%X..0x%X, pages %d",
          lineno, (unsigned)stats->total_bytes, stats->min_addr,
          stats->max_addr, stats->pages);
 

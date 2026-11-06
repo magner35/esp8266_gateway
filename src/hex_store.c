@@ -47,7 +47,7 @@ bool hex_store_begin(uint32_t len)
     erase = (len + 4096 + 4095) & ~4095UL;
     if (erase > sPart->size)
     {
-        DBG("hex: не влезает (%u байт текста)", (unsigned)len);
+        DBG("hex: too big (%u bytes of text)\n", (unsigned)len);
         return false;
     }
     if (esp_partition_erase_range(sPart, 0, erase) != ESP_OK)

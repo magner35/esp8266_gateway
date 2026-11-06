@@ -249,7 +249,7 @@ static void read_bl_table(void)
 
     if (ur_page_read(AVR_FLASH_SIZE - 6, t, 6) != 0)
     {
-        logW(TAG, "таблица urboot не читается - работаем без защиты BL-области");
+        logW(TAG, "urboot table unreadable - running without BL-area protection");
         return;
     }
 
@@ -264,7 +264,7 @@ static void read_bl_table(void)
      * 1..127, uint8_t большего и не примет) */
     if (major < 5 || major > 9 || g_info.bl_pages == 0)
     {
-        logW(TAG, "таблица на вершине flash мусорна (ver %d.%d, pages %d) - игнорирую",
+        logW(TAG, "table at flash top is garbage (ver %d.%d, pages %d) - ignored",
              major, minor, g_info.bl_pages);
         g_info.bl_pages = 0;
         g_info.vbl_vecnum = 0;
@@ -311,9 +311,9 @@ esp_err_t urclock_connect_baud(uint32_t baud)
             vTaskDelay(pdMS_TO_TICKS(60));
             spent += 60;
         }
-        logW(TAG, "попытка %d/%d: загрузчик не ответил", attempt, UR_RESET_ATTEMPTS);
+        logW(TAG, "attempt %d/%d: bootloader did not answer", attempt, UR_RESET_ATTEMPTS);
     }
-    logE(TAG, "синхронизация не удалась (нет urboot на UART0?)");
+    logE(TAG, "sync failed (no urboot on UART0?)");
     return ESP_FAIL;
 
 found:
@@ -328,18 +328,18 @@ found:
 
         g_info.compat = true;
         g_info.table_valid = true;      /* границы неизвестны - защита вся flash */
-        logI(TAG, "ответ 14/10: STK500v1-совместимый загрузчик, читаем сигнатуру");
+        logI(TAG, "reply 14/10: STK500v1-compatible bootloader, reading signature");
 
         uint8_t f[2] = {STK_READ_SIGN, UR_EOP};
         avr_send(f, 2);
         if (ur_reply(sig, 3, UR_CMD_TIMEOUT_MS) != 0 ||
             memcmp(sig, expect, 3) != 0)
         {
-            logE(TAG, "сигнатура %02X %02X %02X != %02X %02X %02X (" AVR_MCUID_NAME ")",
+            logE(TAG, "signature %02X %02X %02X != %02X %02X %02X (" AVR_MCUID_NAME ")",
                  sig[0], sig[1], sig[2], expect[0], expect[1], expect[2]);
             return ESP_FAIL;
         }
-        logI(TAG, "сигнатура ATmega128 подтверждена");
+        logI(TAG, "ATmega128 signature confirmed");
         return ESP_OK;
     }
 
@@ -349,11 +349,11 @@ found:
     {
         /* коллизия кодировки со константами STK500 - urboot перенёс пару в
            255/254, mcuid узнать нельзя (urboot.c: "Cannot work with this...") */
-        logW(TAG, "urboot с коллизией кодировки (255/254): mcuid не проверяется");
+        logW(TAG, "urboot with encoding collision (255/254): mcuid not checked");
     }
     else if (g_info.mcuid != AVR_MCUID && g_info.mcuid != AVR_MCUID_ALT)
     {
-        logE(TAG, "mcuid %u не " AVR_MCUID_NAME " (%d/%d): на линии другой МК",
+        logE(TAG, "mcuid %u is not " AVR_MCUID_NAME " (%d/%d): different MCU on the line",
              g_info.mcuid, AVR_MCUID, AVR_MCUID_ALT);
         return ESP_FAIL;
     }
@@ -368,16 +368,16 @@ found:
         {
             switch (g_info.bl_cap & URT_VBLMASK)
             {
-            case URT_VBLJUMP:          vbl = ", VBL (вектора патчим мы)"; break;
-            case URT_VBLPATCH:         vbl = ", VBL (патчит сам)"; break;
-            case URT_VBLMASK:          vbl = ", VBL (патчит сам, verify чистый)"; break;
-            default:                   vbl = ", обычный (BOOTRST)"; break;
+            case URT_VBLJUMP:          vbl = ", VBL (we patch vectors)"; break;
+            case URT_VBLPATCH:         vbl = ", VBL (patches itself)"; break;
+            case URT_VBLMASK:          vbl = ", VBL (patches itself, verify clean)"; break;
+            default:                   vbl = ", plain (BOOTRST)"; break;
             }
         }
         logI(TAG, "urboot: mcuid=%u " AVR_MCUID_NAME " ce=%d nor=%d%s",
              g_info.mcuid, ce, nor, vbl);
         if (g_info.table_valid)
-            logI(TAG, "urboot v%d.%d: %d страниц BL с 0x%X, cap=0x%02X",
+            logI(TAG, "urboot v%d.%d: %d BL pages from 0x%X, cap=0x%02X",
                  g_info.bl_version >> 3, g_info.bl_version & 7,
                  g_info.bl_pages, g_info.bl_start, g_info.bl_cap);
     }
@@ -409,10 +409,10 @@ static void patch_page0(uint8_t *page)
         memcpy(page + dst, orig, AVR_VECTOR_SIZE);
 
     if (orig[0] != 0x0C || orig[1] != 0x94)
-        logW(TAG, "вектор сброса образца не jmp (0x%02X%02X) - приложение для m128?",
+        logW(TAG, "image reset vector is not jmp (0x%02X%02X) - an m128 app?",
              orig[1], orig[0]);
 
-    logI(TAG, "VBL: сброс -> jmp 0x%X, исходный вектор -> слот %u (байт %u)",
+    logI(TAG, "VBL: reset -> jmp 0x%X, original vector -> slot %u (byte %u)",
          g_info.bl_start, g_info.vbl_vecnum, dst);
 }
 
@@ -466,7 +466,7 @@ static void page_cb(uint32_t addr, const uint8_t *page, void *user)
 
     if (addr >= c->write_limit)
     {
-        logW(TAG, "страница 0x%X в области загрузчика - пропущена", addr);
+        logW(TAG, "page 0x%X inside bootloader area - skipped", addr);
         c->skipped++;
         return;
     }
@@ -492,12 +492,12 @@ static void page_cb(uint32_t addr, const uint8_t *page, void *user)
             if (ur_page_read(addr, rd, AVR_PAGE_SIZE) != 0)
             {
                 if (++c->consec_dead == 5)
-                    logE(TAG, "verify: связь с загрузчиком потеряна - "
-                              "остаток пропускается");
+                    logE(TAG, "verify: bootloader link lost - "
+                              "rest skipped");
                 c->errors++;
                 return;
             }
-            logW(TAG, "verify 0x%X: чтение прошло со второго раза", addr);
+            logW(TAG, "verify 0x%X: read succeeded on retry", addr);
         }
         c->consec_dead = 0;
 
@@ -515,13 +515,13 @@ static void page_cb(uint32_t addr, const uint8_t *page, void *user)
             int vbl_off = (int)g_info.vbl_vecnum * AVR_VECTOR_SIZE;
 
             if (memcmp(rd, p, seg_end) != 0)
-                logW(TAG, "verify 0x0: вектор сброса патчен загрузчиком");
+                logW(TAG, "verify 0x0: reset vector patched by bootloader");
 
             if (vbl_off > seg_end)
             {
                 if (memcmp(rd + seg_end, p + seg_end, vbl_off - seg_end) != 0)
                 {
-                    logE(TAG, "verify 0x%X: не совпало (векторная таблица)", addr);
+                    logE(TAG, "verify 0x%X: mismatch (vector table)", addr);
                     c->mismatches++;
                     return;
                 }
@@ -539,8 +539,8 @@ static void page_cb(uint32_t addr, const uint8_t *page, void *user)
             if (rd[0] == (uint8_t)(rjmp & 0xFF) &&
                 rd[1] == (uint8_t)(rjmp >> 8))
             {
-                logI(TAG, "verify 0x0: вектор сброса заменён загрузчиком на "
-                          "rjmp 0x%04X на BL (PROTECTRESET) - ок", rjmp);
+                logI(TAG, "verify 0x0: reset vector replaced by bootloader with "
+                          "rjmp 0x%04X to BL (PROTECTRESET) - ok", rjmp);
                 off = 2;       /* байты 2..3 вектора остаются нашими */
             }
             /* иначе - rjmp нет, сравниваем всё, включая наш jmp */
@@ -557,7 +557,7 @@ static void page_cb(uint32_t addr, const uint8_t *page, void *user)
                     last = i;
                     cnt++;
                 }
-            logE(TAG, "verify 0x%X: не совпало, отличается байт: %d, смещения %d..%d",
+            logE(TAG, "verify 0x%X: mismatch, first bad byte: %d, offsets %d..%d",
                  addr, cnt, first, last);
 
             /* дамп 16 байт вокруг первого расхождения */
@@ -569,13 +569,13 @@ static void page_cb(uint32_t addr, const uint8_t *page, void *user)
                 pa += snprintf(a + pa, sizeof(a) - pa, "%02X ", p[i]);
                 pb += snprintf(b + pb, sizeof(b) - pb, "%02X ", rd[i]);
             }
-            logE(TAG, "verify 0x%X @%03d: образ  %s", addr, d, a);
+            logE(TAG, "verify 0x%X @%03d: image  %s", addr, d, a);
             logE(TAG, "verify 0x%X @%03d: flash  %s", addr, d, b);
 
             if (addr == 0)
             {
                 int so = (int)g_info.vbl_vecnum * AVR_VECTOR_SIZE;
-                logE(TAG, "verify 0x0: слот vbl[%d]: образ %02X %02X %02X %02X, "
+                logE(TAG, "verify 0x0: vbl[%d] slot: image %02X %02X %02X %02X, "
                           "flash %02X %02X %02X %02X",
                      g_info.vbl_vecnum,
                      p[so], p[so + 1], p[so + 2], p[so + 3],
@@ -609,10 +609,10 @@ static void page_cb(uint32_t addr, const uint8_t *page, void *user)
         if (wrc != 0)
         {
             if (++c->consec_dead == 5)
-                logE(TAG, "запись: связь с загрузчиком потеряна - "
-                          "остаток пропускается");
-            logE(TAG, "запись 0x%X не удалась (%s)", addr,
-                 wrc == -1 ? "таймаут ответа" : "чужой ответ");
+                logE(TAG, "write: bootloader link lost - "
+                          "rest skipped");
+            logE(TAG, "write 0x%X failed (%s)", addr,
+                 wrc == -1 ? "reply timeout" : "wrong reply");
             c->errors++;
             return;
         }
@@ -659,15 +659,15 @@ esp_err_t urclock_program_file(const char *hex_path, urclock_result_t *res)
         logI(TAG, "chip erase...");
         if (ur_chip_erase() != 0)
         {
-            logE(TAG, "chip erase не удался");
+            logE(TAG, "chip erase failed");
             return ESP_FAIL;
         }
         chip_erased = true;
     }
     else if (!g_info.compat && (g_info.features & UB_FLASH_LL_NOR))
     {
-        logW(TAG, "загрузчик без chip erase и без стирания страниц: старые "
-                  "данные могут 'просвечивать'; соберите urboot с CHIP_ERASE");
+        logW(TAG, "bootloader without chip erase and page erase: old "
+                  "data may bleed through; build urboot with CHIP_ERASE");
     }
 
     /* предподсчёт страниц образа (чистый разбор раздела, без AVR):
@@ -689,20 +689,20 @@ esp_err_t urclock_program_file(const char *hex_path, urclock_result_t *res)
     ctx.bl_patches_self = !g_info.compat && g_info.table_valid &&
                           (g_info.bl_cap & URT_VBLMASK) == URT_VBLPATCH;
 
-    logI(TAG, "запись: %s", hex_path ? hex_path : "avrhex");
+    logI(TAG, "write: %s", hex_path ? hex_path : "avrhex");
     sProgPhase = 2;
     sProgDone = 0;
     if (hex_file_parse(hex_path, page_cb, &ctx, &st) != ESP_OK || ctx.errors)
     {
-        logE(TAG, "запись прервана (страниц с ошибками: %d)", ctx.errors);
+        logE(TAG, "write aborted (pages with errors: %d)", ctx.errors);
         return ESP_FAIL;
     }
     if (st.pages == 0 || st.total_bytes == 0)
     {
         /* ноль страниц после разбора = либо битый/пустой hex, либо баг
            парсера - "успешно прошито 0 страниц" здесь недопустимо */
-        logE(TAG, "разбор не дал ни одной страницы (байт данных: %u) - "
-                  "файл пуст или повреждён", (unsigned)st.total_bytes);
+        logE(TAG, "parse yielded no pages (data bytes: %u) - "
+                  "file empty or damaged", (unsigned)st.total_bytes);
         return ESP_FAIL;
     }
     res->written = ctx.written;
@@ -710,14 +710,14 @@ esp_err_t urclock_program_file(const char *hex_path, urclock_result_t *res)
     res->image_bytes = st.total_bytes;
 
     /* верификация - второй проход по тому же файлу, та же сессия */
-    logI(TAG, "верификация...");
+    logI(TAG, "verifying...");
     sProgPhase = 3;
     sProgDone = 0;
     ctx.verify = true;
     ctx.written = ctx.skipped = ctx.last_report = 0;
     if (hex_file_parse(hex_path, page_cb, &ctx, NULL) != ESP_OK || ctx.errors)
     {
-        logE(TAG, "верификация прервана");
+        logE(TAG, "verify aborted");
         return ESP_FAIL;
     }
     res->verify_fail = ctx.mismatches;
@@ -726,7 +726,7 @@ esp_err_t urclock_program_file(const char *hex_path, urclock_result_t *res)
     sProgPhase = 0;
 
     res->ms = (uint32_t)((xTaskGetTickCount() - t0) * portTICK_PERIOD_MS);
-    logI(TAG, "готово за %u.%01u c: записано %d, пропущено %d, verify ошибок %d",
+    logI(TAG, "done in %u.%01u s: written %d, skipped %d, verify errors %d",
          res->ms / 1000, (res->ms % 1000) / 100,
          res->written, res->skipped, res->verify_fail);
 

@@ -1348,6 +1348,7 @@ static void meter_task(void *arg)
 {
     (void)arg;
     ske_req_t *req;
+    static bool sRdySaidSilent; /* RDY-переход: лог один раз */
     for (;;)
     {
         /* USBESP: ПЕРЕД очередью — Modbus-мост не должен слать MB
@@ -1367,6 +1368,27 @@ static void meter_task(void *arg)
              * он и не нужен (hex во flash, вход в urboot - GPIO5) */
             espcons_ota_pend_check();
             continue;
+        }
+
+        /* RDY от прибора (PB2 -> GPIO13, LOW = можно): HIGH = USB
+         * вставлен или прибор в urboot - В ЛИНИЮ НЕ СЛАТЬ ВООБЩЕ
+         * (кадры шлюза рвут urclock-сессию прошивки и мешают
+         * терминалу). Спим до освобождения; USBESP-консоль при этом
+         * доступна (проверка выше идёт первой) */
+        if (!espcons_link_ready())
+        {
+            if (!sRdySaidSilent)
+            {
+                sRdySaidSilent = true;
+                DBG("console: RDY high -> uart silent (usb/bootloader)\n");
+            }
+            vTaskDelay(pdMS_TO_TICKS(100));
+            continue;
+        }
+        if (sRdySaidSilent) /* RDY low: переход молчание -> обмен */
+        {
+            sRdySaidSilent = false;
+            DBG("console: RDY low -> uart exchange resumed\n");
         }
 
         while (xQueueReceive(sQueue, &req, 0) == pdTRUE)
