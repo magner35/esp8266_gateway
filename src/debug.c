@@ -4,10 +4,29 @@
 #include <stdio.h>
 
 #include "freertos/FreeRTOS.h"
+#include "freertos/semphr.h"
 #include "driver/uart.h"
 #include "esp_log.h"
 
 #include "esp8266/eagle_soc.h"
+
+/* ---- newlib-мьютекс -----------------------------------------------
+ * Один общий reent на все задачи: сериализуем strtol/atol/sscanf.
+ * Создаётся лениво (первый вызов) — до планировщика ещё нет задач. */
+static SemaphoreHandle_t sNlMutex;
+
+void nl_lock(void)
+{
+    if (!sNlMutex)
+        sNlMutex = xSemaphoreCreateMutex();
+    xSemaphoreTake(sNlMutex, portMAX_DELAY);
+}
+
+void nl_unlock(void)
+{
+    if (sNlMutex)
+        xSemaphoreGive(sNlMutex);
+}
 #include "esp8266/uart_register.h"
 
 /*

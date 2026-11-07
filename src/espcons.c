@@ -428,7 +428,7 @@ static long upd_http_get(const char *url,
     colon = strchr(host, ':');
     if (colon)
     {
-        port = (uint16_t)atoi(colon + 1);
+        port = (uint16_t)nl_atoi(colon + 1);
         *colon = 0;
     }
     he = gethostbyname(host);
@@ -515,7 +515,7 @@ static long upd_http_get(const char *url,
     {
         char *cl = strstr(hdr, "Content-Length:");
         if (cl)
-            clen = atol(cl + 15);
+            clen = nl_atol(cl + 15);
     }
     if (clen <= 0)
     {
@@ -818,7 +818,7 @@ static void cmd_forget(const char *args)
         return;
     }
     {
-        int n = atoi(args);
+        int n = nl_atoi(args);
         if (n < 1 || n > storage_net_count())
         {
             reply("\r\nusage: FORGET <n>|ALL (see NETS)\r\n");
@@ -929,7 +929,7 @@ static void chk_run(void *arg)
         colon = strchr(host, ':');
         if (colon)
         {
-            port = (uint16_t)atoi(colon + 1);
+            port = (uint16_t)nl_atoi(colon + 1);
             *colon = 0;
         }
         he = gethostbyname(host);
@@ -1021,7 +1021,7 @@ static void chk_run(void *arg)
         {
             char *cl = strstr(hdr, "Content-Length:");
             if (cl)
-                clen = atol(cl + 15);
+                clen = nl_atol(cl + 15);
         }
         if (clen <= 0 || clen >= (long)sizeof(txt))
         {
@@ -1334,7 +1334,7 @@ static void ota_check_task(void *arg)
     colon = strchr(host, ':');
     if (colon)
     {
-        port = (uint16_t)atoi(colon + 1);
+        port = (uint16_t)nl_atoi(colon + 1);
         *colon = 0;
     }
     he = gethostbyname(host);
@@ -1380,7 +1380,7 @@ static void ota_check_task(void *arg)
     {
         char *cl = strstr(hdr, "Content-Length:");
         if (cl)
-            clen = atol(cl + 15);
+            clen = nl_atol(cl + 15);
     }
     if (clen <= 0)
         goto out;
@@ -1481,7 +1481,7 @@ int espcons_ota_version(void)
 {
     if (sOtaAvail == 2)
         return -1; /* сервер недоступен - прибор покажет это */
-    return (sOtaAvail == 1 && sOtaSrvVer[0]) ? atoi(sOtaSrvVer) : 0;
+    return (sOtaAvail == 1 && sOtaSrvVer[0]) ? nl_atoi(sOtaSrvVer) : 0;
 }
 
 /* исполнить отложенную прошивку прибора, если намерение накоплено
@@ -1594,7 +1594,7 @@ static void cmd_ping(const char *args)
         colon = strchr(host, ':');
         if (colon)
         {
-            port = (uint16_t)atoi(colon + 1);
+            port = (uint16_t)nl_atoi(colon + 1);
             *colon = 0;
         }
     }
@@ -1609,7 +1609,7 @@ static void cmd_ping(const char *args)
         colon = strchr(host, ':');
         if (colon)
         {
-            port = (uint16_t)atoi(colon + 1);
+            port = (uint16_t)nl_atoi(colon + 1);
             *colon = 0;
         }
     }

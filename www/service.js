@@ -7,7 +7,6 @@
     async function ntpLoad() {
       try {
         const r = await (await fetch('/api/ntp')).json();
-        $('ntpOn').checked = !!r.on;
         $('ntpS1').value = r.s1 || '';
         $('ntpS2').value = r.s2 || '';
           $('ntpTz').value = (r.tz !== undefined) ? r.tz : 3;
@@ -53,14 +52,13 @@
         await fetch('/api/ntp', {
           method: 'POST',
           headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-          body: 'on=' + ($('ntpOn').checked ? 1 : 0) +
+          body: 'on=1' +
             '&auto=' + ($('ntpAuto').checked ? 1 : 0) +
             '&s1=' + encodeURIComponent($('ntpS1').value.trim()) +
             '&s2=' + encodeURIComponent($('ntpS2').value.trim()) +
             '&tz=' + encodeURIComponent($('ntpTz').value || 0)
         });
       } catch (e) { m.className = 'msg err'; m.textContent = 'нет ответа от шлюза'; return }
-      if (!$('ntpOn').checked) { m.className = 'msg'; m.textContent = ''; return }
       /* с "Авто" полный цикл = sync + определение пояса по IP;
        * пока оба не готовы - TIME не шлём */
       const wantAuto = $('ntpAuto').checked;

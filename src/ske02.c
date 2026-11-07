@@ -91,7 +91,8 @@ static void uart_flush_rx(void)
 static void uart_send_line(const char *cmd)
 {
     uart_write_bytes(SKE_UART_NUM, cmd, strlen(cmd));
-    uart_write_bytes(SKE_UART_NUM, "\r", 1);
+    uart_write_bytes(SKE_UART_NUM, "\r\n", 2); /* CR+LF: терминал
+     * показывает перенос строки (прибор понимает и \r, и \n) */
 }
 
 /*
@@ -275,7 +276,7 @@ static void info_cb(char *line, void *user)
         /* время прибора (DS1307, UNIX UTC) из 'i': если часы шлюза
          * сброшены (потеря питания) - берём отсюда, NTP не дёргаем;
          * затем ntp_apply сам решит по окну 12 ч, нужен ли сервер */
-        long t = strtol(line + 5, NULL, 10);
+        nl_lock(); long t = strtol(line + 5, NULL, 10); nl_unlock();
         time_t now = time(NULL);
         if (t > 1600000000L && (uint32_t)now < 1600000000UL)
         {
@@ -291,10 +292,10 @@ static void info_cb(char *line, void *user)
     {
         char *p = strstr(line, "params");
         long cnt;
-        long sn = strtol(line + 6, NULL, 10);
+        nl_lock(); long sn = strtol(line + 6, NULL, 10); nl_unlock();
         if (!p)
             return;
-        cnt = strtol(p + 6, NULL, 10);
+        nl_lock(); cnt = strtol(p + 6, NULL, 10); nl_unlock();
         xSemaphoreTake(sLock, portMAX_DELAY);
         if (sn > 0)
             snprintf(sCtx.serial, sizeof(sCtx.serial), "%06lu", sn);
@@ -667,7 +668,7 @@ static void wifi_send_line(const char *fmt, ...)
     va_end(ap);
     uart_flush_rx();
     uart_write_bytes(SKE_UART_NUM, line, strlen(line));
-    uart_write_bytes(SKE_UART_NUM, "\r", 1);
+    uart_write_bytes(SKE_UART_NUM, "\r\n", 2);
     for (;;)
     {
         char resp[72];
@@ -861,6 +862,7 @@ static void get_cb(char *line, void *user)
  */
 static void gw_features_find(void);
 static void gw_feature_apply(uint16_t id);
+static void gw_time_settings_find(void); /* clock_NTP + clock_time_zone id */
 static void gw_features_apply_all(void);
 
 static bool sweep_values(void)
@@ -895,6 +897,7 @@ static bool sweep_values(void)
     /* id фич могли смениться (relist после ребута прибора) */
     gw_features_find();
     gw_features_apply_all();
+    gw_time_settings_find(); /* clock_NTP + clock_time_zone для пуша времени */
     return true;
 }
 
@@ -1035,6 +1038,38 @@ static const char *bs_message(int rc)
 
 /* собрать текст "HHMMSS DDMMYY" локального времени; false = нечего
  * слать (NTP выключен или не синхронизирован) */
+/* ---- время от NTP в прибор ------------------------------------------
+ * Прибор = место истины: "Server NTP" (clock_NTP в дереве) решает,
+ * пушит ли шлюз время. При пуше шлюз использует СВОЙ авто-пояс
+ * (ntp_tz_effective) и синхронизирует clock_time_zone прибора
+ * под него — иначе двойной пересчёт (шлюз tz + прибор tz) давал
+ * сдвиг на разницу зон. При NTP ВЫКЛ прибор живёт по своему поясу. */
+static uint16_t sFwNtpOn = 0xFFFF, sFwTz = 0xFFFF;
+
+static void gw_time_settings_find(void)
+{
+    static TreeRec rec;
+    uint16_t id;
+    sFwNtpOn = sFwTz = 0xFFFF;
+    for (id = 0; sCtx.maxId && id <= sCtx.maxId; id++)
+        if (tree_get(id, &rec) && rec.p.present && rec.p.name[0])
+        {
+            if (strstr(rec.p.name, "Server NTP"))
+                sFwNtpOn = id;
+            else if (strstr(rec.p.name, "Time zone"))
+                sFwTz = id;
+        }
+}
+
+/* включён ли пуш времени (по прибору) */
+static bool meter_ntp_on(void)
+{
+    TreeRec rec;
+    if (sFwNtpOn == 0xFFFF || !tree_get(sFwNtpOn, &rec) || !rec.p.present)
+        return false; /* нет пункта - не пушим */
+    return rec.p.value != 0;
+}
+
 static bool time_text(char *text, size_t cap)
 {
     struct tm tm;
@@ -1043,6 +1078,9 @@ static bool time_text(char *text, size_t cap)
 
     if (!nc->on || !ntp_synced())
         return false;
+    /* полный авто-пояс ШЛЮЗА: локальное время одним шагом.
+     * settingsTimeRTC на приборе вычтет tz — шлюз синхронизирует
+     * clock_time_zone прибора под свой авто-пояс перед TIME */
     t = (time_t)ntp_epoch_utc() + (time_t)ntp_tz_effective() * 3600;
     gmtime_r(&t, &tm);
     snprintf(text, cap, "%02d%02d%02d %02d%02d%02d",
@@ -1083,6 +1121,10 @@ static void push_time_if_needed(void)
     ske_req_t r;
     TickType_t now = xTaskGetTickCount();
 
+    /* прибор = место истины: пуш только если "Server NTP" включён
+     * НА ПРИБОРЕ (clock_NTP в дереве); галочка шлюза не управляет */
+    if (!meter_ntp_on())
+        return;
     if (sEverPushed && now - sLastPush < pdMS_TO_TICKS(12UL * 3600 * 1000))
         return;
     /* ВТОРОЙ гейт по настенным часам в NVS: static-переменные живут
@@ -1101,6 +1143,24 @@ static void push_time_if_needed(void)
     memset(&r, 0, sizeof(r));
     if (!time_text(r.text, sizeof(r.text)))
         return;
+    /* синхронизировать clock_time_zone прибора под авто-пояс шлюза:
+     * settingsTimeRTC вычтет tz — они обязаны совпадать */
+    if (sFwTz != 0xFFFF)
+    {
+        TreeRec rec;
+        int8_t tz = ntp_tz_effective();
+        if (tree_get(sFwTz, &rec) && rec.p.present &&
+            (int8_t)(int16_t)rec.p.value != tz)
+        {
+            char tcmd[24];
+            reply_ctx_t trc;
+            memset(&trc, 0, sizeof(trc));
+            snprintf(tcmd, sizeof(tcmd), "SET %u %d",
+                     (unsigned)sFwTz, (int)tz);
+            txt_command(tcmd, reply_cb, &trc, SKE_CMD_TIMEOUT);
+            DBG("ske02: auto tz sync -> %d\n", (int)tz);
+        }
+    }
     r.cmd = SKEQ_SETTIME;
     exec_request(&r);
     DBG("ske02: auto time push %s -> %s\n", r.text, r.err);
@@ -1282,7 +1342,7 @@ static void exec_request(ske_req_t *req)
                               req->mb_req[i]);
             uart_flush_rx();
             uart_write_bytes(SKE_UART_NUM, mbout, strlen(mbout));
-            uart_write_bytes(SKE_UART_NUM, "\r", 1);
+            uart_write_bytes(SKE_UART_NUM, "\r\n", 2);
 
             *req->mb_rlen = 0;
             req->result = SKE_ERR_TRANSPORT;
@@ -1461,6 +1521,7 @@ static void meter_task(void *arg)
                  * gateway» (веб/modbus/OTA) из дерева прибора */
                 gw_features_find();
                 gw_features_apply_all();
+                gw_time_settings_find(); /* clock_NTP + clock_time_zone */
             }
             else
             {

@@ -169,7 +169,7 @@ static bool tz_try_ipapi_com(char *buf, int8_t *out)
     o = strstr(buf, "\"offset\":");
     if (!o)
         return false;
-    sec = strtol(o + 9, NULL, 10);
+    { nl_lock(); sec = strtol(o + 9, NULL, 10); nl_unlock(); }
     h = (int8_t)((sec + 1800) / 3600);
     if (h < -12 || h > 14)
         return false;
@@ -192,9 +192,14 @@ static bool tz_try_ipwho(char *buf, int8_t *out)
     o = strchr(o + 5, '"');
     if (!o)
         return false;
-    if (sscanf(o + 1, "%c%2d:%2d", &sign, &hh, &mm) != 3 &&
-        sscanf(o + 1, "%c%2d%2d", &sign, &hh, &mm) != 3)
-        return false;
+    { int r1 = 0, r2 = 0;
+      nl_lock(); r1 = sscanf(o + 1, "%c%2d:%2d", &sign, &hh, &mm); nl_unlock();
+      if (r1 != 3)
+      {
+          nl_lock(); r2 = sscanf(o + 1, "%c%2d%2d", &sign, &hh, &mm); nl_unlock();
+      }
+      if (r1 != 3 && r2 != 3)
+        return false; }
     h = (int8_t)(hh + (mm >= 30 ? 1 : 0));
     if (sign == '-')
         h = (int8_t)-h;

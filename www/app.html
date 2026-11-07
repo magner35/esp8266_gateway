@@ -917,8 +917,8 @@ button,input,select,textarea{font:inherit;color:inherit}
                 <span class="msg" id="ntpMsg"></span>
             </div>
         </details>
-        <label class="chk" style="margin-top:8px" title="Синхронизировать время и корректировать таймер прибора"><input
-                type="checkbox" id="ntpOn"> Синхронизировать время</label>
+        <label style="margin-top:8px;font-size:12px;color:#8b94a7">Пуш времени в прибор управляется
+            настройкой «Server NTP» в меню прибора</label>
     </div>
     <div class="box">
         <h2 style="margin:0 0 6px">Обновление ПО</h2>
@@ -2561,7 +2561,6 @@ wSync();
     async function ntpLoad() {
       try {
         const r = await (await fetch('/api/ntp')).json();
-        $('ntpOn').checked = !!r.on;
         $('ntpS1').value = r.s1 || '';
         $('ntpS2').value = r.s2 || '';
           $('ntpTz').value = (r.tz !== undefined) ? r.tz : 3;
@@ -2598,14 +2597,13 @@ wSync();
         await fetch('/api/ntp', {
           method: 'POST',
           headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-          body: 'on=' + ($('ntpOn').checked ? 1 : 0) +
+          body: 'on=1' +
             '&auto=' + ($('ntpAuto').checked ? 1 : 0) +
             '&s1=' + encodeURIComponent($('ntpS1').value.trim()) +
             '&s2=' + encodeURIComponent($('ntpS2').value.trim()) +
             '&tz=' + encodeURIComponent($('ntpTz').value || 0)
         });
       } catch (e) { m.className = 'msg err'; m.textContent = 'нет ответа от шлюза'; return }
-      if (!$('ntpOn').checked) { m.className = 'msg'; m.textContent = ''; return }
       const wantAuto = $('ntpAuto').checked;
       m.className = 'msg';
       m.textContent = 'синхронизация…';
