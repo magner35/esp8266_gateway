@@ -586,23 +586,26 @@ static esp_err_t h_api_values(httpd_req_t *req)
             off = snprintf(out, sizeof(out),
                            "%s{\"t\":%lu,\"frequency\":%.2f,"
                            "\"rateMLPM\":%f,\"rate\":%f,"
-                           "\"totalml_plus\":%f,\"totalml_minus\":%f,"
-                           "\"gtotalml\":%f,\"gtotal\":%f,"
+                           "\"gtotal\":%f,"
                            "\"total_plus\":%f,\"total_minus\":%f,"
                            "\"total\":%f,\"total_sum\":%f,"
                            "\"kf_value\":%f,\"batch\":%f,"
                            "\"pulses\":%lu,\"status\":%u,"
-                           "\"setpoint\":%u,\"isr\":%u}",
+                           "\"setpoint\":%u,\"isr\":%u,"
+                           /* канал 2 (COUNT2) */
+                           "\"frequency2\":%.2f,\"kf_value2\":%f,"
+                           "\"pulses2\":%lu,\"isr2\":%u}",
                            i ? "," : "", (unsigned long)ts[i],
                            (double)sv->frequency,
                            (double)sv->rateMLPM, (double)sv->rate,
-                           (double)sv->totalml_plus, (double)sv->totalml_minus,
-                           (double)sv->gtotalml, (double)sv->gtotal,
+                           (double)sv->gtotal,
                            (double)sv->total_plus, (double)sv->total_minus,
                            (double)sv->total, (double)sv->total_sum,
                            (double)sv->kf_value, (double)sv->batch,
                            (unsigned long)sv->pulses, sv->status,
-                           sv->setpoint, sv->isr);
+                           sv->setpoint, sv->isr,
+                           (double)sv->frequency2, (double)sv->kf_value2,
+                           (unsigned long)sv->pulses2, sv->isr2);
             if (httpd_resp_send_chunk(req, out, off) != ESP_OK)
                 return ESP_FAIL;
         }

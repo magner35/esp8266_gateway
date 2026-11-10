@@ -32,11 +32,12 @@ const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;'
       total_minus: 'Объём −',
       total: 'Объём',
       total_sum: 'Объём (сумма)',
-      totalml_plus: 'Объём +, мл',
-      totalml_minus: 'Объём −, мл',
       gtotal: 'Общий объём',
-      gtotalml: 'Общий объём, мл',
       kf_value: 'K-фактор',
+      frequency2: 'Частота 2',
+      kf_value2: 'K-фактор 2',
+      pulses2: 'Импульсы 2',
+      isr2: 'Флаги ISR2 (биты)',
       batch: 'Порция',
       pulses_packet: 'Импульсы (пакет)',
       pulses: 'Импульсы',
@@ -81,30 +82,19 @@ const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;'
     const PSEC = { s: 1, m: 60, h: 3600 };          /* seconds per period */
     const PERN = { s: 'с', m: 'мин', h: 'ч' };
 
-    /* Пересчёт кадра 'm' из ГОЛЫХ мл на стороне браузера: ml-твины
-     * (rateMLPM, totalml_plus и соседи) всегда честны, а единицы из дерева
-     * (/api/params) свежие сразу после SET - в отличие от кэша единиц
-     * в прошивке шлюза, который ловился на рассинхрон. Вызывается
-     * первым делом в vApply. batch НЕ трогаем: прибор
-     * шлёт его уже в текущих единицах (как уставку). */
+    /* Пересчёт кадра 'm' на стороне браузера: объёмы прибор шлёт
+     * УЖЕ в единицах отображения (2026-11), конвертируется только
+     * расход из голых мл/мин. Вызывается первым делом в vApply.
+     * batch НЕ трогаем: прибор шлёт его уже в текущих единицах. */
     function frameNorm(d) {
       if (!d || !d.touched) {
         if (!d) return d;
         const rk = VOLU[UNKEY[UN.rate] || 'l'] || 1000;
-        const ok = VOLU[UNKEY[UN.obj] || 'l'] || 1000;
-        const gk = VOLU[UNKEY[UN.ob] || 'l'] || 1000;
         const ps = PSEC[UNKEY[UN.time] || 'm'] || 60;
         if (isFinite(d.rateMLPM)) {
           d.rate = d.rateMLPM * ps / 60 / rk;
           d.rate_raw = d.rate;
         }
-        if (isFinite(d.totalml_plus)) {
-          d.total_plus = d.totalml_plus / ok;
-          d.total_minus = (isFinite(d.totalml_minus) ? d.totalml_minus : 0) / ok;
-          d.total = d.total_plus - d.total_minus;
-          d.total_sum = d.total_plus + d.total_minus;
-        }
-        if (isFinite(d.gtotalml)) d.gtotal = d.gtotalml / gk;
         d.touched = true;
       }
       return d;
@@ -319,6 +309,7 @@ const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;'
       kf: { n: 'К-фактор', src: 'kf', un: 'kf' },
       price: { n: 'Цена имп.', src: 'price', un: 'price' },
       freq: { n: 'Частота', src: 'frequency', un: 'hz' },  /* всегда Гц */
+      freq2: { n: 'Частота 2', src: 'frequency2', un: 'hz' }, /* канал 2 */
       pulses: { n: 'Импульсы', src: 'pulses', un: 'none' } /* без единиц */
     };
     /* единица измерения источника графика: расход = объём + период,
@@ -336,12 +327,12 @@ const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;'
     }
     /* источники графика, для которых масштаб всегда авто
      * (уставок в приборе для них нет) */
-    const CHART_AUTO_ONLY = ['kf', 'price', 'freq', 'pulses'];
+    const CHART_AUTO_ONLY = ['kf', 'price', 'freq', 'freq2', 'pulses'];
     /* источники, доступные ВИДЖЕТУ "график": множитель/импульсы
      * убраны (не физическая величина); "Расход (Qmax)" - как у
      * барграфа: всегда л/мин, при не-авто верх = уставка Qmax */
     const CHART_SRCS = ['rate', 'qmax', 'total', 'tplus', 'tminus',
-      'tsum', 'gtotal', 'batch', 'freq'];
+      'tsum', 'gtotal', 'batch', 'freq', 'freq2'];
     const CHPER = {
       60: '1 мин', 300: '5 мин', 600: '10 мин', 1800: '30 мин',
       3600: '60 мин', 86400: '24 ч'

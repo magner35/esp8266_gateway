@@ -528,8 +528,6 @@ fail:
  */
 static float sU_mlPerRate = 1000.0f;
 static float sU_tb = 60.0f;
-static float sU_totDiv = 1000.0f;
-static float sU_gtotDiv = 1000.0f;
 
 static void units_note(const SkeParam *p)
 {
@@ -542,10 +540,8 @@ static void units_note(const SkeParam *p)
         sU_mlPerRate = P3[idx < 4 ? idx : 1];
     else if (!strcmp(p->name, "Период"))
         sU_tb = TB[idx < 4 ? idx : 1];
-    else if (!strcmp(p->name, "Объём"))
-        sU_totDiv = P3[idx < 4 ? idx : 1];
-    else if (!strcmp(p->name, "Общий"))
-        sU_gtotDiv = P3[idx < 4 ? idx : 1];
+    /* объёмы больше не конвертируются: кадр 'm' несёт их уже
+     * в единицах отображения прибора */
 }
 
 /* мгновенное обновление кэша единиц: зовётся из web после SET
@@ -569,11 +565,9 @@ static void vals_derive(ProtoCtx *ctx)
 
     v->rate = v->rateMLPM * sU_tb / (60.0f * sU_mlPerRate);
     v->rate_raw = v->rate;
-    v->total_plus = v->totalml_plus / sU_totDiv;
-    v->total_minus = v->totalml_minus / sU_totDiv;
+    /* total_plus/minus/gtotal приходят в единицах отображения */
     v->total = v->total_plus - v->total_minus;
     v->total_sum = v->total_plus + v->total_minus;
-    v->gtotal = v->gtotalml / sU_gtotDiv;
 }
 
 /* потоковые хуки парсера: параметр листинга -> NVS (+кэш единиц) */

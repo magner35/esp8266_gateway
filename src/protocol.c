@@ -964,22 +964,25 @@ void proto_values_line(ProtoCtx *ctx, char *line)
 
     switch (ctx->valsLine)
     {
-    case 0: /* m,frequency,rateMLPM,totalml_plus,totalml_minus,gtotalml */
+    case 0: /* m,freq*1000,rateMLPM*1000,total_plus*1000,total_minus*1000,gtotal*1000
+        * ЦЕЛОЧИСЛЕННЫЙ формат (2026-11, экономия стека Btn на приборе).
+        * Объёмы - в ЕДИНИЦАХ ОТОБРАЖЕНИЯ прибора: шлюз не конвертирует,
+        * total/total_sum единственные производные */
         if (strncmp(line, "m,", 2))
             return; /* console chatter */
         p = line + 2;
-        v->frequency = vals_float(&p, f, sizeof(f));
-        v->rateMLPM = vals_float(&p, f, sizeof(f));
-        v->totalml_plus = vals_float(&p, f, sizeof(f));
-        v->totalml_minus = vals_float(&p, f, sizeof(f));
-        v->gtotalml = vals_float(&p, f, sizeof(f));
+        v->frequency = vals_float(&p, f, sizeof(f)) * 0.001f;
+        v->rateMLPM = vals_float(&p, f, sizeof(f)) * 0.001f;
+        v->total_plus = vals_float(&p, f, sizeof(f)) * 0.001f;
+        v->total_minus = vals_float(&p, f, sizeof(f)) * 0.001f;
+        v->gtotal = vals_float(&p, f, sizeof(f)) * 0.001f;
         ctx->valsLine = 1;
         break;
-    case 1: /* kf_value,pulses,batch,status,setpoint,isr (%02X) */
+    case 1: /* kf*10000,pulses,batch*1000,status,setpoint,isr(%02X),eid,ecnt, + канал 2 */
         p = line;
-        v->kf_value = vals_float(&p, f, sizeof(f));
+        v->kf_value = vals_float(&p, f, sizeof(f)) * 0.0001f;
         v->pulses = vals_ulong(&p, f, sizeof(f), 10);
-        v->batch = vals_float(&p, f, sizeof(f));
+        v->batch = vals_float(&p, f, sizeof(f)) * 0.001f;
         v->status = (uint8_t)vals_ulong(&p, f, sizeof(f), 16);
         v->setpoint = (uint8_t)vals_ulong(&p, f, sizeof(f), 16);
         v->isr = (uint8_t)vals_ulong(&p, f, sizeof(f), 16);
@@ -987,6 +990,11 @@ void proto_values_line(ProtoCtx *ctx, char *line)
          * отсутствующие поля -> 0: маркерный путь отключён */
         v->edit_id = (uint16_t)(vals_ulong(&p, f, sizeof(f), 10) & 0xFFFF);
         v->edit_cnt = (uint8_t)vals_ulong(&p, f, sizeof(f), 10);
+        /* 9-12: канал 2 (COUNT2); старая прошивка не шлёт -> 0 */
+        v->frequency2 = vals_float(&p, f, sizeof(f)) * 0.001f;
+        v->kf_value2 = vals_float(&p, f, sizeof(f)) * 0.0001f;
+        v->pulses2 = vals_ulong(&p, f, sizeof(f), 10);
+        v->isr2 = (uint8_t)vals_ulong(&p, f, sizeof(f), 16);
         ctx->valsLine = 2; /* frame complete */
         v->updated = ctx->nowMs;
         break;

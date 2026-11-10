@@ -80,10 +80,14 @@ typedef struct
 {
     float frequency, rate_raw, rateMLPM, rate;
     float total_plus, total_minus, total, total_sum;
-    float totalml_plus, totalml_minus, gtotal, gtotalml;
+    float gtotal;
     float kf_value, batch;
     uint32_t pulses_packet, pulses;
-    uint8_t status, setpoint, isr;
+    /* канал 2 (COUNT2): поля 9-12 второй строки кадра (могут
+     * отсутствовать у старой прошивки прибора - тогда 0) */
+    float frequency2, kf_value2;
+    uint32_t pulses2;
+    uint8_t status, setpoint, isr, isr2;
     /* 7-8 поля кадра 'm': МАРКЕР ПРАВКИ - id последнего изменённого
      * параметра + счётчик правок (прибор пишет в storePropertyValue).
      * Счётчик УШЁЛ НАЗАД = ребут прибора (шлюз делает relist).
