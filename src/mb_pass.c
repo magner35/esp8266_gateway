@@ -32,6 +32,8 @@ static volatile bool sEnabled = true; /* фича «Wi-Fi gateway: Modbus» */
 
 void mb_pass_enable(bool on)
 {
+    if (on == sEnabled)
+        return;   /* без изменений: не спамим лог на каждый relist/sweep */
     sEnabled = on;
     DBG("mbp: %s\n", on ? "enabled" : "disabled (feature off)");
 }

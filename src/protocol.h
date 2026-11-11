@@ -34,7 +34,10 @@ enum
 {
     SKT_FLOAT = 0, SKT_U32, SKT_TIME, SKT_DATE, SKT_U8, SKT_I8, SKT_H8,
     SKT_U16, SKT_H16, SKT_I16, SKT_BOOL, SKT_ENUM, SKT_STRING, SKT_STRINGP,
-    SKT_CMD
+    SKT_CMD,
+    /* новые типы прибора (PR_H32/PR_MAC/PR_IP в fproperty.h) -
+     * В КОНЦЕ enum: сдвиг существующих значений ломает NVS-дерево */
+    SKT_H32, SKT_MAC, SKT_IP
 };
 
 /* internal result codes of the console transactions */
@@ -46,8 +49,9 @@ enum
 #define SKE_ERR_TRANSPORT (-1)
 
 /* sized from a real device listing (177 params, 33 submenus, 3132 bytes
- * of rusified option labels) plus headroom */
-#define SKE_MAX_PARAMS    192
+ * of rusified option labels) plus headroom; 224 = запас на новые
+ * пункты меню прибора (при 192 seenMap уходил за границу) */
+#define SKE_MAX_PARAMS    224
 #define SKE_NAME_LEN      44   /* menu texts are up to 20 CHARS = 41 UTF-8
                                 * bytes (Cyrillic) + NUL */
 #define SKE_MENU_LEN      44   /* one pool for L1 sections and submenus */

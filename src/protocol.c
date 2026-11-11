@@ -45,19 +45,25 @@ static uint8_t type_by_token(const char *tok)
     if (!strcmp(tok, "DATE")) return SKT_DATE;
     if (!strcmp(tok, "U8")) return SKT_U8;
     if (!strcmp(tok, "I8")) return SKT_I8;
+    if (!strcmp(tok, "H8")) return SKT_H8;
     if (!strcmp(tok, "U16")) return SKT_U16;
+    if (!strcmp(tok, "H16")) return SKT_H16;
     if (!strcmp(tok, "I16")) return SKT_I16;
     if (!strcmp(tok, "B")) return SKT_BOOL;
     if (!strcmp(tok, "E")) return SKT_ENUM;
     if (!strcmp(tok, "S")) return SKT_STRING;
     if (!strcmp(tok, "CMD")) return SKT_CMD;
+    if (!strcmp(tok, "H32")) return SKT_H32;
+    if (!strcmp(tok, "MAC")) return SKT_MAC;
+    if (!strcmp(tok, "IP")) return SKT_IP;
     return 0xFF;
 }
 
 uint8_t proto_type_size(uint8_t type)
 {
-    static const uint8_t sz[15] = { 4, 4, 4, 4, 1, 1, 1, 2, 2, 2, 1, 1, 0, 0, 0 };
-    return (type < 15) ? sz[type] : 0;
+    /* 15-17: H32=4Б (hex-вид U32), MAC/IP=строки (0Б, readonly) */
+    static const uint8_t sz[18] = { 4, 4, 4, 4, 1, 1, 1, 2, 2, 2, 1, 1, 0, 0, 0, 4, 0, 0 };
+    return (type < 18) ? sz[type] : 0;
 }
 
 /* ------------------------------------------------------------------ */
@@ -242,6 +248,11 @@ static uint32_t text_to_raw(SkeParam *p, const char *text)
         /* enum/bool display values (option labels) are matched back to
          * their index by proto_parse_line through the pool */
         return p->value;
+    case SKT_H32:
+        return (uint32_t)strtoul(text, NULL, 16);   /* hex-вид U32 */
+    case SKT_MAC:
+    case SKT_IP:
+        return p->value;   /* строки: только отображение, не парсим */
     default:
         return (uint32_t)strtol(text, NULL, 10);
     }
@@ -332,6 +343,11 @@ void proto_raw_to_display(uint8_t type, uint32_t raw, char *buf, size_t cap)
     if (type == SKT_I16)
     {
         snprintf(buf, cap, "%d", (int)(int16_t)raw);
+        return;
+    }
+    if (type == SKT_H32)
+    {
+        snprintf(buf, cap, "%08lX", (unsigned long)raw);
         return;
     }
     snprintf(buf, cap, "%lu", (unsigned long)raw);
@@ -849,8 +865,9 @@ void proto_parse_line(ProtoCtx *ctx, char *s)
     else
         cur.readOnly = ro;
 
-    cur.present = (proto_type_size(type) > 0 || type == SKT_STRING);
-    if (type == SKT_STRING)
+    cur.present = (proto_type_size(type) > 0 || type == SKT_STRING ||
+                   type == SKT_MAC || type == SKT_IP);
+    if (type == SKT_STRING || type == SKT_MAC || type == SKT_IP)
         cur.readOnly = true; /* LCD strings are never settable */
     if (!strncmp(valBuf, "******", 6))
         cur.masked = true; /* password U32s are always shown masked */
@@ -900,6 +917,9 @@ emit:
     {
         if (ctx->on_param)
             ctx->on_param(ctx, (uint16_t)id, &cur);
+        /* ГРАНИЦА: id >= SKE_MAX_PARAMS писало бы seenMap за границей
+         * (порча контекста, параметр терялся молча) */
+        if (id < SKE_MAX_PARAMS)
         {
             uint16_t byte = (uint16_t)(id >> 3);
             uint16_t bit = (uint16_t)(1u << (id & 7));

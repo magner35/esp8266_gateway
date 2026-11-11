@@ -71,8 +71,12 @@ static float src_value(const char *src, const SkeValues *v)
     if (!strcmp(src, "batch")) return v->batch;
     if (!strcmp(src, "kf")) return v->kf_value;
     if (!strcmp(src, "price")) return v->kf_value > 0 ? 1.0f / v->kf_value : 0;
+    if (!strcmp(src, "kf2")) return v->kf_value2;
+    if (!strcmp(src, "price2")) return v->kf_value2 > 0 ? 1.0f / v->kf_value2 : 0;
     if (!strcmp(src, "freq")) return v->frequency;
+    if (!strcmp(src, "freq2")) return v->frequency2;
     if (!strcmp(src, "pulses")) return (float)v->pulses;
+    if (!strcmp(src, "pulses2")) return (float)v->pulses2;
     return NAN;
 }
 

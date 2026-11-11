@@ -172,27 +172,36 @@ const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;'
     }
     function parValue(w, d) {
       const un = CHSRC[w.src].un;
-      /* К-фактор / цена импульса. При включённой линеаризации
-       * (Линеаризация → Метод ≠ Выкл) К-фактор ДИНАМИЧЕСКИЙ: прибор
-       * интерполирует его по частоте сигнала, живое значение едет
-       * в каждом кадре 'm' как kf_value. Цена = обратное число.
-       * Без линеаризации — константа из Множителя (другой тип =
-       * обратное). Вручную: K-фактор растёт с укрупнением единицы
-       * (имп/мл -> имп/л = ×1000), цена наоборот падает (÷1000). */
+      /* К-фактор / цена импульса КАНАЛ 2: то же правило Множителя,
+       * что у канала 1 — kf_value2 показывает ЧТО ввёл пользователь
+       * (K-фактор или Цена), противоположный виджет = 1/kf_value2 */
+      if (w.src === 'kf2' || w.src === 'price2') {
+        const kv = d.kf_value2;
+        if (!(kv > 0)) return undefined;
+        const isKf = MULT.type === 'kf';
+        const v = (w.src === 'kf2') === isKf ? kv : 1 / kv;
+        if (w.auto !== false) return v;
+        const devK = VOLU[UNKEY[MULU]] || VOLU.l;
+        const tgtK = VOLU[w.vol];
+        return (w.src === 'kf2') === isKf ? v * tgtK / devK : v * devK / tgtK;
+      }
+      /* К-фактор / цена импульса КАНАЛ 1. ЗНАЧЕНИЕ ВСЕГДА из кадра 'm'
+       * (kf_value): прибор вычисляет его сплайном или константой,
+       * параметр "Значение" из меню УДАЛЁН (упрощение 2026-11).
+       * Цена = обратное число. Режим "Множитель" (K-фактор/Цена имп.)
+       * влияет только на ПОДПИСЬ единиц, не на расчёт */
       if (un === 'kf' || un === 'price') {
-        let v;
-        if (LINM && LINM !== 'Выкл') {
-          const kv = d.kf_value;
-          if (!(kv > 0)) return undefined;   /* потока нет / интерп. 0 */
-          v = un === 'kf' ? kv : 1 / kv;
-        } else {
-          if (!isFinite(MULT.value) || MULT.value <= 0) return undefined;
-          v = CHSRC[w.src].src === MULT.type ? MULT.value : 1 / MULT.value;
-        }
+        const kv = d.kf_value;
+        if (!(kv > 0)) return undefined;
+        /* "Множитель" показывает ЧТО kf_value ЕСТЬ (K-фактор или
+         * Цена имп.); другой виджет — обратное число 1/kf_value.
+         * MULT.type='kf' -> kf_value = K-фактор; 'price' -> цена */
+        const isKf = MULT.type === 'kf';
+        const v = (un === 'kf') === isKf ? kv : 1 / kv;
         if (w.auto !== false) return v;
         const devK = VOLU[UNKEY[MULU]] || VOLU.l;   /* ml per device unit */
         const tgtK = VOLU[w.vol];                   /* ml per chosen unit */
-        return un === 'kf' ? v * tgtK / devK : v * devK / tgtK;
+        return (un === 'kf') === isKf ? v * tgtK / devK : v * devK / tgtK;
       }
       const v = d[CHSRC[w.src].src];
       if (v === undefined) return undefined;
@@ -308,9 +317,12 @@ const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;'
       /* множитель (данные из дерева Множитель, см. MULT/MULU) */
       kf: { n: 'К-фактор', src: 'kf', un: 'kf' },
       price: { n: 'Цена имп.', src: 'price', un: 'price' },
+      kf2: { n: 'К-фактор 2', src: 'kf2', un: 'kf' },       /* канал 2 */
+      price2: { n: 'Цена имп. 2', src: 'price2', un: 'price' }, /* канал 2 */
       freq: { n: 'Частота', src: 'frequency', un: 'hz' },  /* всегда Гц */
       freq2: { n: 'Частота 2', src: 'frequency2', un: 'hz' }, /* канал 2 */
-      pulses: { n: 'Импульсы', src: 'pulses', un: 'none' } /* без единиц */
+      pulses: { n: 'Импульсы', src: 'pulses', un: 'none' }, /* без единиц */
+      pulses2: { n: 'Импульсы 2', src: 'pulses2', un: 'none' } /* канал 2 */
     };
     /* единица измерения источника графика: расход = объём + период,
      * объёмы = единица объёма (как у барграфа, из UN); частота/множитель —
@@ -332,7 +344,8 @@ const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;'
      * убраны (не физическая величина); "Расход (Qmax)" - как у
      * барграфа: всегда л/мин, при не-авто верх = уставка Qmax */
     const CHART_SRCS = ['rate', 'qmax', 'total', 'tplus', 'tminus',
-      'tsum', 'gtotal', 'batch', 'freq', 'freq2'];
+      'tsum', 'gtotal', 'batch', 'freq', 'freq2',
+      'kf2', 'price2', 'pulses2'];
     const CHPER = {
       60: '1 мин', 300: '5 мин', 600: '10 мин', 1800: '30 мин',
       3600: '60 мин', 86400: '24 ч'
@@ -1252,16 +1265,14 @@ const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;'
             if (p.n === 'Общий') un.ob = ev;
             if (p.n === 'Период') un.time = tv;
           }
-          /* multiplier: "Тип" (bool) + "Значение" (float) + "Единицы"
-           * (enum мл/л/м³) in Множитель */
-          if (p.tb === 'Множитель') {
-            if (p.t === 10 && p.n === 'Тип')
-              mult.type = (p.r === 0 || p.v === 'K-фактор') ? 'kf' : 'price';
-            if (p.t === 0 && p.n === 'Значение')
-              mult.value = parseFloat(p.v);
-            if (p.t === 11 && p.n === 'Единицы')
-              mulU = UNSHORT[p.v] || '';
-          }
+          /* multiplier: "Множитель" (BOOL: K-фактор=0 | Цена имп.=1)
+           * и "Единицы" (enum мл/л/м³) — прямо в дереве (подменю
+           * "Множитель" УДАЛЕНО прибором 2026-11, параметр "Значение"
+           * тоже; kf_value теперь всегда из кадра 'm') */
+          if (p.t === 10 && /Множитель|M\275o\266/.test(p.n))
+            mult.type = (p.r === 0 || /K-/.test(p.v)) ? 'kf' : 'price';
+          if (p.t === 11 && p.n === 'Единицы' && p.tb !== 'Единицы измерения')
+            mulU = UNSHORT[p.v] || '';
         }
         if (mult.type !== MULT.type || mult.value !== MULT.value || mulU !== MULU) {
           MULT = mult;

@@ -341,13 +341,14 @@ static bool capture_listing(TickType_t timeout)
      * порождает команду уровнем глубже. Ответ уровня < 1.5К - буфер
      * 2.3К в куче, выделяется ОДИН РАЗ (старт, куча девственна).
      */
-    /* очередь static (560Б): на стеке + кадры разбора переполняли
-     * meter_task (IllegalInstruction с мусорным PC после relist);
-     * вызывается только из meter_task - реентерабельность не нужна */
-    static char queue[40][14];
+    /* очередь static: 3 Б/слот [секция,подменю,подподменю] (255=нет).
+     * 96 слотов = 288 Б — ДЕШЕВЛЕ прежних 40x14=560 Б строк, а
+     * вместимость выше (при 40 строках DFS молча ронял подменю) */
+#define QNONE 0xFF
+#define QMAX  96
+    static uint8_t queue[QMAX][3];
     int qt = 0;
     int chunks = 0;
-    int len;
     int s;
 
     if (!sListBuf)
@@ -371,49 +372,42 @@ static bool capture_listing(TickType_t timeout)
 
     for (s = 0; s < 3; s++)
     {
-        queue[qt][0]='L';queue[qt][1]='I';queue[qt][2]='S';queue[qt][3]='T';
-        queue[qt][4]=' ';queue[qt][5]=(char)('0'+s);queue[qt][6]=0;
+        queue[qt][0] = (uint8_t)s;
+        queue[qt][1] = QNONE;
+        queue[qt][2] = QNONE;
         qt++;
     }
 
     /* DFS (стек): дочерние команды кладутся НА ВЕРШИНУ стека и
-     * выполняются СРАЗУ за родителем - L3-подменю идут за своими
-     * L2, а не все скопом в конце (BFS). Снятие = qt-- (БЕЗ qh:
-     * старый qh++ догонял qt и цикл умирал после 2 кусков) */
-    while (qt > 0 && chunks < 40)
+     * выполняются СРАЗУ за родителем. Снятие = qt-- */
+    while (qt > 0 && chunks < QMAX)
     {
-        char parentCmd[14];
-        qt--;   /* снимаем с вершины стека */
-        /* СТЁК: родитель лежит в ТОЙ ЖЕ ячейке, куда запишутся дети
-         * (первый ребёнок затирал родителя, второй строил команду от
-         * уже перезаписанного -> " 07 07"). Копируем до разбора. */
-        snprintf(parentCmd, sizeof(parentCmd), "%s", queue[qt]);
-        char *pp, *pe;
-        int child = 0;
-        int nArgs = 1;
-        const char *q;
-        bool prompt = false;
-        bool overflow = false;
-        size_t llen = 0;
-
-        /* самопроверка очереди: только A-Z/0-9/пробел и разумная
-         * длина; мусор = очередь побита, лучше упасть с логом */
+        uint8_t parent[3];
+        char parentCmd[20];
+        qt--;
+        parent[0] = queue[qt][0];
+        parent[1] = queue[qt][1];
+        parent[2] = queue[qt][2];
+        /* сборка команды из 3-байтового слота */
+        if (parent[2] != QNONE)
+            snprintf(parentCmd, sizeof(parentCmd), "LIST %u %u %u",
+                     parent[0], parent[1], parent[2]);
+        else if (parent[1] != QNONE)
+            snprintf(parentCmd, sizeof(parentCmd), "LIST %u %u",
+                     parent[0], parent[1]);
+        else
+            snprintf(parentCmd, sizeof(parentCmd), "LIST %u", parent[0]);
         {
-            const char *v;
-            for (v = parentCmd; *v; v++)
-                if (!((*v >= 'A' && *v <= 'Z') || (*v >= '0' && *v <= '9') ||
-                      *v == ' '))
-                    break;
-            if (*v || v - parentCmd > 13 || parentCmd[0] != 'L')
-            {
-                DBG("ske02: queue[%d] CORRUPT: %s\n", qt, parentCmd);
-                goto fail;
-            }
-        }
+            char *pp, *pe;
+            int child = 0;
+            bool prompt = false;
+            bool overflow = false;
+            size_t llen = 0;
 
         uart_flush_rx();
         uart_send_line(parentCmd);
         proto_prompt_reset(&sCtx);
+        DBG("ske02: >> %s\n", parentCmd);
         for (;;)
         {
             char line[512];
@@ -445,10 +439,6 @@ static bool capture_listing(TickType_t timeout)
             goto fail;
         }
 
-        for (q = parentCmd; *q; q++)
-            if (*q == ' ')
-                nArgs++;
-
         pp = sListBuf;
         pe = sListBuf + llen;
         while (pp < pe)
@@ -469,23 +459,26 @@ static bool capture_listing(TickType_t timeout)
             if (lbuf[0] == '[' && lbuf[1] == 'L')
             {
                 /* первый заголовок ответа - сама цель; остальные -
-                 * дети: команда на уровень глубже (макс. 3 числа) */
-                /* nArgs = слова команды с 'LIST': 2='LIST s', 3='LIST s m',
-                 * 4='LIST s m n' (максимум прибора). off-by-one: '< 3'
-                 * блокировало ВСЕ L3-запросы - 93 параметра вместо 188 */
-                if (child > 0 && nArgs < 4 && qt < 40 && child <= 100)
+                 * дети: уровень глубже. Глубина = какой слот родителя
+                 * ещё свободен (QNONE). Максимум прибора - 3 числа */
+                if (child > 0 && parent[2] == QNONE &&
+                    qt < QMAX && child <= 100)
                 {
-                    /* ручная сборка: snprintf в буфер 14Б с %s%d
-                     * давал -Werror=format-truncation */
-                    char *w = queue[qt];
-                    const char *r = parentCmd;
-                    while (*r && w < queue[qt] + 11)
-                        *w++ = *r++;
-                    *w++ = ' ';
-                    *w++ = (char)('0' + (child - 1) / 10);
-                    *w++ = (char)('0' + (child - 1) % 10);
-                    *w = 0;
-
+                    /* ребёнок наследует поля родителя + свой номер
+                     * в первый свободный слот */
+                    queue[qt][0] = parent[0];
+                    if (parent[1] == QNONE)
+                    {
+                        /* родитель "LIST s" -> ребёнок "LIST s m" */
+                        queue[qt][1] = (uint8_t)(child - 1);
+                        queue[qt][2] = QNONE;
+                    }
+                    else
+                    {
+                        /* родитель "LIST s m" -> ребёнок "LIST s m n" */
+                        queue[qt][1] = parent[1];
+                        queue[qt][2] = (uint8_t)(child - 1);
+                    }
                     qt++;
                 }
                 child++;
@@ -499,16 +492,20 @@ static bool capture_listing(TickType_t timeout)
             line_to_parser(lbuf);
             pp = nul ? nul + 1 : pe;
         }
+        }
         chunks++;
     }
 
-    DBG("ske02: listing done (%d chunks, %u params)\n",
-        chunks, (unsigned)sCtx.liveCount);
+    DBG("ske02: listing done (%d chunks, %u params, maxId %u)\n",
+        chunks, (unsigned)sCtx.liveCount, (unsigned)sCtx.maxId);
     xSemaphoreTake(sLock, portMAX_DELAY);
     sCtx.inListing = false;
     xSemaphoreGive(sLock);
-    /* полнота = каждый кусок дошёл до промпта */
-    tree_commit(&sCtx, sCtx.liveCount);
+    /* полнота = каждый кусок дошёл до промпта.
+     * СЧЁТЧИК = maxId+1 (не liveCount): страница итерирует
+     * id=0..count-1; при дырах в нумерации (liveCount < maxId+1)
+     * хвост записей лежал в NVS, но не отдавался */
+    tree_commit(&sCtx, (uint16_t)(sCtx.maxId + 1));
     sLastOk = xTaskGetTickCount();
     return true;
 
@@ -898,15 +895,16 @@ static bool sweep_values(void)
 /* ---- фичи шлюза из дерева прибора --------------------------------
  * «Wi-Fi gateway» в меню прибора: WEB panel / Modbus TCP/IP / OTA.
  * Обычные параметры дерева: прибор хранит, шлюз применяет. Поиск id
- * по латинским токенам в имени (WEB/Modbus/OTA - одинаковы в обоих
- * языках прибора). Отсутствуют (старая прошивка) - всё включено. */
-static uint16_t sFwWeb = 0xFFFF, sFwMb = 0xFFFF, sFwOta = 0xFFFF;
+ * по латинским токенам в имени (WEB/Modbus - одинаковы в обоих
+ * языках прибора). Отсутствуют (старая прошивка) - всё включено.
+ * OTA-параметр УДАЛЁН из прибора (всегда доступен) — не ищем. */
+static uint16_t sFwWeb = 0xFFFF, sFwMb = 0xFFFF;
 
 static void gw_features_find(void)
 {
     static TreeRec rec;   /* ~755Б: только задача meter, как в sweep */
     uint16_t id;
-    sFwWeb = sFwMb = sFwOta = 0xFFFF;
+    sFwWeb = sFwMb = 0xFFFF;
     for (id = 0; sCtx.maxId && id <= sCtx.maxId; id++)
         if (tree_get(id, &rec) && rec.p.present && rec.p.name[0])
         {
@@ -914,8 +912,6 @@ static void gw_features_find(void)
                 sFwWeb = id;
             else if (strstr(rec.p.name, "Modbus"))
                 sFwMb = id;
-            else if (strstr(rec.p.name, "OTA"))
-                sFwOta = id;
         }
 }
 
@@ -926,22 +922,20 @@ static void gw_feature_apply(uint16_t id)
     if (id == 0xFFFF || !tree_get(id, &rec) || !rec.p.present)
         return;
     on = rec.p.value != 0;
-    DBG("gw: feature id=%u on=%d (web=%u mb=%u ota=%u)\n",
-        (unsigned)id, (int)on,
-        (unsigned)sFwWeb, (unsigned)sFwMb, (unsigned)sFwOta);
+    DBG("gw: feature id=%d on=%d (web=%d mb=%d)\n",
+        (int)(id == 0xFFFF ? -1 : (int)id), (int)on,
+        (int)(sFwWeb == 0xFFFF ? -1 : (int)sFwWeb),
+        (int)(sFwMb == 0xFFFF ? -1 : (int)sFwMb));
     if (id == sFwWeb)
         web_httpd_enable(on);
     else if (id == sFwMb)
         mb_pass_enable(on);
-    else if (id == sFwOta)
-        web_ota_enable(on);
 }
 
 static void gw_features_apply_all(void)
 {
     gw_feature_apply(sFwWeb);
     gw_feature_apply(sFwMb);
-    gw_feature_apply(sFwOta);
 }
 
 /* синхронизация ОДНОГО пункта: G <id> -> строка -> tree_set_value.

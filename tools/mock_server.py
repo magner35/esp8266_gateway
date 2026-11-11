@@ -304,6 +304,11 @@ def _values_sampler():
             "status": flag_byte(t, "status"),
             "setpoint": flag_byte(t, "setpoint"),
             "isr": flag_byte(t, "isr"),
+            # канал 2 (COUNT2): половинная частота, kf2, pulses2, isr2
+            "frequency2": freq * 0.5,
+            "kf_value2": KF * 1.1,
+            "pulses2": int(STATE["pulses"] * 0.4),
+            "isr2": flag_byte(t, "isr") & 0x0F,
         })
         chart_push(VAL_RING[-1], int((now - STATE["t0"]) * 1000))
         time.sleep(0.2)
