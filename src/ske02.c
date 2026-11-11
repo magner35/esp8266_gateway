@@ -42,7 +42,7 @@
 #define SKE_UART_NUM      UART_NUM_0
 #define SKE_UART_BAUD     115200 /* единая скорость консоли прибора (см. avr_conf.h) */
 #define SKE_UART_RX_BUF   4096  /* стирание flash подвешивает CPU при NVS-записях листинга */
-#define SKE_CMD_TIMEOUT   pdMS_TO_TICKS(1200)
+#define SKE_CMD_TIMEOUT   pdMS_TO_TICKS(3000)  /* консоль прибора: EEPROM-записи подвешивают CPU */
 #define SKE_LIST_TIMEOUT  pdMS_TO_TICKS(15000)
 #define SKE_WAKE_PERIOD   pdMS_TO_TICKS(200)
 #define SKE_VALUES_PERIOD pdMS_TO_TICKS(200)
@@ -212,15 +212,32 @@ static bool ske_echo_off(void)
 {
     char last[32];
     int attempt;
-    for (attempt = 0; attempt < 3; attempt++)
+    /* OTA-ребут (soft reset): UART FIFO может держать мусор от
+     * прошлой сессии, а консоль прибора — остаться с echo off.
+     * Даём линии осесть и сливаем RX дважды с паузой */
+    vTaskDelay(pdMS_TO_TICKS(200));
+    uart_flush_rx();
+    vTaskDelay(pdMS_TO_TICKS(100));
+    uart_flush_rx();
+    for (attempt = 0; attempt < 5; attempt++)
     {
         last[0] = 0;
-        /* the leading empty line drops any half-typed text line the
-         * console may be holding after boot noise */
+        /* пустая строка сбрасывает недонабранную строку консоли */
         txt_command("", NULL, NULL, SKE_CMD_TIMEOUT);
-        if (txt_command("ECHO", echo_cb, last, SKE_CMD_TIMEOUT) &&
-            !strncmp(last, "echo off", 8))
-            return true;
+        if (txt_command("ECHO", echo_cb, last, SKE_CMD_TIMEOUT))
+        {
+            /* ЛЮБОЙ "echo ..." = консоль жива. Если получили
+             * "echo on" (было off с прошлой сессии) — шлём ещё раз */
+            if (!strncmp(last, "echo off", 8))
+                return true;
+            if (!strncmp(last, "echo on", 7))
+            {
+                last[0] = 0;
+                if (txt_command("ECHO", echo_cb, last, SKE_CMD_TIMEOUT) &&
+                    !strncmp(last, "echo off", 8))
+                    return true;
+            }
+        }
         DBG("ske02: wake reply: '%s'\n",
             sFirstLineValid ? sFirstLine : "<none>");
     }

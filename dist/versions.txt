@@ -1,1 +1,1 @@
-bundle 3426+3525 2026-11-11 system_full.skpak 1063506 gw+meter
+bundle 3426+3525 2026-11-12 system_full.skpak 1064002 gw+meter

@@ -11,6 +11,7 @@
 #include "tcpip_adapter.h"
 
 #include "debug.h"
+#include "ske02.h"
 #include "dns.h"
 #include "storage.h"
 #include "ntp.h"
@@ -29,6 +30,7 @@ static char sApSsid[24];
 static wifi_scan_config_t sScanCfg = { .show_hidden = 0 };
 static uint8_t sStaFails;
 static bool sStaEverConnected;
+static char sHostname[24];   /* "ske02-XXXXXX-YYYY": ставится при STA_START */
 
 /*
  * Event-driven join, the canonical IDF pattern:
@@ -54,6 +56,32 @@ static void on_event(void *arg, esp_event_base_t base, int32_t id,
             DBG("wifi: station disconnected\n");
         if (id == WIFI_EVENT_STA_START)
         {
+            /* hostname ПЕРЕСОБИРАЕМ здесь: serial мог подтянуться
+             * после wifi_start (boot-гейт 12с, INFO может быть
+             * позже). DHCP ещё не запущен - имя уйдёт в DISCOVER */
+            {
+                char sn[11];
+                uint8_t mac[6];
+                memset(sn, 0, sizeof(sn));
+                esp_efuse_mac_get_default(mac);
+                if (xSemaphoreTake(ske02_lock(), pdMS_TO_TICKS(500)) == pdTRUE)
+                {
+                    strlcpy(sn, ske02_ctx()->serial, sizeof(sn));
+                    xSemaphoreGive(ske02_lock());
+                }
+                if (sn[0])
+                    snprintf(sHostname, sizeof(sHostname),
+                             "SKE02-%s-%02X%02X", sn, mac[4], mac[5]);
+                else
+                    snprintf(sHostname, sizeof(sHostname),
+                             "SKE02-%02X%02X%02X%02X%02X%02X",
+                             mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+                esp_err_t rc =
+                    tcpip_adapter_set_hostname(TCPIP_ADAPTER_IF_STA,
+                                               sHostname);
+                DBG("wifi: hostname %s (%s)\n", sHostname,
+                    rc == ESP_OK ? "ok" : "FAIL");
+            }
             esp_wifi_connect();
             return;
         }
@@ -208,6 +236,11 @@ static void wifi_manager_task(void *arg)
 void wifi_start(void)
 {
     wifi_init_config_t wificfg = WIFI_INIT_CONFIG_DEFAULT();
+
+    /* hostname НЕ готовим здесь: boot-гейт 12с, INFO может не успеть.
+     * Строка ПЕРЕСОБИРАЕТСЯ в STA_START (интерфейс поднят, DHCP
+     * ещё не пошёл) — к тому времени serial уже есть */
+    sHostname[0] = 0;
     sEvents = xEventGroupCreate();
     tcpip_adapter_init();
     esp_event_loop_create_default();
